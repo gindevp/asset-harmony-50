@@ -70,9 +70,18 @@ const StockInPage = () => {
     { key: 'status', label: 'Trạng thái', render: r => <StatusBadge status={r.status} label={stockInStatusLabels[r.status]} /> },
     { key: 'createdAt', label: 'Ngày tạo', render: r => formatDate(r.createdAt) },
     { key: 'actions', label: '', render: r => (
-      <Button variant="ghost" size="sm" onClick={(e) => { e.stopPropagation(); setSelected(r); }}>
-        <Eye className="h-4 w-4" />
-      </Button>
+      <DropdownMenu>
+        <DropdownMenuTrigger asChild>
+          <Button variant="ghost" size="icon" className="h-8 w-8" onClick={e => e.stopPropagation()}>
+            <MoreHorizontal className="h-4 w-4" />
+          </Button>
+        </DropdownMenuTrigger>
+        <DropdownMenuContent align="end">
+          <DropdownMenuItem onClick={() => setSelected(r)}><Eye className="h-4 w-4 mr-2" />Xem chi tiết</DropdownMenuItem>
+          <DropdownMenuItem onClick={() => toast.info('Chức năng sửa phiếu nhập (demo)')}><Pencil className="h-4 w-4 mr-2" />Sửa</DropdownMenuItem>
+          <DropdownMenuItem className="text-destructive focus:text-destructive" onClick={() => setDeleteTarget(r)}><Trash2 className="h-4 w-4 mr-2" />Xóa</DropdownMenuItem>
+        </DropdownMenuContent>
+      </DropdownMenu>
     )},
   ];
 
