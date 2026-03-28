@@ -4,7 +4,9 @@ import { StatusBadge } from '@/components/shared/StatusBadge';
 import { FilterBar, FilterField } from '@/components/shared/FilterBar';
 import { Button } from '@/components/ui/button';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
-import { Plus, Eye } from 'lucide-react';
+import { Plus, Eye, MoreHorizontal, Pencil, Trash2 } from 'lucide-react';
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from '@/components/ui/dropdown-menu';
+import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from '@/components/ui/alert-dialog';
 import {
   stockOuts, StockOut, stockOutStatusLabels, formatDate, getItemName,
   getEmployeeName, getDepartmentName, getLocationName
