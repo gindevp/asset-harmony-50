@@ -2,7 +2,7 @@
 @tailwind components;
 @tailwind utilities;
 
-@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap');
+/* Segoe UI is a system font, no import needed */
 
 @layer base {
   :root {
@@ -45,15 +45,15 @@
 
     --radius: 0.5rem;
 
-    --sidebar-background: 220 20% 14%;
-    --sidebar-foreground: 220 14% 96%;
+    --sidebar-background: 0 0% 100%;
+    --sidebar-foreground: 220 20% 14%;
     --sidebar-primary: 347 100% 47%;
     --sidebar-primary-foreground: 0 0% 100%;
-    --sidebar-accent: 220 20% 20%;
-    --sidebar-accent-foreground: 220 14% 96%;
-    --sidebar-border: 220 20% 22%;
+    --sidebar-accent: 220 14% 96%;
+    --sidebar-accent-foreground: 220 20% 14%;
+    --sidebar-border: 220 13% 91%;
     --sidebar-ring: 347 100% 47%;
-    --sidebar-muted: 220 14% 40%;
+    --sidebar-muted: 220 10% 46%;
   }
 
   .dark {
@@ -94,7 +94,7 @@
 
   body {
     @apply bg-background text-foreground font-sans antialiased;
-    font-family: 'Inter', system-ui, -apple-system, sans-serif;
+    font-family: 'Segoe UI', system-ui, -apple-system, sans-serif;
   }
 
   h1, h2, h3, h4, h5, h6 {
@@ -112,7 +112,7 @@
   }
 
   .page-title {
-    @apply text-2xl font-bold text-foreground;
+    @apply text-2xl font-bold text-primary;
   }
 
   .page-description {
