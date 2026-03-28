@@ -9,7 +9,7 @@ import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from '@/components/ui/dialog';
 import { employees as initialEmployees, Employee, EmployeeStatus, departments } from '@/data/mockData';
-import { Download, Plus, Trash2 } from 'lucide-react';
+import { Download, Plus, Trash2, Pencil } from 'lucide-react';
 import { toast } from 'sonner';
 
 const roleLabels: Record<string, string> = {
