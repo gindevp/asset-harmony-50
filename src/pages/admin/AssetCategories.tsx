@@ -7,7 +7,9 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
-import { Plus } from 'lucide-react';
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from '@/components/ui/dialog';
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from '@/components/ui/dropdown-menu';
+import { Plus, MoreHorizontal, Eye, Pencil, Trash2 } from 'lucide-react';
 import { assetTypes, assetGroups, assetLines, assetItems, AssetItem } from '@/data/mockData';
 import { toast } from 'sonner';
 
@@ -16,6 +18,60 @@ const AssetCategories = () => {
   const [showModal, setShowModal] = useState(false);
   const [filters, setFilters] = useState<Record<string, string>>({});
   const [page, setPage] = useState(1);
+
+  // Detail / Edit / Delete state
+  const [detailOpen, setDetailOpen] = useState(false);
+  const [detailData, setDetailData] = useState<Record<string, string> | null>(null);
+  const [detailTitle, setDetailTitle] = useState('');
+  const [deleteOpen, setDeleteOpen] = useState(false);
+  const [deleteInfo, setDeleteInfo] = useState<{ name: string; type: string } | null>(null);
+  const [editOpen, setEditOpen] = useState(false);
+  const [editTitle, setEditTitle] = useState('');
+  const [editFields, setEditFields] = useState<{ label: string; value: string; key: string }[]>([]);
+
+  const openDetail = (title: string, data: Record<string, string>) => {
+    setDetailTitle(title);
+    setDetailData(data);
+    setDetailOpen(true);
+  };
+
+  const openEdit = (title: string, fields: { label: string; value: string; key: string }[]) => {
+    setEditTitle(title);
+    setEditFields(fields);
+    setEditOpen(true);
+  };
+
+  const openDelete = (name: string, type: string) => {
+    setDeleteInfo({ name, type });
+    setDeleteOpen(true);
+  };
+
+  const handleDelete = () => {
+    toast.success(`Đã xóa ${deleteInfo?.type} "${deleteInfo?.name}" (demo)`);
+    setDeleteOpen(false);
+    setDeleteInfo(null);
+  };
+
+  const handleEditSave = () => {
+    toast.success('Đã cập nhật thành công (demo)');
+    setEditOpen(false);
+  };
+
+  // Action menu component
+  const ActionsCell = ({ onView, onEdit, onDelete }: { onView: () => void; onEdit: () => void; onDelete: () => void }) => (
+    <DropdownMenu>
+      <DropdownMenuTrigger asChild>
+        <Button variant="ghost" size="icon" className="h-8 w-8">
+          <MoreHorizontal className="h-4 w-4" />
+        </Button>
+      </DropdownMenuTrigger>
+      <DropdownMenuContent align="end">
+        <DropdownMenuItem onClick={onView}><Eye className="h-4 w-4 mr-2" />Xem chi tiết</DropdownMenuItem>
+        <DropdownMenuItem onClick={onEdit}><Pencil className="h-4 w-4 mr-2" />Sửa</DropdownMenuItem>
+        <DropdownMenuItem onClick={onDelete} className="text-destructive focus:text-destructive"><Trash2 className="h-4 w-4 mr-2" />Xóa</DropdownMenuItem>
+      </DropdownMenuContent>
+    </DropdownMenu>
+  );
 
   const filteredItems = assetItems.filter(item => {
     if (filters.search && !item.name.toLowerCase().includes(filters.search.toLowerCase()) && !item.code.toLowerCase().includes(filters.search.toLowerCase())) return false;
@@ -36,24 +92,64 @@ const AssetCategories = () => {
     { key: 'group', label: 'Nhóm', render: r => assetGroups.find(g => g.id === r.groupId)?.name },
     { key: 'unit', label: 'ĐVT' },
     { key: 'depreciation', label: 'Khấu hao', render: r => r.enableDepreciation ? '✓' : '—' },
+    { key: 'actions', label: 'Thao tác', render: r => (
+      <ActionsCell
+        onView={() => openDetail('Chi tiết item tài sản', {
+          'Mã': r.code, 'Tên': r.name,
+          'Loại QL': r.managementType === 'DEVICE' ? 'Thiết bị' : 'Vật tư',
+          'Loại': assetTypes.find(t => t.id === r.typeId)?.name || '',
+          'Nhóm': assetGroups.find(g => g.id === r.groupId)?.name || '',
+          'ĐVT': r.unit, 'Khấu hao': r.enableDepreciation ? 'Có' : 'Không',
+        })}
+        onEdit={() => openEdit('Sửa item tài sản', [
+          { label: 'Tên', value: r.name, key: 'name' },
+          { label: 'ĐVT', value: r.unit, key: 'unit' },
+        ])}
+        onDelete={() => openDelete(r.name, 'item tài sản')}
+      />
+    )},
   ];
 
   const typeColumns: Column<typeof assetTypes[0]>[] = [
     { key: 'code', label: 'Mã', render: r => <span className="font-mono text-sm">{r.code}</span> },
     { key: 'name', label: 'Tên loại' },
     { key: 'description', label: 'Mô tả' },
+    { key: 'actions', label: 'Thao tác', render: r => (
+      <ActionsCell
+        onView={() => openDetail('Chi tiết loại tài sản', { 'Mã': r.code, 'Tên': r.name, 'Mô tả': r.description || '' })}
+        onEdit={() => openEdit('Sửa loại tài sản', [
+          { label: 'Tên', value: r.name, key: 'name' },
+          { label: 'Mô tả', value: r.description || '', key: 'description' },
+        ])}
+        onDelete={() => openDelete(r.name, 'loại tài sản')}
+      />
+    )},
   ];
 
   const groupColumns: Column<typeof assetGroups[0]>[] = [
     { key: 'code', label: 'Mã', render: r => <span className="font-mono text-sm">{r.code}</span> },
     { key: 'name', label: 'Tên nhóm' },
     { key: 'type', label: 'Loại', render: r => assetTypes.find(t => t.id === r.typeId)?.name },
+    { key: 'actions', label: 'Thao tác', render: r => (
+      <ActionsCell
+        onView={() => openDetail('Chi tiết nhóm tài sản', { 'Mã': r.code, 'Tên': r.name, 'Loại': assetTypes.find(t => t.id === r.typeId)?.name || '' })}
+        onEdit={() => openEdit('Sửa nhóm tài sản', [{ label: 'Tên', value: r.name, key: 'name' }])}
+        onDelete={() => openDelete(r.name, 'nhóm tài sản')}
+      />
+    )},
   ];
 
   const lineColumns: Column<typeof assetLines[0]>[] = [
     { key: 'code', label: 'Mã', render: r => <span className="font-mono text-sm">{r.code}</span> },
     { key: 'name', label: 'Tên dòng' },
     { key: 'group', label: 'Nhóm', render: r => assetGroups.find(g => g.id === r.groupId)?.name },
+    { key: 'actions', label: 'Thao tác', render: r => (
+      <ActionsCell
+        onView={() => openDetail('Chi tiết dòng tài sản', { 'Mã': r.code, 'Tên': r.name, 'Nhóm': assetGroups.find(g => g.id === r.groupId)?.name || '' })}
+        onEdit={() => openEdit('Sửa dòng tài sản', [{ label: 'Tên', value: r.name, key: 'name' }])}
+        onDelete={() => openDelete(r.name, 'dòng tài sản')}
+      />
+    )},
   ];
 
   const filterFields: FilterField[] = [
@@ -69,7 +165,7 @@ const AssetCategories = () => {
           <h1 className="page-title">Danh mục tài sản</h1>
           <p className="page-description">Quản lý loại, nhóm, dòng và item tài sản</p>
         </div>
-        <Button onClick={() => { setShowModal(true); toast.info('Form tạo mới (demo)'); }}>
+        <Button onClick={() => { setShowModal(true); }}>
           <Plus className="h-4 w-4 mr-1" /> Thêm mới
         </Button>
       </div>
@@ -97,6 +193,7 @@ const AssetCategories = () => {
         </TabsContent>
       </Tabs>
 
+      {/* Modal thêm mới */}
       <EntityFormModal open={showModal} onClose={() => setShowModal(false)} title="Thêm item tài sản" size="lg"
         onSubmit={() => { toast.success('Đã lưu thành công (demo)'); setShowModal(false); }}>
         <div className="grid grid-cols-2 gap-4">
@@ -123,6 +220,51 @@ const AssetCategories = () => {
           </div>
         </div>
       </EntityFormModal>
+
+      {/* Dialog xem chi tiết */}
+      <Dialog open={detailOpen} onOpenChange={v => !v && setDetailOpen(false)}>
+        <DialogContent className="max-w-lg">
+          <DialogHeader>
+            <DialogTitle>{detailTitle}</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-3 py-2">
+            {detailData && Object.entries(detailData).map(([label, value]) => (
+              <div key={label} className="flex items-start gap-3">
+                <span className="text-sm font-medium text-muted-foreground w-24 shrink-0">{label}:</span>
+                <span className="text-sm">{value || '—'}</span>
+              </div>
+            ))}
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      {/* Dialog sửa */}
+      <EntityFormModal open={editOpen} onClose={() => setEditOpen(false)} title={editTitle} onSubmit={handleEditSave} submitLabel="Lưu">
+        <div className="space-y-4">
+          {editFields.map(f => (
+            <div key={f.key} className="space-y-2">
+              <Label>{f.label}</Label>
+              <Input value={f.value} onChange={e => setEditFields(prev => prev.map(p => p.key === f.key ? { ...p, value: e.target.value } : p))} />
+            </div>
+          ))}
+        </div>
+      </EntityFormModal>
+
+      {/* Dialog xác nhận xóa */}
+      <Dialog open={deleteOpen} onOpenChange={v => !v && setDeleteOpen(false)}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle>Xác nhận xóa</DialogTitle>
+            <DialogDescription>
+              Bạn có chắc muốn xóa {deleteInfo?.type} <strong>{deleteInfo?.name}</strong>? Hành động này không thể hoàn tác.
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setDeleteOpen(false)}>Hủy</Button>
+            <Button variant="destructive" onClick={handleDelete}>Xác nhận xóa</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 };
