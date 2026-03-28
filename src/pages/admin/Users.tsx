@@ -143,9 +143,14 @@ const UsersPage = () => {
       <span className={`inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-semibold ${statusBadgeClass[r.status]}`}>{statusLabels[r.status]}</span>
     )},
     { key: 'actions', label: '', render: r => r.status !== 'DELETED' ? (
-      <Button variant="ghost" size="icon" className="h-8 w-8 text-muted-foreground hover:text-destructive" onClick={(e) => { e.stopPropagation(); setDeleteTarget(r); }}>
-        <Trash2 className="h-4 w-4" />
-      </Button>
+      <div className="flex items-center gap-1">
+        <Button variant="ghost" size="icon" className="h-8 w-8 text-muted-foreground hover:text-primary" onClick={(e) => { e.stopPropagation(); openEdit(r); }}>
+          <Pencil className="h-4 w-4" />
+        </Button>
+        <Button variant="ghost" size="icon" className="h-8 w-8 text-muted-foreground hover:text-destructive" onClick={(e) => { e.stopPropagation(); setDeleteTarget(r); }}>
+          <Trash2 className="h-4 w-4" />
+        </Button>
+      </div>
     ) : null },
   ];
 
