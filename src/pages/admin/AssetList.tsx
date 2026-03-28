@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useMemo } from 'react';
 import { DataTable, Column } from '@/components/shared/DataTable';
 import { FilterBar, FilterField } from '@/components/shared/FilterBar';
 import { StatusBadge } from '@/components/shared/StatusBadge';
@@ -14,36 +14,66 @@ import {
   formatCurrency, formatDate, calculateDepreciation, getSupplierName
 } from '@/data/mockData';
 
+interface DeviceSummary {
+  itemId: string;
+  code: string;
+  name: string;
+  total: number;
+  inStock: number;
+  inUse: number;
+  underRepair: number;
+  broken: number;
+  lost: number;
+  disposed: number;
+}
+
 const AssetList = () => {
   const [tab, setTab] = useState('devices');
   const [filters, setFilters] = useState<Record<string, string>>({});
   const [page, setPage] = useState(1);
-  const [selectedEquipment, setSelectedEquipment] = useState<Equipment | null>(null);
+  const [selectedItem, setSelectedItem] = useState<DeviceSummary | null>(null);
 
-  const filteredEquipments = equipments.filter(eq => {
-    if (filters.search) {
-      const s = filters.search.toLowerCase();
+  // Aggregate equipment by item
+  const deviceSummaries = useMemo<DeviceSummary[]>(() => {
+    const map = new Map<string, DeviceSummary>();
+    for (const eq of equipments) {
       const item = assetItems.find(i => i.id === eq.itemId);
-      if (!eq.equipmentCode.toLowerCase().includes(s) && !eq.serial.toLowerCase().includes(s) && !item?.name.toLowerCase().includes(s)) return false;
+      if (!item || item.managementType !== 'DEVICE') continue;
+      if (!map.has(eq.itemId)) {
+        map.set(eq.itemId, { itemId: eq.itemId, code: item.code, name: item.name, total: 0, inStock: 0, inUse: 0, underRepair: 0, broken: 0, lost: 0, disposed: 0 });
+      }
+      const s = map.get(eq.itemId)!;
+      s.total++;
+      if (eq.status === 'IN_STOCK') s.inStock++;
+      else if (eq.status === 'IN_USE' || eq.status === 'PENDING_ISSUE') s.inUse++;
+      else if (eq.status === 'UNDER_REPAIR') s.underRepair++;
+      else if (eq.status === 'BROKEN') s.broken++;
+      else if (eq.status === 'LOST') s.lost++;
+      else if (eq.status === 'DISPOSED') s.disposed++;
     }
-    if (filters.status && eq.status !== filters.status) return false;
-    return true;
-  });
+    return Array.from(map.values());
+  }, []);
 
-  const deviceColumns: Column<Equipment>[] = [
-    { key: 'equipmentCode', label: 'Mã TB', render: r => <span className="font-mono text-sm font-medium">{r.equipmentCode}</span> },
-    { key: 'name', label: 'Tên thiết bị', render: r => getItemName(r.itemId) },
-    { key: 'serial', label: 'Serial' },
-    { key: 'status', label: 'Trạng thái', render: r => <StatusBadge status={r.status} label={equipmentStatusLabels[r.status]} /> },
-    { key: 'assignedTo', label: 'Người sử dụng', render: r => r.assignedTo ? getEmployeeName(r.assignedTo) : '—' },
-    { key: 'department', label: 'Phòng ban', render: r => r.assignedDepartment ? getDepartmentName(r.assignedDepartment) : '—' },
-    { key: 'originalCost', label: 'Nguyên giá', render: r => formatCurrency(r.originalCost), className: 'text-right' },
-    { key: 'currentValue', label: 'GT còn lại', render: r => {
-      const dep = calculateDepreciation(r.originalCost, r.salvageValue, r.depreciationMonths, r.capitalizedDate);
-      return formatCurrency(dep.currentValue);
-    }, className: 'text-right' },
+  const filteredDevices = useMemo(() => {
+    return deviceSummaries.filter(d => {
+      if (filters.search) {
+        const s = filters.search.toLowerCase();
+        if (!d.name.toLowerCase().includes(s) && !d.code.toLowerCase().includes(s)) return false;
+      }
+      return true;
+    });
+  }, [deviceSummaries, filters]);
+
+  const deviceColumns: Column<DeviceSummary>[] = [
+    { key: 'code', label: 'Mã TS', render: r => <span className="font-mono text-sm font-medium">{r.code}</span> },
+    { key: 'name', label: 'Tên thiết bị' },
+    { key: 'total', label: 'Tổng SL', className: 'text-right', render: r => <span className="font-medium">{r.total}</span> },
+    { key: 'inStock', label: 'Tồn kho', className: 'text-right', render: r => <span className="font-medium text-emerald-600">{r.inStock}</span> },
+    { key: 'inUse', label: 'Đang dùng', className: 'text-right', render: r => <span className="font-medium text-blue-600">{r.inUse}</span> },
+    { key: 'underRepair', label: 'Đang sửa', className: 'text-right', render: r => <span className={r.underRepair > 0 ? 'font-medium text-orange-600' : ''}>{r.underRepair}</span> },
+    { key: 'broken', label: 'Hỏng', className: 'text-right', render: r => <span className={r.broken > 0 ? 'font-medium text-destructive' : ''}>{r.broken}</span> },
     { key: 'actions', label: '', render: r => (
-      <Button variant="ghost" size="sm" onClick={(e) => { e.stopPropagation(); setSelectedEquipment(r); }}>
+      <Button variant="ghost" size="sm" onClick={(e) => { e.stopPropagation(); setSelectedItem(r); }}>
         <Eye className="h-4 w-4" />
       </Button>
     )},
@@ -55,16 +85,15 @@ const AssetList = () => {
     { key: 'total', label: 'Tổng SL', render: r => r.totalQuantity, className: 'text-right' },
     { key: 'inStock', label: 'Tồn kho', render: r => <span className="font-medium text-emerald-600">{r.inStockQuantity}</span>, className: 'text-right' },
     { key: 'issued', label: 'Đã cấp', render: r => r.issuedQuantity, className: 'text-right' },
-    { key: 'returned', label: 'Đã thu hồi', render: r => r.returnedQuantity, className: 'text-right' },
     { key: 'broken', label: 'Hỏng', render: r => r.brokenQuantity, className: 'text-right' },
   ];
 
   const filterFields: FilterField[] = [
-    { key: 'search', label: 'Tìm kiếm', type: 'text', placeholder: 'Mã, tên, serial...' },
-    { key: 'status', label: 'Trạng thái', type: 'select', options: Object.entries(equipmentStatusLabels).map(([v, l]) => ({ value: v, label: l })) },
+    { key: 'search', label: 'Tìm kiếm', type: 'text', placeholder: 'Mã, tên tài sản...' },
   ];
 
-  const dep = selectedEquipment ? calculateDepreciation(selectedEquipment.originalCost, selectedEquipment.salvageValue, selectedEquipment.depreciationMonths, selectedEquipment.capitalizedDate) : null;
+  // Get equipment list for selected item detail
+  const selectedEquipments = selectedItem ? equipments.filter(eq => eq.itemId === selectedItem.itemId) : [];
 
   return (
     <div className="page-container">
@@ -78,60 +107,87 @@ const AssetList = () => {
 
       <Tabs value={tab} onValueChange={setTab}>
         <TabsList>
-          <TabsTrigger value="devices">Thiết bị ({equipments.length})</TabsTrigger>
+          <TabsTrigger value="devices">Thiết bị ({deviceSummaries.length})</TabsTrigger>
           <TabsTrigger value="consumables">Vật tư ({consumableStocks.length})</TabsTrigger>
         </TabsList>
         <TabsContent value="devices" className="space-y-4 mt-4">
           <FilterBar fields={filterFields} values={filters} onChange={(k, v) => setFilters(p => ({ ...p, [k]: v }))} onReset={() => setFilters({})} />
-          <DataTable columns={deviceColumns} data={filteredEquipments} currentPage={page} onPageChange={setPage} />
+          <DataTable columns={deviceColumns} data={filteredDevices} currentPage={page} onPageChange={setPage} />
         </TabsContent>
         <TabsContent value="consumables" className="mt-4">
           <DataTable columns={consumableColumns} data={consumableStocks} />
         </TabsContent>
       </Tabs>
 
-      {/* Equipment Detail Dialog */}
-      <Dialog open={!!selectedEquipment} onOpenChange={() => setSelectedEquipment(null)}>
-        <DialogContent className="max-w-3xl">
+      {/* Device Item Detail Dialog */}
+      <Dialog open={!!selectedItem} onOpenChange={() => setSelectedItem(null)}>
+        <DialogContent className="max-w-4xl max-h-[85vh] overflow-y-auto">
           <DialogHeader>
-            <DialogTitle>Chi tiết thiết bị {selectedEquipment?.equipmentCode}</DialogTitle>
+            <DialogTitle>Chi tiết thiết bị: {selectedItem?.name}</DialogTitle>
           </DialogHeader>
-          {selectedEquipment && (
+          {selectedItem && (
             <div className="space-y-6">
-              <div className="grid grid-cols-2 gap-4 text-sm">
-                <div><span className="text-muted-foreground">Tên:</span> <span className="font-medium">{getItemName(selectedEquipment.itemId)}</span></div>
-                <div><span className="text-muted-foreground">Serial:</span> <span className="font-mono">{selectedEquipment.serial}</span></div>
-                <div><span className="text-muted-foreground">Trạng thái:</span> <StatusBadge status={selectedEquipment.status} label={equipmentStatusLabels[selectedEquipment.status]} /></div>
-                <div><span className="text-muted-foreground">NCC:</span> {getSupplierName(selectedEquipment.supplierId)}</div>
-                <div><span className="text-muted-foreground">Người dùng:</span> {selectedEquipment.assignedTo ? getEmployeeName(selectedEquipment.assignedTo) : '—'}</div>
-                <div><span className="text-muted-foreground">Phòng ban:</span> {selectedEquipment.assignedDepartment ? getDepartmentName(selectedEquipment.assignedDepartment) : '—'}</div>
+              <div className="grid grid-cols-3 md:grid-cols-6 gap-3">
+                <div className="text-center p-3 rounded-lg bg-muted/50">
+                  <div className="text-lg font-bold">{selectedItem.total}</div>
+                  <div className="text-xs text-muted-foreground">Tổng</div>
+                </div>
+                <div className="text-center p-3 rounded-lg bg-emerald-50">
+                  <div className="text-lg font-bold text-emerald-600">{selectedItem.inStock}</div>
+                  <div className="text-xs text-muted-foreground">Tồn kho</div>
+                </div>
+                <div className="text-center p-3 rounded-lg bg-blue-50">
+                  <div className="text-lg font-bold text-blue-600">{selectedItem.inUse}</div>
+                  <div className="text-xs text-muted-foreground">Đang dùng</div>
+                </div>
+                <div className="text-center p-3 rounded-lg bg-orange-50">
+                  <div className="text-lg font-bold text-orange-600">{selectedItem.underRepair}</div>
+                  <div className="text-xs text-muted-foreground">Đang sửa</div>
+                </div>
+                <div className="text-center p-3 rounded-lg bg-red-50">
+                  <div className="text-lg font-bold text-destructive">{selectedItem.broken}</div>
+                  <div className="text-xs text-muted-foreground">Hỏng</div>
+                </div>
+                <div className="text-center p-3 rounded-lg bg-muted/50">
+                  <div className="text-lg font-bold">{selectedItem.lost + selectedItem.disposed}</div>
+                  <div className="text-xs text-muted-foreground">Mất/Thanh lý</div>
+                </div>
               </div>
 
-              {dep && (
-                <Card>
-                  <CardHeader><CardTitle className="text-base">Khấu hao đường thẳng</CardTitle></CardHeader>
-                  <CardContent>
-                    <div className="grid grid-cols-2 md:grid-cols-4 gap-4 text-sm">
-                      <div><span className="text-muted-foreground block">Nguyên giá</span><span className="font-semibold">{formatCurrency(selectedEquipment.originalCost)}</span></div>
-                      <div><span className="text-muted-foreground block">KH/tháng</span><span className="font-semibold">{formatCurrency(dep.monthlyDep)}</span></div>
-                      <div><span className="text-muted-foreground block">KH lũy kế ({dep.effectiveElapsed}/{dep.totalMonths} tháng)</span><span className="font-semibold">{formatCurrency(dep.accumulated)}</span></div>
-                      <div><span className="text-muted-foreground block">GT còn lại</span><span className="font-semibold text-primary">{formatCurrency(dep.currentValue)}</span></div>
-                    </div>
-                    <div className="mt-3 h-2 rounded-full bg-muted overflow-hidden">
-                      <div className="h-full bg-primary rounded-full transition-all" style={{ width: `${(dep.effectiveElapsed / dep.totalMonths) * 100}%` }} />
-                    </div>
-                  </CardContent>
-                </Card>
-              )}
-
               <Card>
-                <CardHeader><CardTitle className="text-base">Lịch sử</CardTitle></CardHeader>
-                <CardContent>
-                  <Timeline events={[
-                    { id: '1', date: formatDate(selectedEquipment.createdAt), title: 'Nhập kho', description: `Phiếu ${selectedEquipment.stockInCode}` },
-                    ...(selectedEquipment.assignedTo ? [{ id: '2', date: formatDate(selectedEquipment.createdAt), title: 'Cấp phát', description: `Cho ${getEmployeeName(selectedEquipment.assignedTo!)}` }] : []),
-                    ...(selectedEquipment.status === 'UNDER_REPAIR' ? [{ id: '3', date: '2025-03-15', title: 'Sửa chữa', description: selectedEquipment.notes, status: 'Đang sửa' }] : []),
-                  ]} />
+                <CardHeader><CardTitle className="text-base">Danh sách thiết bị chi tiết</CardTitle></CardHeader>
+                <CardContent className="p-0">
+                  <div className="overflow-x-auto">
+                    <table className="w-full text-sm">
+                      <thead>
+                        <tr className="border-b bg-muted/50">
+                          <th className="text-left px-4 py-2 font-medium">Mã TB</th>
+                          <th className="text-left px-4 py-2 font-medium">Serial</th>
+                          <th className="text-left px-4 py-2 font-medium">Trạng thái</th>
+                          <th className="text-left px-4 py-2 font-medium">Người dùng</th>
+                          <th className="text-left px-4 py-2 font-medium">Phòng ban</th>
+                          <th className="text-right px-4 py-2 font-medium">Nguyên giá</th>
+                          <th className="text-right px-4 py-2 font-medium">GT còn lại</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {selectedEquipments.map(eq => {
+                          const dep = calculateDepreciation(eq.originalCost, eq.salvageValue, eq.depreciationMonths, eq.capitalizedDate);
+                          return (
+                            <tr key={eq.id} className="border-b last:border-0 hover:bg-muted/30">
+                              <td className="px-4 py-2 font-mono font-medium">{eq.equipmentCode}</td>
+                              <td className="px-4 py-2 font-mono text-muted-foreground">{eq.serial}</td>
+                              <td className="px-4 py-2"><StatusBadge status={eq.status} label={equipmentStatusLabels[eq.status]} /></td>
+                              <td className="px-4 py-2">{eq.assignedTo ? getEmployeeName(eq.assignedTo) : '—'}</td>
+                              <td className="px-4 py-2">{eq.assignedDepartment ? getDepartmentName(eq.assignedDepartment) : '—'}</td>
+                              <td className="px-4 py-2 text-right">{formatCurrency(eq.originalCost)}</td>
+                              <td className="px-4 py-2 text-right font-medium text-primary">{formatCurrency(dep.currentValue)}</td>
+                            </tr>
+                          );
+                        })}
+                      </tbody>
+                    </table>
+                  </div>
                 </CardContent>
               </Card>
             </div>
