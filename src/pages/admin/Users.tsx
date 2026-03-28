@@ -224,6 +224,46 @@ const UsersPage = () => {
         </div>
       </EntityFormModal>
 
+      {/* Dialog sửa người dùng */}
+      <EntityFormModal open={!!editTarget} onClose={() => setEditTarget(null)} title="Chỉnh sửa người dùng" onSubmit={handleEdit} submitLabel="Lưu" size="lg">
+        <div className="grid grid-cols-2 gap-4">
+          <div className="space-y-2">
+            <Label>Họ tên <span className="text-destructive">*</span></Label>
+            <Input value={editForm.name} onChange={e => setEditForm(p => ({ ...p, name: e.target.value }))} />
+          </div>
+          <div className="space-y-2">
+            <Label>Email <span className="text-destructive">*</span></Label>
+            <Input type="email" value={editForm.email} onChange={e => setEditForm(p => ({ ...p, email: e.target.value }))} />
+          </div>
+          <div className="space-y-2">
+            <Label>Số điện thoại</Label>
+            <Input value={editForm.phone} onChange={e => setEditForm(p => ({ ...p, phone: e.target.value }))} />
+          </div>
+          <div className="space-y-2">
+            <Label>Phòng ban <span className="text-destructive">*</span></Label>
+            <Select value={editForm.departmentId} onValueChange={v => setEditForm(p => ({ ...p, departmentId: v }))}>
+              <SelectTrigger><SelectValue /></SelectTrigger>
+              <SelectContent>
+                {departments.map(d => <SelectItem key={d.id} value={d.id}>{d.name}</SelectItem>)}
+              </SelectContent>
+            </Select>
+          </div>
+          <div className="space-y-2">
+            <Label>Chức danh</Label>
+            <Input value={editForm.position} onChange={e => setEditForm(p => ({ ...p, position: e.target.value }))} />
+          </div>
+          <div className="space-y-2">
+            <Label>Vai trò</Label>
+            <Select value={editForm.role} onValueChange={v => setEditForm(p => ({ ...p, role: v as Employee['role'] }))}>
+              <SelectTrigger><SelectValue /></SelectTrigger>
+              <SelectContent>
+                {Object.entries(roleLabels).map(([v, l]) => <SelectItem key={v} value={v}>{l}</SelectItem>)}
+              </SelectContent>
+            </Select>
+          </div>
+        </div>
+      </EntityFormModal>
+
       {/* Dialog xác nhận xóa */}
       <Dialog open={!!deleteTarget} onOpenChange={v => !v && setDeleteTarget(null)}>
         <DialogContent className="max-w-md">
