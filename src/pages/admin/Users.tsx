@@ -113,6 +113,22 @@ const UsersPage = () => {
     toast.success('Đã tạm xóa người dùng');
   };
 
+  const openEdit = (emp: Employee) => {
+    setEditTarget(emp);
+    setEditForm({ name: emp.name, email: emp.email, phone: emp.phone, departmentId: emp.departmentId, position: emp.position, role: emp.role });
+  };
+
+  const handleEdit = () => {
+    if (!editTarget) return;
+    if (!editForm.name || !editForm.email || !editForm.departmentId) {
+      toast.error('Vui lòng điền đầy đủ thông tin bắt buộc');
+      return;
+    }
+    setData(prev => prev.map(e => e.id === editTarget.id ? { ...e, ...editForm } : e));
+    setEditTarget(null);
+    toast.success('Đã cập nhật người dùng');
+  };
+
   const columns: Column<Employee>[] = [
     { key: 'code', label: 'Mã NV', render: r => <span className="font-mono text-sm font-medium">{r.code}</span> },
     { key: 'name', label: 'Họ tên' },
