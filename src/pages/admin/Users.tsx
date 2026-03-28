@@ -9,7 +9,7 @@ import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from '@/components/ui/dialog';
 import { employees as initialEmployees, Employee, EmployeeStatus, departments } from '@/data/mockData';
-import { Download, Plus, Trash2 } from 'lucide-react';
+import { Download, Plus, Trash2, Pencil } from 'lucide-react';
 import { toast } from 'sonner';
 
 const roleLabels: Record<string, string> = {
@@ -51,6 +51,8 @@ const UsersPage = () => {
   const [addOpen, setAddOpen] = useState(false);
   const [form, setForm] = useState(emptyForm);
   const [deleteTarget, setDeleteTarget] = useState<Employee | null>(null);
+  const [editTarget, setEditTarget] = useState<Employee | null>(null);
+  const [editForm, setEditForm] = useState(emptyForm);
 
   const counts = useMemo(() => tabCounts(data), [data]);
 
@@ -111,6 +113,22 @@ const UsersPage = () => {
     toast.success('Đã tạm xóa người dùng');
   };
 
+  const openEdit = (emp: Employee) => {
+    setEditTarget(emp);
+    setEditForm({ name: emp.name, email: emp.email, phone: emp.phone, departmentId: emp.departmentId, position: emp.position, role: emp.role });
+  };
+
+  const handleEdit = () => {
+    if (!editTarget) return;
+    if (!editForm.name || !editForm.email || !editForm.departmentId) {
+      toast.error('Vui lòng điền đầy đủ thông tin bắt buộc');
+      return;
+    }
+    setData(prev => prev.map(e => e.id === editTarget.id ? { ...e, ...editForm } : e));
+    setEditTarget(null);
+    toast.success('Đã cập nhật người dùng');
+  };
+
   const columns: Column<Employee>[] = [
     { key: 'code', label: 'Mã NV', render: r => <span className="font-mono text-sm font-medium">{r.code}</span> },
     { key: 'name', label: 'Họ tên' },
@@ -125,9 +143,14 @@ const UsersPage = () => {
       <span className={`inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-semibold ${statusBadgeClass[r.status]}`}>{statusLabels[r.status]}</span>
     )},
     { key: 'actions', label: '', render: r => r.status !== 'DELETED' ? (
-      <Button variant="ghost" size="icon" className="h-8 w-8 text-muted-foreground hover:text-destructive" onClick={(e) => { e.stopPropagation(); setDeleteTarget(r); }}>
-        <Trash2 className="h-4 w-4" />
-      </Button>
+      <div className="flex items-center gap-1">
+        <Button variant="ghost" size="icon" className="h-8 w-8 text-muted-foreground hover:text-primary" onClick={(e) => { e.stopPropagation(); openEdit(r); }}>
+          <Pencil className="h-4 w-4" />
+        </Button>
+        <Button variant="ghost" size="icon" className="h-8 w-8 text-muted-foreground hover:text-destructive" onClick={(e) => { e.stopPropagation(); setDeleteTarget(r); }}>
+          <Trash2 className="h-4 w-4" />
+        </Button>
+      </div>
     ) : null },
   ];
 
@@ -192,6 +215,46 @@ const UsersPage = () => {
           <div className="space-y-2">
             <Label>Vai trò</Label>
             <Select value={form.role} onValueChange={v => setForm(p => ({ ...p, role: v as Employee['role'] }))}>
+              <SelectTrigger><SelectValue /></SelectTrigger>
+              <SelectContent>
+                {Object.entries(roleLabels).map(([v, l]) => <SelectItem key={v} value={v}>{l}</SelectItem>)}
+              </SelectContent>
+            </Select>
+          </div>
+        </div>
+      </EntityFormModal>
+
+      {/* Dialog sửa người dùng */}
+      <EntityFormModal open={!!editTarget} onClose={() => setEditTarget(null)} title="Chỉnh sửa người dùng" onSubmit={handleEdit} submitLabel="Lưu" size="lg">
+        <div className="grid grid-cols-2 gap-4">
+          <div className="space-y-2">
+            <Label>Họ tên <span className="text-destructive">*</span></Label>
+            <Input value={editForm.name} onChange={e => setEditForm(p => ({ ...p, name: e.target.value }))} />
+          </div>
+          <div className="space-y-2">
+            <Label>Email <span className="text-destructive">*</span></Label>
+            <Input type="email" value={editForm.email} onChange={e => setEditForm(p => ({ ...p, email: e.target.value }))} />
+          </div>
+          <div className="space-y-2">
+            <Label>Số điện thoại</Label>
+            <Input value={editForm.phone} onChange={e => setEditForm(p => ({ ...p, phone: e.target.value }))} />
+          </div>
+          <div className="space-y-2">
+            <Label>Phòng ban <span className="text-destructive">*</span></Label>
+            <Select value={editForm.departmentId} onValueChange={v => setEditForm(p => ({ ...p, departmentId: v }))}>
+              <SelectTrigger><SelectValue /></SelectTrigger>
+              <SelectContent>
+                {departments.map(d => <SelectItem key={d.id} value={d.id}>{d.name}</SelectItem>)}
+              </SelectContent>
+            </Select>
+          </div>
+          <div className="space-y-2">
+            <Label>Chức danh</Label>
+            <Input value={editForm.position} onChange={e => setEditForm(p => ({ ...p, position: e.target.value }))} />
+          </div>
+          <div className="space-y-2">
+            <Label>Vai trò</Label>
+            <Select value={editForm.role} onValueChange={v => setEditForm(p => ({ ...p, role: v as Employee['role'] }))}>
               <SelectTrigger><SelectValue /></SelectTrigger>
               <SelectContent>
                 {Object.entries(roleLabels).map(([v, l]) => <SelectItem key={v} value={v}>{l}</SelectItem>)}
