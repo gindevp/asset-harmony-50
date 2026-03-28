@@ -51,6 +51,8 @@ const UsersPage = () => {
   const [addOpen, setAddOpen] = useState(false);
   const [form, setForm] = useState(emptyForm);
   const [deleteTarget, setDeleteTarget] = useState<Employee | null>(null);
+  const [editTarget, setEditTarget] = useState<Employee | null>(null);
+  const [editForm, setEditForm] = useState(emptyForm);
 
   const counts = useMemo(() => tabCounts(data), [data]);
 
