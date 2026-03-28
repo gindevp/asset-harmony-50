@@ -44,6 +44,7 @@ const StockInPage = () => {
   const [filters, setFilters] = useState<Record<string, string>>({});
   const [page, setPage] = useState(1);
   const [selected, setSelected] = useState<StockIn | null>(null);
+  const [deleteTarget, setDeleteTarget] = useState<StockIn | null>(null);
 
   // Create form state
   const [createOpen, setCreateOpen] = useState(false);
