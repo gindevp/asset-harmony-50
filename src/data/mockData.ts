@@ -13,6 +13,8 @@ export const departments: Department[] = [
   { id: 'dept-5', name: 'Phòng Marketing', code: 'MKT' },
 ];
 
+export type EmployeeStatus = 'ACTIVE' | 'INACTIVE' | 'DELETED';
+
 export interface Employee {
   id: string;
   code: string;
@@ -22,17 +24,19 @@ export interface Employee {
   departmentId: string;
   position: string;
   role: 'ADMIN' | 'ASSET_MANAGER' | 'DEPARTMENT_COORDINATOR' | 'EMPLOYEE';
+  status: EmployeeStatus;
+  createdAt: string;
 }
 
 export const employees: Employee[] = [
-  { id: 'emp-1', code: 'NV000001', name: 'Nguyễn Văn An', email: 'an.nv@company.vn', phone: '0901234567', departmentId: 'dept-1', position: 'Trưởng phòng IT', role: 'ADMIN' },
-  { id: 'emp-2', code: 'NV000002', name: 'Trần Thị Bình', email: 'binh.tt@company.vn', phone: '0901234568', departmentId: 'dept-1', position: 'Kỹ sư phần mềm', role: 'EMPLOYEE' },
-  { id: 'emp-3', code: 'NV000003', name: 'Lê Minh Cường', email: 'cuong.lm@company.vn', phone: '0901234569', departmentId: 'dept-2', position: 'Trưởng phòng HCNS', role: 'ASSET_MANAGER' },
-  { id: 'emp-4', code: 'NV000004', name: 'Phạm Thị Dung', email: 'dung.pt@company.vn', phone: '0901234570', departmentId: 'dept-2', position: 'Chuyên viên nhân sự', role: 'EMPLOYEE' },
-  { id: 'emp-5', code: 'NV000005', name: 'Hoàng Văn Em', email: 'em.hv@company.vn', phone: '0901234571', departmentId: 'dept-3', position: 'Kế toán trưởng', role: 'DEPARTMENT_COORDINATOR' },
-  { id: 'emp-6', code: 'NV000006', name: 'Vũ Thị Phương', email: 'phuong.vt@company.vn', phone: '0901234572', departmentId: 'dept-3', position: 'Kế toán viên', role: 'EMPLOYEE' },
-  { id: 'emp-7', code: 'NV000007', name: 'Đỗ Quang Hải', email: 'hai.dq@company.vn', phone: '0901234573', departmentId: 'dept-4', position: 'Nhân viên kinh doanh', role: 'EMPLOYEE' },
-  { id: 'emp-8', code: 'NV000008', name: 'Ngô Thanh Hương', email: 'huong.nt@company.vn', phone: '0901234574', departmentId: 'dept-5', position: 'Trưởng phòng Marketing', role: 'DEPARTMENT_COORDINATOR' },
+  { id: 'emp-1', code: 'NV000001', name: 'Nguyễn Văn An', email: 'an.nv@company.vn', phone: '0901234567', departmentId: 'dept-1', position: 'Trưởng phòng IT', role: 'ADMIN', status: 'ACTIVE', createdAt: '2024-01-15' },
+  { id: 'emp-2', code: 'NV000002', name: 'Trần Thị Bình', email: 'binh.tt@company.vn', phone: '0901234568', departmentId: 'dept-1', position: 'Kỹ sư phần mềm', role: 'EMPLOYEE', status: 'ACTIVE', createdAt: '2024-02-10' },
+  { id: 'emp-3', code: 'NV000003', name: 'Lê Minh Cường', email: 'cuong.lm@company.vn', phone: '0901234569', departmentId: 'dept-2', position: 'Trưởng phòng HCNS', role: 'ASSET_MANAGER', status: 'ACTIVE', createdAt: '2024-01-20' },
+  { id: 'emp-4', code: 'NV000004', name: 'Phạm Thị Dung', email: 'dung.pt@company.vn', phone: '0901234570', departmentId: 'dept-2', position: 'Chuyên viên nhân sự', role: 'EMPLOYEE', status: 'INACTIVE', createdAt: '2024-03-05' },
+  { id: 'emp-5', code: 'NV000005', name: 'Hoàng Văn Em', email: 'em.hv@company.vn', phone: '0901234571', departmentId: 'dept-3', position: 'Kế toán trưởng', role: 'DEPARTMENT_COORDINATOR', status: 'ACTIVE', createdAt: '2024-01-25' },
+  { id: 'emp-6', code: 'NV000006', name: 'Vũ Thị Phương', email: 'phuong.vt@company.vn', phone: '0901234572', departmentId: 'dept-3', position: 'Kế toán viên', role: 'EMPLOYEE', status: 'DELETED', createdAt: '2024-04-12' },
+  { id: 'emp-7', code: 'NV000007', name: 'Đỗ Quang Hải', email: 'hai.dq@company.vn', phone: '0901234573', departmentId: 'dept-4', position: 'Nhân viên kinh doanh', role: 'EMPLOYEE', status: 'ACTIVE', createdAt: '2024-05-01' },
+  { id: 'emp-8', code: 'NV000008', name: 'Ngô Thanh Hương', email: 'huong.nt@company.vn', phone: '0901234574', departmentId: 'dept-5', position: 'Trưởng phòng Marketing', role: 'DEPARTMENT_COORDINATOR', status: 'ACTIVE', createdAt: '2024-03-18' },
 ];
 
 // ==================== LOCATIONS ====================
