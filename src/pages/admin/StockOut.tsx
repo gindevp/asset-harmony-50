@@ -31,6 +31,7 @@ const StockOutPage = () => {
   const [filters, setFilters] = useState<Record<string, string>>({});
   const [page, setPage] = useState(1);
   const [selected, setSelected] = useState<StockOut | null>(null);
+  const [deleteTarget, setDeleteTarget] = useState<StockOut | null>(null);
 
   const filtered = stockOuts.filter(so => {
     if (filters.search && !so.code.toLowerCase().includes(filters.search.toLowerCase())) return false;
