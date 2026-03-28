@@ -10,7 +10,9 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
-import { Plus, Eye, Trash2, PlusCircle } from 'lucide-react';
+import { Plus, Eye, Trash2, PlusCircle, MoreHorizontal, Pencil } from 'lucide-react';
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from '@/components/ui/dropdown-menu';
+import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from '@/components/ui/alert-dialog';
 import {
   stockIns, StockIn, stockInStatusLabels, stockInSourceLabels,
   formatCurrency, formatDate, getItemName, getSupplierName, getEmployeeName,
@@ -42,6 +44,7 @@ const StockInPage = () => {
   const [filters, setFilters] = useState<Record<string, string>>({});
   const [page, setPage] = useState(1);
   const [selected, setSelected] = useState<StockIn | null>(null);
+  const [deleteTarget, setDeleteTarget] = useState<StockIn | null>(null);
 
   // Create form state
   const [createOpen, setCreateOpen] = useState(false);
@@ -67,9 +70,18 @@ const StockInPage = () => {
     { key: 'status', label: 'Trạng thái', render: r => <StatusBadge status={r.status} label={stockInStatusLabels[r.status]} /> },
     { key: 'createdAt', label: 'Ngày tạo', render: r => formatDate(r.createdAt) },
     { key: 'actions', label: '', render: r => (
-      <Button variant="ghost" size="sm" onClick={(e) => { e.stopPropagation(); setSelected(r); }}>
-        <Eye className="h-4 w-4" />
-      </Button>
+      <DropdownMenu>
+        <DropdownMenuTrigger asChild>
+          <Button variant="ghost" size="icon" className="h-8 w-8" onClick={e => e.stopPropagation()}>
+            <MoreHorizontal className="h-4 w-4" />
+          </Button>
+        </DropdownMenuTrigger>
+        <DropdownMenuContent align="end">
+          <DropdownMenuItem onClick={() => setSelected(r)}><Eye className="h-4 w-4 mr-2" />Xem chi tiết</DropdownMenuItem>
+          <DropdownMenuItem onClick={() => toast.info('Chức năng sửa phiếu nhập (demo)')}><Pencil className="h-4 w-4 mr-2" />Sửa</DropdownMenuItem>
+          <DropdownMenuItem className="text-destructive focus:text-destructive" onClick={() => setDeleteTarget(r)}><Trash2 className="h-4 w-4 mr-2" />Xóa</DropdownMenuItem>
+        </DropdownMenuContent>
+      </DropdownMenu>
     )},
   ];
 
@@ -409,6 +421,20 @@ const StockInPage = () => {
           )}
         </DialogContent>
       </Dialog>
+
+      {/* ===== DELETE CONFIRM ===== */}
+      <AlertDialog open={!!deleteTarget} onOpenChange={() => setDeleteTarget(null)}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Xác nhận xóa phiếu nhập</AlertDialogTitle>
+            <AlertDialogDescription>Bạn có chắc chắn muốn xóa phiếu <strong>{deleteTarget?.code}</strong>? Hành động này không thể hoàn tác.</AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Hủy</AlertDialogCancel>
+            <AlertDialogAction className="bg-destructive text-destructive-foreground hover:bg-destructive/90" onClick={() => { toast.success(`Đã xóa phiếu ${deleteTarget?.code} (demo)`); setDeleteTarget(null); }}>Xóa</AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 };
