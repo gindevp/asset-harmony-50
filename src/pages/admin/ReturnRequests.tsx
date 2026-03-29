@@ -49,6 +49,15 @@ const ReturnRequests = () => {
           <p className="page-description">Duyệt và xử lý yêu cầu thu hồi tài sản</p>
         </div>
       </div>
+      <FilterBar
+        fields={[
+          { key: 'search', label: 'Tìm kiếm', type: 'text', placeholder: 'Mã YC, người yêu cầu...' },
+          { key: 'status', label: 'Trạng thái', type: 'select', options: Object.entries(returnStatusLabels).map(([v, l]) => ({ value: v, label: l })) },
+        ]}
+        values={filters}
+        onChange={(k, v) => { setFilters(prev => ({ ...prev, [k]: v })); setPage(1); }}
+        onReset={() => { setFilters({}); setPage(1); }}
+      />
       <DataTable columns={columns} data={sorted} currentPage={page} onPageChange={setPage} />
 
       <Dialog open={!!selected} onOpenChange={() => setSelected(null)}>

@@ -54,6 +54,15 @@ const RepairRequests = () => {
           <p className="page-description">Tiếp nhận và xử lý yêu cầu sửa chữa thiết bị</p>
         </div>
       </div>
+      <FilterBar
+        fields={[
+          { key: 'search', label: 'Tìm kiếm', type: 'text', placeholder: 'Mã YC, thiết bị, người YC...' },
+          { key: 'status', label: 'Trạng thái', type: 'select', options: Object.entries(repairStatusLabels).map(([v, l]) => ({ value: v, label: l })) },
+        ]}
+        values={filters}
+        onChange={(k, v) => { setFilters(prev => ({ ...prev, [k]: v })); setPage(1); }}
+        onReset={() => { setFilters({}); setPage(1); }}
+      />
       <DataTable columns={columns} data={sorted} currentPage={page} onPageChange={setPage} />
 
       <Dialog open={!!selected} onOpenChange={() => setSelected(null)}>
