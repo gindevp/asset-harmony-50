@@ -99,7 +99,6 @@ const Inventory = () => {
   const columns: Column<InventoryRow>[] = [
     { key: 'code', label: 'Mã hàng', render: r => <span className="font-mono text-sm">{r.code}</span> },
     { key: 'name', label: 'Tên hàng', render: r => <span className="font-medium">{r.name}</span> },
-    { key: 'code', label: 'Mã hàng', render: r => <span className="font-mono text-sm">{r.code}</span> },
     { key: 'groupName', label: 'Nhóm hàng hóa' },
     { key: 'unit', label: 'ĐVT', className: 'text-center' },
     { key: 'inStock', label: 'SL còn trong kho', className: 'text-center', render: r => <span className="font-semibold text-green-700">{r.inStock}</span> },
