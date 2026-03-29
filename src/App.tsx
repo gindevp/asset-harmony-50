@@ -44,6 +44,7 @@ const App = () => (
             <Route path="suppliers" element={<Suppliers />} />
             <Route path="stock-in" element={<StockIn />} />
             <Route path="stock-out" element={<StockOut />} />
+            <Route path="inventory" element={<Inventory />} />
             <Route path="asset-tracking" element={<AssetTracking />} />
             <Route path="allocation-requests" element={<AllocationRequests />} />
             <Route path="repair-requests" element={<RepairRequests />} />
