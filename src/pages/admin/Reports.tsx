@@ -1,51 +1,170 @@
-import { useState } from 'react';
+import { useCallback, useMemo, useState } from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Button } from '@/components/ui/button';
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { FileDown, BarChart3 } from 'lucide-react';
+import { FileDown } from 'lucide-react';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, PieChart, Pie, Cell } from 'recharts';
-import { equipments, assetItems, assetGroups, consumableStocks, formatCurrency, calculateDepreciation } from '@/data/mockData';
+import { formatCurrency, calculateDepreciation } from '@/data/mockData';
 import { toast } from 'sonner';
+import {
+  mapAssetItemDto,
+  useAssetGroups,
+  useAssetItems,
+  useConsumableStocksView,
+  useEnrichedEquipmentList,
+  useStockInsView,
+} from '@/hooks/useEntityApi';
+import { formatEquipmentCodeDisplay } from '@/utils/formatCodes';
+import { downloadCsv, reportFilename, rowsToCsv } from '@/utils/csvExport';
 
 const COLORS = ['#ee0033', '#3b82f6', '#10b981', '#f59e0b', '#8b5cf6', '#ec4899'];
 
 const Reports = () => {
   const [tab, setTab] = useState('asset');
+  const gQ = useAssetGroups();
+  const iQ = useAssetItems();
+  const eqQ = useEnrichedEquipmentList();
+  const csQ = useConsumableStocksView();
+  const siQ = useStockInsView();
 
-  // Asset report data
-  const byGroup = assetGroups.map(g => ({
-    name: g.name,
-    count: equipments.filter(eq => assetItems.find(i => i.id === eq.itemId)?.groupId === g.id).length,
-  })).filter(d => d.count > 0);
+  const assetGroups = useMemo(
+    () =>
+      (gQ.data ?? []).map(g => ({
+        id: String(g.id),
+        name: g.name ?? '',
+        code: g.code ?? '',
+      })),
+    [gQ.data],
+  );
+  const assetItems = useMemo(() => (iQ.data ?? []).map(mapAssetItemDto), [iQ.data]);
+  const equipments = eqQ.data ?? [];
+  const consumableStocks = csQ.data ?? [];
+  const stockIns = siQ.data ?? [];
 
-  const byStatus = [
-    { name: 'Tồn kho', value: equipments.filter(e => e.status === 'IN_STOCK').length },
-    { name: 'Đang dùng', value: equipments.filter(e => e.status === 'IN_USE').length },
-    { name: 'Đang sửa', value: equipments.filter(e => e.status === 'UNDER_REPAIR').length },
-    { name: 'Hỏng', value: equipments.filter(e => e.status === 'BROKEN').length },
-  ].filter(d => d.value > 0);
+  /** Giá trị mua sắm (phiếu nhập nguồn mua) theo tháng */
+  const procurementByMonth = useMemo(() => {
+    const m = new Map<string, number>();
+    for (const doc of stockIns) {
+      if (doc.source !== 'PURCHASE') continue;
+      const ym = doc.createdAt.slice(0, 7);
+      for (const line of doc.lines) {
+        m.set(ym, (m.get(ym) ?? 0) + line.totalPrice);
+      }
+    }
+    return [...m.entries()]
+      .sort((a, b) => a[0].localeCompare(b[0]))
+      .map(([month, amount]) => ({ month, amount }));
+  }, [stockIns]);
 
-  // Depreciation report
-  const depData = equipments.map(eq => {
-    const item = assetItems.find(i => i.id === eq.itemId);
-    const dep = calculateDepreciation(eq.originalCost, eq.salvageValue, eq.depreciationMonths, eq.capitalizedDate);
-    return { code: eq.equipmentCode, name: item?.name || '', ...dep, originalCost: eq.originalCost };
-  });
+  const byGroup = useMemo(
+    () =>
+      assetGroups
+        .map(g => ({
+          name: g.name,
+          count: equipments.filter(eq => assetItems.find(i => i.id === eq.itemId)?.groupId === g.id).length,
+        }))
+        .filter(d => d.count > 0),
+    [assetGroups, equipments, assetItems],
+  );
+
+  const byStatus = useMemo(
+    () =>
+      [
+        { name: 'Tồn kho', value: equipments.filter(e => e.status === 'IN_STOCK').length },
+        { name: 'Đang dùng', value: equipments.filter(e => e.status === 'IN_USE').length },
+        { name: 'Đang sửa', value: equipments.filter(e => e.status === 'UNDER_REPAIR').length },
+        { name: 'Hỏng', value: equipments.filter(e => e.status === 'BROKEN').length },
+      ].filter(d => d.value > 0),
+    [equipments],
+  );
+
+  const depData = useMemo(
+    () =>
+      equipments.map(eq => {
+        const item = assetItems.find(i => i.id === eq.itemId);
+        const dep = calculateDepreciation(eq.originalCost, eq.salvageValue, eq.depreciationMonths, eq.capitalizedDate);
+        return {
+          code: formatEquipmentCodeDisplay(eq.equipmentCode),
+          name: item?.name || '',
+          ...dep,
+          originalCost: eq.originalCost,
+        };
+      }),
+    [equipments, assetItems],
+  );
 
   const totalOriginal = depData.reduce((s, d) => s + d.originalCost, 0);
   const totalCurrent = depData.reduce((s, d) => s + d.currentValue, 0);
   const totalAccum = depData.reduce((s, d) => s + d.accumulated, 0);
+
+  const handleExportCsv = useCallback(() => {
+    try {
+      if (tab === 'asset') {
+        const header = ['Nhóm', 'Số lượng'];
+        const rows = byGroup.map(r => [r.name, r.count]);
+        downloadCsv(reportFilename('bao-cao-tai-san'), rowsToCsv(header, rows));
+      } else if (tab === 'inventory') {
+        const header = ['Mã tài sản', 'Tên', 'Tồn kho', 'Tổng SL', 'Đã cấp', 'Hỏng'];
+        const rows = consumableStocks.map(cs => {
+          const item = assetItems.find(i => i.id === cs.itemId);
+          return [
+            item?.code ?? '',
+            item?.name ?? '',
+            cs.inStockQuantity,
+            cs.totalQuantity,
+            cs.issuedQuantity,
+            cs.brokenQuantity,
+          ];
+        });
+        downloadCsv(reportFilename('bao-cao-ton-kho'), rowsToCsv(header, rows));
+      } else if (tab === 'depreciation') {
+        const header = [
+          'Mã TB',
+          'Tên',
+          'Nguyên giá',
+          'KH/tháng',
+          'KH lũy kế',
+          'GT còn lại',
+          'Tháng đã KH',
+          'Tổng tháng KH',
+        ];
+        const rows = depData.map(d => [
+          d.code,
+          d.name,
+          d.originalCost,
+          d.monthlyDep,
+          d.accumulated,
+          d.currentValue,
+          d.effectiveElapsed,
+          d.totalMonths,
+        ]);
+        downloadCsv(reportFilename('bao-cao-khau-hao'), rowsToCsv(header, rows));
+      } else if (tab === 'procurement') {
+        const header = ['Tháng', 'Giá trị mua (VND)'];
+        const rows = procurementByMonth.map(r => [r.month, r.amount]);
+        downloadCsv(reportFilename('bao-cao-mua-sam'), rowsToCsv(header, rows));
+      }
+      toast.success('Đã tải CSV');
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : 'Lỗi xuất CSV');
+    }
+  }, [tab, byGroup, consumableStocks, assetItems, depData, procurementByMonth]);
 
   return (
     <div className="page-container">
       <div className="page-header">
         <div>
           <h1 className="page-title">Báo cáo – Thống kê</h1>
-          <p className="page-description">Tổng hợp báo cáo tài sản, tồn kho, khấu hao</p>
+          <p className="page-description">
+            Tổng hợp tài sản, tồn kho, khấu hao — <strong>Xuất CSV</strong> theo tab đang mở (mở bằng Excel/LibreOffice).
+          </p>
         </div>
-        <Button variant="outline" onClick={() => toast.info('Xuất báo cáo CSV/Excel (demo)')}>
-          <FileDown className="h-4 w-4 mr-1" /> Xuất Excel
+        <Button
+          variant="outline"
+          onClick={handleExportCsv}
+          disabled={eqQ.isLoading || csQ.isLoading || gQ.isLoading || iQ.isLoading || siQ.isLoading}
+        >
+          <FileDown className="h-4 w-4 mr-1" /> Xuất CSV
         </Button>
       </div>
 
@@ -54,6 +173,7 @@ const Reports = () => {
           <TabsTrigger value="asset">Tài sản</TabsTrigger>
           <TabsTrigger value="inventory">Tồn kho</TabsTrigger>
           <TabsTrigger value="depreciation">Khấu hao</TabsTrigger>
+          <TabsTrigger value="procurement">Mua sắm</TabsTrigger>
         </TabsList>
 
         <TabsContent value="asset" className="space-y-4 mt-4">
@@ -165,6 +285,29 @@ const Reports = () => {
                   ))}
                 </tbody>
               </table>
+            </CardContent>
+          </Card>
+        </TabsContent>
+
+        <TabsContent value="procurement" className="space-y-4 mt-4">
+          <Card>
+            <CardHeader>
+              <CardTitle className="text-base">Quy mô mua sắm theo tháng (phiếu nhập — nguồn mua)</CardTitle>
+            </CardHeader>
+            <CardContent>
+              {procurementByMonth.length === 0 ? (
+                <p className="text-sm text-muted-foreground">Chưa có dữ liệu phiếu nhập mua.</p>
+              ) : (
+                <ResponsiveContainer width="100%" height={320}>
+                  <BarChart data={procurementByMonth.map(r => ({ name: r.month, value: r.amount }))}>
+                    <CartesianGrid strokeDasharray="3 3" />
+                    <XAxis dataKey="name" />
+                    <YAxis />
+                    <Tooltip formatter={(v: number) => formatCurrency(v)} />
+                    <Bar dataKey="value" fill="hsl(347, 100%, 47%)" radius={[4, 4, 0, 0]} />
+                  </BarChart>
+                </ResponsiveContainer>
+              )}
             </CardContent>
           </Card>
         </TabsContent>

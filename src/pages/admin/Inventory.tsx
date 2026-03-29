@@ -3,10 +3,16 @@ import { DataTable, Column } from '@/components/shared/DataTable';
 import { Button } from '@/components/ui/button';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Download, X, ChevronDown, ChevronUp } from 'lucide-react';
+import { formatCurrency } from '@/data/mockData';
 import {
-  assetItems, assetTypes, assetGroups, assetLines, equipments, consumableStocks,
-  formatCurrency, EquipmentStatus, equipmentStatusLabels,
-} from '@/data/mockData';
+  mapAssetItemDto,
+  useAssetGroups,
+  useAssetItems,
+  useAssetLines,
+  useAssetTypes,
+  useConsumableStocksView,
+  useEnrichedEquipmentList,
+} from '@/hooks/useEntityApi';
 
 interface InventoryRow {
   id: string;
@@ -23,6 +29,47 @@ interface InventoryRow {
 }
 
 const Inventory = () => {
+  const tQ = useAssetTypes();
+  const gQ = useAssetGroups();
+  const lQ = useAssetLines();
+  const iQ = useAssetItems();
+  const eqQ = useEnrichedEquipmentList();
+  const csQ = useConsumableStocksView();
+
+  const assetTypes = useMemo(
+    () =>
+      (tQ.data ?? []).map(t => ({
+        id: String(t.id),
+        code: t.code ?? '',
+        name: t.name ?? '',
+        description: t.description ?? '',
+      })),
+    [tQ.data],
+  );
+  const assetGroups = useMemo(
+    () =>
+      (gQ.data ?? []).map(g => ({
+        id: String(g.id),
+        code: g.code ?? '',
+        name: g.name ?? '',
+        typeId: String(g.assetType?.id ?? ''),
+      })),
+    [gQ.data],
+  );
+  const assetLines = useMemo(
+    () =>
+      (lQ.data ?? []).map(l => ({
+        id: String(l.id),
+        code: l.code ?? '',
+        name: l.name ?? '',
+        groupId: String(l.assetGroup?.id ?? ''),
+      })),
+    [lQ.data],
+  );
+  const assetItems = useMemo(() => (iQ.data ?? []).map(mapAssetItemDto), [iQ.data]);
+  const equipments = eqQ.data ?? [];
+  const consumableStocks = csQ.data ?? [];
+
   const [filters, setFilters] = useState<Record<string, string>>({});
   const [page, setPage] = useState(1);
   const [showAdvanced, setShowAdvanced] = useState(false);
@@ -56,7 +103,7 @@ const Inventory = () => {
         };
       }
     });
-  }, []);
+  }, [assetItems, equipments, consumableStocks, assetGroups]);
 
   const filtered = useMemo(() => {
     return inventoryData.filter(row => {
@@ -81,18 +128,18 @@ const Inventory = () => {
       }
       return true;
     });
-  }, [inventoryData, filters]);
+  }, [inventoryData, filters, assetItems]);
 
   // Dependent filter options
   const groupOptions = useMemo(() => {
     if (filters.type) return assetGroups.filter(g => g.typeId === filters.type);
     return assetGroups;
-  }, [filters.type]);
+  }, [filters.type, assetGroups]);
 
   const lineOptions = useMemo(() => {
     if (filters.group) return assetLines.filter(l => l.groupId === filters.group);
     return assetLines;
-  }, [filters.group]);
+  }, [filters.group, assetLines]);
 
   const resetFilters = () => { setFilters({}); setPage(1); };
 

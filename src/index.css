@@ -2,6 +2,24 @@
 @tailwind components;
 @tailwind utilities;
 
+/* In trang: ẩn sidebar/header điều hướng khi print (Ctrl+P) */
+@media print {
+  body {
+    background: white !important;
+  }
+  .print\:hidden,
+  aside,
+  nav,
+  [data-sidebar],
+  .sidebar-nav-item {
+    display: none !important;
+  }
+  .page-container {
+    max-width: none !important;
+    padding: 0 !important;
+  }
+}
+
 /* Segoe UI is a system font, no import needed */
 
 @layer base {
@@ -15,6 +33,7 @@
     --popover: 0 0% 100%;
     --popover-foreground: 220 20% 14%;
 
+    /* Brand Phase 1: đỏ #EE0033 (hsl 347 100% 47%) */
     --primary: 347 100% 47%;
     --primary-foreground: 0 0% 100%;
 

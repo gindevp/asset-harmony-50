@@ -1,6 +1,10 @@
+import { useQuery } from '@tanstack/react-query';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Check, X } from 'lucide-react';
+import { apiGet, getStoredToken } from '@/api/http';
+import { hasAnyAuthority } from '@/auth/jwt';
+import type { AuthorityDto } from '@/api/types';
 
 const roles = [
   { key: 'EMPLOYEE', label: 'Nhân viên', description: 'Tạo/xem yêu cầu của mình, xem tài sản được cấp' },
@@ -23,40 +27,76 @@ const matrix: Record<string, boolean[]> = {
   ADMIN: [true, true, true, true, true, true, true, true, true, true, true, true, true, true],
 };
 
-const RolesPage = () => (
-  <div className="page-container">
-    <div className="page-header">
-      <div>
-        <h1 className="page-title">Vai trò & Quyền</h1>
-        <p className="page-description">Ma trận phân quyền hệ thống</p>
-      </div>
-    </div>
+const RolesPage = () => {
+  const canAdmin = hasAnyAuthority(getStoredToken(), ['ROLE_ADMIN']);
+  const authoritiesQ = useQuery({
+    queryKey: ['api', 'authorities'],
+    queryFn: () => apiGet<AuthorityDto[]>('/api/authorities'),
+    enabled: canAdmin,
+  });
 
-    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-      {roles.map(role => (
-        <Card key={role.key}>
+  return (
+    <div className="page-container">
+      <div className="page-header">
+        <div>
+          <h1 className="page-title">Vai trò & Quyền</h1>
+          <p className="page-description">Ma trận phân quyền hệ thống</p>
+        </div>
+      </div>
+
+      {canAdmin && (
+        <Card className="mb-4">
           <CardHeader>
-            <CardTitle className="text-base">{role.label}</CardTitle>
+            <CardTitle className="text-base">Quyền đăng ký trên hệ thống (GET /api/authorities)</CardTitle>
           </CardHeader>
           <CardContent>
-            <p className="text-sm text-muted-foreground mb-3">{role.description}</p>
-            <div className="space-y-1.5">
-              {permissions.map((perm, idx) => (
-                <div key={perm} className="flex items-center gap-2 text-sm">
-                  {matrix[role.key][idx] ? (
-                    <Check className="h-4 w-4 text-emerald-600 flex-shrink-0" />
-                  ) : (
-                    <X className="h-4 w-4 text-muted-foreground/30 flex-shrink-0" />
-                  )}
-                  <span className={matrix[role.key][idx] ? '' : 'text-muted-foreground/50'}>{perm}</span>
-                </div>
-              ))}
-            </div>
+            {authoritiesQ.isLoading && <p className="text-sm text-muted-foreground">Đang tải…</p>}
+            {authoritiesQ.isError && (
+              <p className="text-sm text-destructive">Không tải được (cần ROLE_ADMIN).</p>
+            )}
+            {authoritiesQ.data && (
+              <div className="flex flex-wrap gap-2">
+                {(authoritiesQ.data ?? [])
+                  .map(a => a.name)
+                  .filter(Boolean)
+                  .sort()
+                  .map(name => (
+                    <Badge key={name} variant="secondary" className="font-mono text-xs">
+                      {name}
+                    </Badge>
+                  ))}
+              </div>
+            )}
           </CardContent>
         </Card>
-      ))}
+      )}
+
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+        {roles.map(role => (
+          <Card key={role.key}>
+            <CardHeader>
+              <CardTitle className="text-base">{role.label}</CardTitle>
+            </CardHeader>
+            <CardContent>
+              <p className="text-sm text-muted-foreground mb-3">{role.description}</p>
+              <div className="space-y-1.5">
+                {permissions.map((perm, idx) => (
+                  <div key={perm} className="flex items-center gap-2 text-sm">
+                    {matrix[role.key][idx] ? (
+                      <Check className="h-4 w-4 text-emerald-600 flex-shrink-0" />
+                    ) : (
+                      <X className="h-4 w-4 text-muted-foreground/30 flex-shrink-0" />
+                    )}
+                    <span className={matrix[role.key][idx] ? '' : 'text-muted-foreground/50'}>{perm}</span>
+                  </div>
+                ))}
+              </div>
+            </CardContent>
+          </Card>
+        ))}
+      </div>
     </div>
-  </div>
-);
+  );
+};
 
 export default RolesPage;

@@ -1,27 +1,65 @@
+import { useMemo } from 'react';
 import { KPICard } from '@/components/shared/KPICard';
 import { StatusBadge } from '@/components/shared/StatusBadge';
 import { DataTable, Column } from '@/components/shared/DataTable';
+import { Package, Warehouse, Monitor, Wrench, AlertTriangle } from 'lucide-react';
 import {
-  Package, Warehouse, Monitor, Wrench, AlertTriangle, BarChart3, TrendingUp
-} from 'lucide-react';
-import {
-  equipments, allocationRequests, repairRequests, returnRequests,
-  allocationStatusLabels, repairStatusLabels, returnStatusLabels,
-  getEmployeeName, getDepartmentName, formatDate, getItemName,
-  consumableStocks, assetItems
+  allocationStatusLabels,
+  formatDate,
+  getEmployeeName,
+  getDepartmentName,
+  getItemName,
 } from '@/data/mockData';
+import type { AllocationRequest } from '@/data/mockData';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, PieChart, Pie, Cell } from 'recharts';
+import {
+  useAllocationRequestsView,
+  useAssetItems,
+  useConsumableStocksView,
+  useDepartments,
+  useEmployees,
+  useEnrichedEquipmentList,
+  useRepairRequestsView,
+  useReturnRequestsView,
+} from '@/hooks/useEntityApi';
+import { Skeleton } from '@/components/ui/skeleton';
 
 const Dashboard = () => {
+  const eqQ = useEnrichedEquipmentList();
+  const allocQ = useAllocationRequestsView();
+  const repairQ = useRepairRequestsView();
+  const retQ = useReturnRequestsView();
+  const csQ = useConsumableStocksView();
+  const itemsQ = useAssetItems();
+  const empQ = useEmployees();
+  const depQ = useDepartments();
+
+  const equipments = eqQ.data ?? [];
+  const allocationRequests = allocQ.data ?? [];
+  const repairRequests = repairQ.data ?? [];
+  const returnRequests = retQ.data ?? [];
+  const consumableStocks = csQ.data ?? [];
+  const assetItemsRaw = itemsQ.data ?? [];
+  const employees = empQ.data ?? [];
+  const departments = depQ.data ?? [];
+
+  const loading =
+    eqQ.isLoading ||
+    allocQ.isLoading ||
+    repairQ.isLoading ||
+    retQ.isLoading ||
+    csQ.isLoading ||
+    itemsQ.isLoading ||
+    empQ.isLoading ||
+    depQ.isLoading;
+
   const totalEquipment = equipments.length;
   const inStock = equipments.filter(e => e.status === 'IN_STOCK').length;
   const inUse = equipments.filter(e => e.status === 'IN_USE').length;
   const underRepair = equipments.filter(e => e.status === 'UNDER_REPAIR').length;
   const broken = equipments.filter(e => e.status === 'BROKEN' || e.status === 'LOST').length;
   const totalConsumable = consumableStocks.reduce((s, c) => s + c.totalQuantity, 0);
-  const pendingRequests = allocationRequests.filter(r => r.status === 'CHO_DUYET').length;
-
   const statusChart = [
     { name: 'Tồn kho', value: inStock, fill: '#10b981' },
     { name: 'Đang dùng', value: inUse, fill: '#3b82f6' },
@@ -29,45 +67,88 @@ const Dashboard = () => {
     { name: 'Hỏng/Mất', value: broken, fill: '#ef4444' },
   ];
 
-  const groupChart = [
-    { name: 'Laptop', count: equipments.filter(e => ['item-1','item-2'].includes(e.itemId)).length },
-    { name: 'Màn hình', count: equipments.filter(e => e.itemId === 'item-3').length },
-    { name: 'Máy in', count: equipments.filter(e => e.itemId === 'item-4').length },
-    { name: 'Mạng', count: equipments.filter(e => e.itemId === 'item-8').length },
-  ];
+  const groupChart = useMemo(() => {
+    const m = new Map<string, number>();
+    for (const e of equipments) {
+      m.set(e.itemId, (m.get(e.itemId) ?? 0) + 1);
+    }
+    return Array.from(m.entries())
+      .map(([itemId, count]) => ({
+        name: getItemName(itemId, assetItemsRaw),
+        count,
+      }))
+      .sort((a, b) => b.count - a.count)
+      .slice(0, 8);
+  }, [equipments, assetItemsRaw]);
 
-  const recentRequests = [...allocationRequests].sort((a, b) => b.createdAt.localeCompare(a.createdAt)).slice(0, 5);
+  const recentRequests = useMemo(
+    () => [...allocationRequests].sort((a, b) => b.createdAt.localeCompare(a.createdAt)).slice(0, 5),
+    [allocationRequests],
+  );
 
-  const requestColumns: Column<typeof recentRequests[0]>[] = [
+  const requestColumns: Column<AllocationRequest>[] = [
     { key: 'code', label: 'Mã YC', render: r => <span className="font-mono text-sm font-medium">{r.code}</span> },
-    { key: 'requester', label: 'Người yêu cầu', render: r => getEmployeeName(r.requesterId) },
-    { key: 'department', label: 'Phòng ban', render: r => getDepartmentName(r.departmentId) },
+    { key: 'requester', label: 'Người yêu cầu', render: r => getEmployeeName(r.requesterId, employees) },
+    { key: 'assignee', label: 'Đối tượng nhận', render: r => <span className="max-w-[10rem] truncate block">{r.assigneeSummary}</span> },
+    {
+      key: 'stockIssue',
+      label: 'PX',
+      render: r =>
+        r.stockIssueCode ? (
+          <span className="font-mono text-xs">{r.stockIssueCode}</span>
+        ) : (
+          <span className="text-muted-foreground">—</span>
+        ),
+    },
+    { key: 'department', label: 'Phòng ban', render: r => getDepartmentName(r.departmentId, departments) },
     { key: 'createdAt', label: 'Ngày tạo', render: r => formatDate(r.createdAt) },
-    { key: 'status', label: 'Trạng thái', render: r => <StatusBadge status={r.status} label={allocationStatusLabels[r.status]} /> },
+    {
+      key: 'status',
+      label: 'Trạng thái',
+      render: r => <StatusBadge status={r.status} label={allocationStatusLabels[r.status] ?? r.status} />,
+    },
   ];
 
   const alerts = [
-    ...allocationRequests.filter(r => r.status === 'CHO_DUYET').map(r => ({
-      id: r.id, type: 'warning' as const, message: `Yêu cầu cấp phát ${r.code} đang chờ duyệt`
+    ...allocationRequests.filter(r => r.status === 'PENDING').map(r => ({
+      key: `alloc-${r.id}`,
+      type: 'warning' as const,
+      message: `Yêu cầu cấp phát ${r.code} đang chờ duyệt`,
     })),
-    ...repairRequests.filter(r => r.status === 'DANG_SUA').map(r => ({
-      id: r.id, type: 'repair' as const, message: `Yêu cầu sửa chữa ${r.code} đang xử lý`
+    ...repairRequests.filter(r => r.status === 'IN_PROGRESS').map(r => ({
+      key: `repair-${r.id}`,
+      type: 'repair' as const,
+      message: `Yêu cầu sửa chữa ${r.code} đang xử lý`,
     })),
-    ...returnRequests.filter(r => r.status === 'CHO_DUYET').map(r => ({
-      id: r.id, type: 'warning' as const, message: `Yêu cầu thu hồi ${r.code} đang chờ duyệt`
+    ...returnRequests.filter(r => r.status === 'PENDING').map(r => ({
+      key: `return-${r.id}`,
+      type: 'warning' as const,
+      message: `Yêu cầu thu hồi ${r.code} đang chờ duyệt`,
     })),
   ];
+
+  if (loading && !eqQ.data) {
+    return (
+      <div className="page-container space-y-4">
+        <Skeleton className="h-10 w-64" />
+        <div className="grid grid-cols-5 gap-4">
+          {[1, 2, 3, 4, 5].map(i => (
+            <Skeleton key={i} className="h-24" />
+          ))}
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="page-container">
       <div className="page-header">
         <div>
           <h1 className="page-title">Dashboard</h1>
-          <p className="page-description">Tổng quan hệ thống quản lý tài sản nội bộ</p>
+          <p className="page-description">Dữ liệu từ API backend (DB). Tổng vật tư: {totalConsumable}</p>
         </div>
       </div>
 
-      {/* KPI Cards */}
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-4">
         <KPICard title="Tổng thiết bị" value={totalEquipment} icon={Package} iconClassName="bg-accent" />
         <KPICard title="Tồn kho" value={inStock} icon={Warehouse} iconClassName="bg-emerald-100" />
@@ -76,7 +157,6 @@ const Dashboard = () => {
         <KPICard title="Hỏng / Mất" value={broken} icon={AlertTriangle} iconClassName="bg-red-100" />
       </div>
 
-      {/* Charts */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
         <Card>
           <CardHeader>
@@ -85,8 +165,18 @@ const Dashboard = () => {
           <CardContent>
             <ResponsiveContainer width="100%" height={250}>
               <PieChart>
-                <Pie data={statusChart} cx="50%" cy="50%" innerRadius={60} outerRadius={90} dataKey="value" label={({ name, value }) => `${name}: ${value}`}>
-                  {statusChart.map((entry, i) => <Cell key={i} fill={entry.fill} />)}
+                <Pie
+                  data={statusChart}
+                  cx="50%"
+                  cy="50%"
+                  innerRadius={60}
+                  outerRadius={90}
+                  dataKey="value"
+                  label={({ name, value }) => `${name}: ${value}`}
+                >
+                  {statusChart.map((entry, i) => (
+                    <Cell key={i} fill={entry.fill} />
+                  ))}
                 </Pie>
                 <Tooltip />
               </PieChart>
@@ -95,13 +185,13 @@ const Dashboard = () => {
         </Card>
         <Card>
           <CardHeader>
-            <CardTitle className="text-base">Số lượng theo nhóm thiết bị</CardTitle>
+            <CardTitle className="text-base">Số lượng theo master tài sản (top)</CardTitle>
           </CardHeader>
           <CardContent>
             <ResponsiveContainer width="100%" height={250}>
               <BarChart data={groupChart}>
                 <CartesianGrid strokeDasharray="3 3" />
-                <XAxis dataKey="name" />
+                <XAxis dataKey="name" tick={{ fontSize: 11 }} interval={0} angle={-25} textAnchor="end" height={70} />
                 <YAxis />
                 <Tooltip />
                 <Bar dataKey="count" fill="hsl(347, 100%, 47%)" radius={[4, 4, 0, 0]} />
@@ -111,7 +201,6 @@ const Dashboard = () => {
         </Card>
       </div>
 
-      {/* Alerts & Recent Requests */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
         <Card className="lg:col-span-1">
           <CardHeader>
@@ -124,8 +213,10 @@ const Dashboard = () => {
               <p className="text-sm text-muted-foreground">Không có cảnh báo</p>
             ) : (
               alerts.map(a => (
-                <div key={a.id} className="flex items-start gap-2 p-2 rounded-md bg-muted/50">
-                  <div className={`w-2 h-2 rounded-full mt-1.5 flex-shrink-0 ${a.type === 'warning' ? 'bg-amber-500' : 'bg-orange-500'}`} />
+                <div key={a.key} className="flex items-start gap-2 p-2 rounded-md bg-muted/50">
+                  <div
+                    className={`w-2 h-2 rounded-full mt-1.5 flex-shrink-0 ${a.type === 'warning' ? 'bg-amber-500' : 'bg-orange-500'}`}
+                  />
                   <span className="text-sm">{a.message}</span>
                 </div>
               ))
@@ -134,7 +225,7 @@ const Dashboard = () => {
         </Card>
         <Card className="lg:col-span-2">
           <CardHeader>
-            <CardTitle className="text-base">Yêu cầu gần đây</CardTitle>
+            <CardTitle className="text-base">Yêu cầu cấp phát gần đây</CardTitle>
           </CardHeader>
           <CardContent className="p-0">
             <DataTable columns={requestColumns} data={recentRequests} pageSize={5} />
@@ -142,27 +233,35 @@ const Dashboard = () => {
         </Card>
       </div>
 
-      {/* Consumable summary */}
       <Card>
         <CardHeader>
           <CardTitle className="text-base">Tồn kho vật tư</CardTitle>
         </CardHeader>
         <CardContent>
           <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-            {consumableStocks.map(cs => {
-              const item = assetItems.find(i => i.id === cs.itemId);
-              return (
-                <div key={cs.id} className="p-4 rounded-lg border space-y-2">
-                  <h4 className="font-medium text-sm">{item?.name}</h4>
-                  <div className="grid grid-cols-2 gap-2 text-sm">
-                    <div><span className="text-muted-foreground">Tổng: </span><span className="font-medium">{cs.totalQuantity}</span></div>
-                    <div><span className="text-muted-foreground">Tồn kho: </span><span className="font-medium text-emerald-600">{cs.inStockQuantity}</span></div>
-                    <div><span className="text-muted-foreground">Đã cấp: </span><span className="font-medium text-blue-600">{cs.issuedQuantity}</span></div>
-                    <div><span className="text-muted-foreground">Thu hồi: </span><span className="font-medium">{cs.returnedQuantity}</span></div>
+            {consumableStocks.map(cs => (
+              <div key={cs.id} className="p-4 rounded-lg border space-y-2">
+                <h4 className="font-medium text-sm">{getItemName(cs.itemId, assetItemsRaw)}</h4>
+                <div className="grid grid-cols-2 gap-2 text-sm">
+                  <div>
+                    <span className="text-muted-foreground">Tổng: </span>
+                    <span className="font-medium">{cs.totalQuantity}</span>
+                  </div>
+                  <div>
+                    <span className="text-muted-foreground">Tồn kho: </span>
+                    <span className="font-medium text-emerald-600">{cs.inStockQuantity}</span>
+                  </div>
+                  <div>
+                    <span className="text-muted-foreground">Đã cấp: </span>
+                    <span className="font-medium text-blue-600">{cs.issuedQuantity}</span>
+                  </div>
+                  <div>
+                    <span className="text-muted-foreground">Thu hồi: </span>
+                    <span className="font-medium">{cs.returnedQuantity}</span>
                   </div>
                 </div>
-              );
-            })}
+              </div>
+            ))}
           </div>
         </CardContent>
       </Card>

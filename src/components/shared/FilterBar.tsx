@@ -41,9 +41,11 @@ export const FilterBar = ({ fields, values, onChange, onReset, children }: Filte
             </SelectTrigger>
             <SelectContent>
               <SelectItem value="all">Tất cả {f.label.toLowerCase()}</SelectItem>
-              {f.options?.map(o => (
-                <SelectItem key={o.value} value={o.value}>{o.label}</SelectItem>
-              ))}
+              {f.options
+                ?.filter(o => o.value !== '')
+                .map(o => (
+                  <SelectItem key={o.value} value={o.value}>{o.label}</SelectItem>
+                ))}
             </SelectContent>
           </Select>
         )}

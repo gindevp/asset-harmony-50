@@ -1,16 +1,22 @@
+import { useEffect } from "react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { BrowserRouter, Route, Routes } from "react-router-dom";
+import { getStoredToken } from "@/api/http";
+import { fetchAndStoreAccountContext } from "@/api/account";
 import { Toaster as Sonner } from "@/components/ui/sonner";
 import { Toaster } from "@/components/ui/toaster";
 import { TooltipProvider } from "@/components/ui/tooltip";
+import { ProtectedRoute } from "@/components/auth/ProtectedRoute";
 import Index from "./pages/Index";
 import NotFound from "./pages/NotFound";
+import Login from "./pages/Login";
 import { AdminLayout } from "./components/layout/AdminLayout";
 import { EmployeeLayout } from "./components/layout/EmployeeLayout";
 import Dashboard from "./pages/admin/Dashboard";
 import AssetCategories from "./pages/admin/AssetCategories";
 import AssetList from "./pages/admin/AssetList";
 import Suppliers from "./pages/admin/Suppliers";
+import Locations from "./pages/admin/Locations";
 import StockIn from "./pages/admin/StockIn";
 import StockOut from "./pages/admin/StockOut";
 import AssetTracking from "./pages/admin/AssetTracking";
@@ -27,7 +33,23 @@ import MyAssets from "./pages/employee/MyAssets";
 
 const queryClient = new QueryClient();
 
-const App = () => (
+const ADMIN_ROLES = ["ROLE_ADMIN", "ROLE_ASSET_MANAGER", "ROLE_GD"];
+const EMPLOYEE_ROLES = [
+  "ROLE_ADMIN",
+  "ROLE_ASSET_MANAGER",
+  "ROLE_GD",
+  "ROLE_EMPLOYEE",
+  "ROLE_DEPARTMENT_COORDINATOR",
+];
+
+const App = () => {
+  useEffect(() => {
+    if (getStoredToken()) {
+      void fetchAndStoreAccountContext();
+    }
+  }, []);
+
+  return (
   <QueryClientProvider client={queryClient}>
     <TooltipProvider>
       <Toaster />
@@ -35,13 +57,21 @@ const App = () => (
       <BrowserRouter>
         <Routes>
           <Route path="/" element={<Index />} />
+          <Route path="/login" element={<Login />} />
 
-          {/* Admin routes */}
-          <Route path="/admin" element={<AdminLayout />}>
+          <Route
+            path="/admin"
+            element={
+              <ProtectedRoute anyAuthority={ADMIN_ROLES}>
+                <AdminLayout />
+              </ProtectedRoute>
+            }
+          >
             <Route index element={<Dashboard />} />
             <Route path="asset-categories" element={<AssetCategories />} />
             <Route path="assets" element={<AssetList />} />
             <Route path="suppliers" element={<Suppliers />} />
+            <Route path="locations" element={<Locations />} />
             <Route path="stock-in" element={<StockIn />} />
             <Route path="stock-out" element={<StockOut />} />
             <Route path="inventory" element={<Inventory />} />
@@ -55,8 +85,14 @@ const App = () => (
             <Route path="reports" element={<Reports />} />
           </Route>
 
-          {/* Employee routes */}
-          <Route path="/employee" element={<EmployeeLayout />}>
+          <Route
+            path="/employee"
+            element={
+              <ProtectedRoute anyAuthority={EMPLOYEE_ROLES}>
+                <EmployeeLayout />
+              </ProtectedRoute>
+            }
+          >
             <Route path="allocation-requests" element={<EmployeeRequests />} />
             <Route path="repair-requests" element={<EmployeeRequests />} />
             <Route path="return-requests" element={<EmployeeRequests />} />
@@ -68,6 +104,7 @@ const App = () => (
       </BrowserRouter>
     </TooltipProvider>
   </QueryClientProvider>
-);
+  );
+};
 
 export default App;

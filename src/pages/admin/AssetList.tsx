@@ -1,18 +1,33 @@
 import { useState, useMemo } from 'react';
+import { useQueryClient } from '@tanstack/react-query';
 import { DataTable, Column } from '@/components/shared/DataTable';
 import { FilterBar, FilterField } from '@/components/shared/FilterBar';
-import { StatusBadge } from '@/components/shared/StatusBadge';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
-import { Timeline } from '@/components/shared/Timeline';
 import { Eye, FileDown } from 'lucide-react';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { toast } from 'sonner';
+import { apiPatch } from '@/api/http';
 import {
-  equipments, Equipment, consumableStocks, assetItems, assetGroups, assetTypes,
-  equipmentStatusLabels, getEmployeeName, getDepartmentName, getItemName,
-  formatCurrency, formatDate, calculateDepreciation, getSupplierName
+  equipmentStatusLabels,
+  getEmployeeName,
+  getDepartmentName,
+  getItemName,
+  formatCurrency,
+  calculateDepreciation,
 } from '@/data/mockData';
+import type { ConsumableStock, Equipment } from '@/data/mockData';
+import {
+  mapAssetItemDto,
+  useAssetItems,
+  useConsumableStocksView,
+  useDepartments,
+  useEmployees,
+  useEnrichedEquipmentList,
+} from '@/hooks/useEntityApi';
+import { formatEquipmentCodeDisplay } from '@/utils/formatCodes';
 
 interface DeviceSummary {
   itemId: string;
@@ -28,19 +43,61 @@ interface DeviceSummary {
 }
 
 const AssetList = () => {
+  const qc = useQueryClient();
+  const iQ = useAssetItems();
+  const csQ = useConsumableStocksView();
+  const eqQ = useEnrichedEquipmentList();
+  const empQ = useEmployees();
+  const depQ = useDepartments();
+
+  const assetItems = useMemo(() => (iQ.data ?? []).map(mapAssetItemDto), [iQ.data]);
+  const consumableStocks = csQ.data ?? [];
+  const equipments = eqQ.data ?? [];
+  const employees = empQ.data ?? [];
+  const departments = depQ.data ?? [];
+
   const [tab, setTab] = useState('devices');
   const [filters, setFilters] = useState<Record<string, string>>({});
   const [page, setPage] = useState(1);
   const [selectedItem, setSelectedItem] = useState<DeviceSummary | null>(null);
+  const [eqStatusBusy, setEqStatusBusy] = useState<string | null>(null);
 
-  // Aggregate equipment by item
+  const changeEquipmentStatus = async (eq: Equipment, newStatus: string) => {
+    if (newStatus === eq.status) return;
+    if (['DISPOSED', 'LOST', 'BROKEN'].includes(newStatus)) {
+      if (!window.confirm(`Xác nhận đổi trạng thái thành «${equipmentStatusLabels[newStatus]}»?`)) return;
+    }
+    setEqStatusBusy(eq.id);
+    try {
+      await apiPatch(`/api/equipment/${eq.id}`, { id: Number(eq.id), status: newStatus });
+      toast.success('Đã cập nhật trạng thái thiết bị');
+      void qc.invalidateQueries({ queryKey: ['api', 'equipment'] });
+      void qc.invalidateQueries({ queryKey: ['api', 'equipment-assignments'] });
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : 'Không cập nhật được trạng thái');
+    } finally {
+      setEqStatusBusy(null);
+    }
+  };
+
   const deviceSummaries = useMemo<DeviceSummary[]>(() => {
     const map = new Map<string, DeviceSummary>();
     for (const eq of equipments) {
       const item = assetItems.find(i => i.id === eq.itemId);
       if (!item || item.managementType !== 'DEVICE') continue;
       if (!map.has(eq.itemId)) {
-        map.set(eq.itemId, { itemId: eq.itemId, code: item.code, name: item.name, total: 0, inStock: 0, inUse: 0, underRepair: 0, broken: 0, lost: 0, disposed: 0 });
+        map.set(eq.itemId, {
+          itemId: eq.itemId,
+          code: item.code,
+          name: item.name,
+          total: 0,
+          inStock: 0,
+          inUse: 0,
+          underRepair: 0,
+          broken: 0,
+          lost: 0,
+          disposed: 0,
+        });
       }
       const s = map.get(eq.itemId)!;
       s.total++;
@@ -52,7 +109,7 @@ const AssetList = () => {
       else if (eq.status === 'DISPOSED') s.disposed++;
     }
     return Array.from(map.values());
-  }, []);
+  }, [equipments, assetItems]);
 
   const filteredDevices = useMemo(() => {
     return deviceSummaries.filter(d => {
@@ -79,9 +136,13 @@ const AssetList = () => {
     )},
   ];
 
-  const consumableColumns: Column<typeof consumableStocks[0]>[] = [
-    { key: 'item', label: 'Mã', render: r => <span className="font-mono text-sm font-medium">{assetItems.find(i => i.id === r.itemId)?.code}</span> },
-    { key: 'name', label: 'Tên vật tư', render: r => getItemName(r.itemId) },
+  const consumableColumns: Column<ConsumableStock>[] = [
+    {
+      key: 'item',
+      label: 'Mã',
+      render: r => <span className="font-mono text-sm font-medium">{assetItems.find(i => i.id === r.itemId)?.code}</span>,
+    },
+    { key: 'name', label: 'Tên vật tư', render: r => getItemName(r.itemId, assetItems) },
     { key: 'total', label: 'Tổng SL', render: r => r.totalQuantity, className: 'text-right' },
     { key: 'inStock', label: 'Tồn kho', render: r => <span className="font-medium text-emerald-600">{r.inStockQuantity}</span>, className: 'text-right' },
     { key: 'issued', label: 'Đã cấp', render: r => r.issuedQuantity, className: 'text-right' },
@@ -163,7 +224,7 @@ const AssetList = () => {
                         <tr className="border-b bg-muted/50">
                           <th className="text-left px-4 py-2 font-medium">Mã TB</th>
                           <th className="text-left px-4 py-2 font-medium">Serial</th>
-                          <th className="text-left px-4 py-2 font-medium">Trạng thái</th>
+                          <th className="text-left px-4 py-2 font-medium min-w-[200px]">Trạng thái</th>
                           <th className="text-left px-4 py-2 font-medium">Người dùng</th>
                           <th className="text-left px-4 py-2 font-medium">Phòng ban</th>
                           <th className="text-right px-4 py-2 font-medium">Nguyên giá</th>
@@ -175,11 +236,28 @@ const AssetList = () => {
                           const dep = calculateDepreciation(eq.originalCost, eq.salvageValue, eq.depreciationMonths, eq.capitalizedDate);
                           return (
                             <tr key={eq.id} className="border-b last:border-0 hover:bg-muted/30">
-                              <td className="px-4 py-2 font-mono font-medium">{eq.equipmentCode}</td>
+                              <td className="px-4 py-2 font-mono font-medium">
+                                {formatEquipmentCodeDisplay(eq.equipmentCode)}
+                              </td>
                               <td className="px-4 py-2 font-mono text-muted-foreground">{eq.serial}</td>
-                              <td className="px-4 py-2"><StatusBadge status={eq.status} label={equipmentStatusLabels[eq.status]} /></td>
-                              <td className="px-4 py-2">{eq.assignedTo ? getEmployeeName(eq.assignedTo) : '—'}</td>
-                              <td className="px-4 py-2">{eq.assignedDepartment ? getDepartmentName(eq.assignedDepartment) : '—'}</td>
+                              <td className="px-4 py-2">
+                                <Select
+                                  value={eq.status}
+                                  onValueChange={v => void changeEquipmentStatus(eq, v)}
+                                  disabled={eqStatusBusy === eq.id}
+                                >
+                                  <SelectTrigger className="h-8 max-w-[220px] text-xs">
+                                    <SelectValue />
+                                  </SelectTrigger>
+                                  <SelectContent>
+                                    {Object.entries(equipmentStatusLabels).map(([k, l]) => (
+                                      <SelectItem key={k} value={k}>{l}</SelectItem>
+                                    ))}
+                                  </SelectContent>
+                                </Select>
+                              </td>
+                              <td className="px-4 py-2">{eq.assignedTo ? getEmployeeName(eq.assignedTo, employees) : '—'}</td>
+                              <td className="px-4 py-2">{eq.assignedDepartment ? getDepartmentName(eq.assignedDepartment, departments) : '—'}</td>
                               <td className="px-4 py-2 text-right">{formatCurrency(eq.originalCost)}</td>
                               <td className="px-4 py-2 text-right font-medium text-primary">{formatCurrency(dep.currentValue)}</td>
                             </tr>

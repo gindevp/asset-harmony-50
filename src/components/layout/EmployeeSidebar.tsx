@@ -1,5 +1,7 @@
-import { NavLink, useLocation } from 'react-router-dom';
-import { FileText, Package, Wrench, RotateCcw, ClipboardList, Menu, X } from 'lucide-react';
+import { NavLink, useLocation, useNavigate } from 'react-router-dom';
+import { Package, Wrench, RotateCcw, ClipboardList, Menu, X, LogOut } from 'lucide-react';
+import { Button } from '@/components/ui/button';
+import { setStoredToken } from '@/api/http';
 import { cn } from '@/lib/utils';
 import { useState } from 'react';
 
@@ -11,6 +13,7 @@ const navItems = [
 ];
 
 export const EmployeeSidebar = () => {
+  const navigate = useNavigate();
   const location = useLocation();
   const [collapsed, setCollapsed] = useState(false);
 
@@ -53,15 +56,18 @@ export const EmployeeSidebar = () => {
 
       {!collapsed && (
         <div className="p-3 border-t border-sidebar-border">
-          <div className="flex items-center gap-2">
-            <div className="w-8 h-8 rounded-full bg-sidebar-accent flex items-center justify-center text-xs font-medium">
-              TB
-            </div>
-            <div className="flex-1 min-w-0">
-              <p className="text-xs font-medium truncate">Trần Thị Bình</p>
-              <p className="text-xs text-sidebar-muted truncate">Nhân viên</p>
-            </div>
-          </div>
+          <Button
+            variant="outline"
+            size="sm"
+            className="w-full justify-start"
+            onClick={() => {
+              setStoredToken(null);
+              navigate('/login');
+            }}
+          >
+            <LogOut className="h-4 w-4 mr-2" />
+            Đăng xuất
+          </Button>
         </div>
       )}
     </aside>

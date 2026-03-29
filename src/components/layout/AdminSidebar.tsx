@@ -1,4 +1,7 @@
-import { NavLink, useLocation } from 'react-router-dom';
+import { NavLink, useLocation, useNavigate } from 'react-router-dom';
+import { LogOut } from 'lucide-react';
+import { Button } from '@/components/ui/button';
+import { setStoredToken } from '@/api/http';
 import {
   LayoutDashboard, Package, FolderTree, List, Truck, ArrowDownToLine, ArrowUpFromLine,
   ClipboardCheck, FileText, Wrench, RotateCcw, Users, Shield, ScrollText,
@@ -21,6 +24,7 @@ const navItems: NavItem[] = [
       { label: 'Danh mục tài sản', path: '/admin/asset-categories' },
       { label: 'Danh sách tài sản', path: '/admin/assets' },
       { label: 'Nhà cung cấp', path: '/admin/suppliers' },
+      { label: 'Vị trí / khu vực', path: '/admin/locations' },
     ]
   },
   {
@@ -45,10 +49,11 @@ const navItems: NavItem[] = [
       { label: 'Vai trò/Quyền', path: '/admin/roles' },
     ]
   },
-  { label: 'Nhật ký hệ thống', path: '/admin/system-logs', icon: ScrollText },
+  { label: 'Nhật ký & lịch sử thao tác', path: '/admin/system-logs', icon: ScrollText },
 ];
 
 export const AdminSidebar = () => {
+  const navigate = useNavigate();
   const location = useLocation();
   const [collapsed, setCollapsed] = useState(false);
   const [expandedGroups, setExpandedGroups] = useState<string[]>(() => {
@@ -149,16 +154,19 @@ export const AdminSidebar = () => {
 
       {/* Footer */}
       {!collapsed && (
-        <div className="p-3 border-t border-sidebar-border">
-          <div className="flex items-center gap-2">
-            <div className="w-8 h-8 rounded-full bg-sidebar-accent flex items-center justify-center text-xs font-medium">
-              NA
-            </div>
-            <div className="flex-1 min-w-0">
-              <p className="text-xs font-medium truncate">Nguyễn Văn An</p>
-              <p className="text-xs text-sidebar-muted truncate">Admin</p>
-            </div>
-          </div>
+        <div className="p-3 border-t border-sidebar-border space-y-2">
+          <Button
+            variant="outline"
+            size="sm"
+            className="w-full justify-start"
+            onClick={() => {
+              setStoredToken(null);
+              navigate('/login');
+            }}
+          >
+            <LogOut className="h-4 w-4 mr-2" />
+            Đăng xuất
+          </Button>
         </div>
       )}
     </aside>
