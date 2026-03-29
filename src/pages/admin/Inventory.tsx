@@ -97,7 +97,7 @@ const Inventory = () => {
   const resetFilters = () => { setFilters({}); setPage(1); };
 
   const columns: Column<InventoryRow>[] = [
-    { key: 'stt', label: 'STT', render: (_, idx) => <span>{(page - 1) * 10 + (idx as number) + 1}</span>, className: 'w-14' },
+    { key: 'code', label: 'Mã hàng', render: r => <span className="font-mono text-sm">{r.code}</span> },
     { key: 'name', label: 'Tên hàng', render: r => <span className="font-medium">{r.name}</span> },
     { key: 'code', label: 'Mã hàng', render: r => <span className="font-mono text-sm">{r.code}</span> },
     { key: 'groupName', label: 'Nhóm hàng hóa' },
