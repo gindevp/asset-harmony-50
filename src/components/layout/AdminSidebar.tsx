@@ -27,6 +27,7 @@ const navItems: NavItem[] = [
     label: 'Kho', icon: Truck, children: [
       { label: 'Nhập kho', path: '/admin/stock-in' },
       { label: 'Xuất kho', path: '/admin/stock-out' },
+      { label: 'Tồn kho', path: '/admin/inventory' },
     ]
   },
   { label: 'Quản lý trạng thái', path: '/admin/asset-tracking', icon: ClipboardCheck },

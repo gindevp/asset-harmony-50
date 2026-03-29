@@ -21,6 +21,7 @@ import Users from "./pages/admin/Users";
 import Roles from "./pages/admin/Roles";
 import SystemLogs from "./pages/admin/SystemLogs";
 import Reports from "./pages/admin/Reports";
+import Inventory from "./pages/admin/Inventory";
 import EmployeeRequests from "./pages/employee/EmployeeRequests";
 import MyAssets from "./pages/employee/MyAssets";
 
@@ -43,6 +44,7 @@ const App = () => (
             <Route path="suppliers" element={<Suppliers />} />
             <Route path="stock-in" element={<StockIn />} />
             <Route path="stock-out" element={<StockOut />} />
+            <Route path="inventory" element={<Inventory />} />
             <Route path="asset-tracking" element={<AssetTracking />} />
             <Route path="allocation-requests" element={<AllocationRequests />} />
             <Route path="repair-requests" element={<RepairRequests />} />
