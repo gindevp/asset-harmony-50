@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { DataTable, Column } from '@/components/shared/DataTable';
 import { StatusBadge } from '@/components/shared/StatusBadge';
+import { FilterBar } from '@/components/shared/FilterBar';
 import { Button } from '@/components/ui/button';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Eye } from 'lucide-react';
@@ -12,10 +13,18 @@ import { toast } from 'sonner';
 import { ApprovalActionBar } from '@/components/shared/ApprovalActionBar';
 
 const ReturnRequests = () => {
+  const [filters, setFilters] = useState<Record<string, string>>({});
   const [page, setPage] = useState(1);
   const [selected, setSelected] = useState<ReturnRequest | null>(null);
 
-  const sorted = [...returnRequests].sort((a, b) => b.createdAt.localeCompare(a.createdAt));
+  const sorted = returnRequests.filter(r => {
+    if (filters.search) {
+      const s = filters.search.toLowerCase();
+      if (!r.code.toLowerCase().includes(s) && !getEmployeeName(r.requesterId).toLowerCase().includes(s)) return false;
+    }
+    if (filters.status && r.status !== filters.status) return false;
+    return true;
+  }).sort((a, b) => b.createdAt.localeCompare(a.createdAt));
 
   const columns: Column<ReturnRequest>[] = [
     { key: 'code', label: 'Mã YC', render: r => <span className="font-mono text-sm font-medium">{r.code}</span> },
@@ -40,6 +49,15 @@ const ReturnRequests = () => {
           <p className="page-description">Duyệt và xử lý yêu cầu thu hồi tài sản</p>
         </div>
       </div>
+      <FilterBar
+        fields={[
+          { key: 'search', label: 'Tìm kiếm', type: 'text', placeholder: 'Mã YC, người yêu cầu...' },
+          { key: 'status', label: 'Trạng thái', type: 'select', options: Object.entries(returnStatusLabels).map(([v, l]) => ({ value: v, label: l })) },
+        ]}
+        values={filters}
+        onChange={(k, v) => { setFilters(prev => ({ ...prev, [k]: v })); setPage(1); }}
+        onReset={() => { setFilters({}); setPage(1); }}
+      />
       <DataTable columns={columns} data={sorted} currentPage={page} onPageChange={setPage} />
 
       <Dialog open={!!selected} onOpenChange={() => setSelected(null)}>
