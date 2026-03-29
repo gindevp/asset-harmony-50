@@ -21,6 +21,7 @@ import Users from "./pages/admin/Users";
 import Roles from "./pages/admin/Roles";
 import SystemLogs from "./pages/admin/SystemLogs";
 import Reports from "./pages/admin/Reports";
+import Inventory from "./pages/admin/Inventory";
 import EmployeeRequests from "./pages/employee/EmployeeRequests";
 import MyAssets from "./pages/employee/MyAssets";
 
