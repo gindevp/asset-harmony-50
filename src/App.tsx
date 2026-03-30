@@ -7,7 +7,6 @@ import { Toaster as Sonner } from "@/components/ui/sonner";
 import { Toaster } from "@/components/ui/toaster";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { ProtectedRoute } from "@/components/auth/ProtectedRoute";
-import Index from "./pages/Index";
 import NotFound from "./pages/NotFound";
 import Login from "./pages/Login";
 import { AdminLayout } from "./components/layout/AdminLayout";
@@ -30,6 +29,7 @@ import Reports from "./pages/admin/Reports";
 import Inventory from "./pages/admin/Inventory";
 import EmployeeRequests from "./pages/employee/EmployeeRequests";
 import MyAssets from "./pages/employee/MyAssets";
+import { Navigate } from "react-router-dom";
 
 const queryClient = new QueryClient();
 
@@ -56,7 +56,7 @@ const App = () => {
       <Sonner />
       <BrowserRouter>
         <Routes>
-          <Route path="/" element={<Index />} />
+          <Route path="/" element={<Navigate to="/login" replace />} />
           <Route path="/login" element={<Login />} />
 
           <Route
