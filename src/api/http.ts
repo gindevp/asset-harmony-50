@@ -12,7 +12,7 @@ const TOKEN_KEY = 'asset_app_jwt';
 const API_BASE_URL =
   import.meta.env.DEV
     ? ''
-    : (import.meta.env.VITE_API_BASE_URL ?? 'https://assetmanager.railway.internal');
+    : (import.meta.env.VITE_API_BASE_URL ?? 'https://assetmanagerapp.up.railway.app');
 
 function resolveApiUrl(path: string): string {
   if (path.startsWith('http://') || path.startsWith('https://')) return path;
