@@ -6,13 +6,13 @@ const TOKEN_KEY = 'asset_app_jwt';
 /**
  * Base URL API cho môi trường production deploy.
  * - DEV: để Vite proxy /api -> localhost:8080 như hiện tại.
- * - PROD: phải trỏ vào public backend URL (env `VITE_API_BASE_URL`).
- *   Lưu ý: `*.railway.internal` chỉ dùng nội bộ Railway, browser sẽ không resolve được.
+ * - PROD: mặc định theo backend Railway: https://assetmanager.railway.internal
+ *   (có thể override bằng env `VITE_API_BASE_URL`).
  */
 const API_BASE_URL =
   import.meta.env.DEV
     ? ''
-    : (import.meta.env.VITE_API_BASE_URL ?? '');
+    : (import.meta.env.VITE_API_BASE_URL ?? 'https://assetmanager.railway.internal');
 
 function resolveApiUrl(path: string): string {
   if (path.startsWith('http://') || path.startsWith('https://')) return path;
