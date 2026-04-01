@@ -210,7 +210,7 @@ const AssetTracking = () => {
     },
     {
       key: 'itemCode',
-      label: 'Mã TS',
+      label: 'Mã TB',
       render: r => <span className="font-mono text-xs text-muted-foreground">{getItemCode(r.itemId, assetItems) || '—'}</span>,
     },
     { key: 'name', label: 'Tên tài sản', render: r => getItemName(r.itemId, assetItems) },

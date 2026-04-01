@@ -107,9 +107,15 @@ export interface Equipment {
   capitalizedDate: string;
   depreciationMonths: number;
   salvageValue: number;
+  /** Từ DTO `bookValueSnapshot` (BE) nếu có — có thể dùng thay tính GT còn lại client */
+  bookValueSnapshot?: number;
   assignedTo?: string;
   assignedDepartment?: string;
   assignedLocation?: string;
+  /** Snapshot từ API equipment-assignments (ưu tiên hiển thị, không phụ thuộc GET employees/departments) */
+  assignedToName?: string;
+  assignedDepartmentName?: string;
+  assignedLocationName?: string;
   supplierId: string;
   stockInCode: string;
   notes: string;
@@ -120,6 +126,9 @@ export interface Equipment {
 export interface ConsumableStock {
   id: string;
   itemId: string;
+  /** Từ GET /api/consumable-stocks (assetItem lồng) — fallback khi chưa ghép được danh mục */
+  itemCode?: string;
+  itemName?: string;
   totalQuantity: number;
   inStockQuantity: number;
   issuedQuantity: number;

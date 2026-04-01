@@ -18,38 +18,28 @@ import {
   useAssetGroups,
   useAssetItems,
   useAssetLines,
-  useAssetTypes,
 } from '@/hooks/useEntityApi';
 import { apiDelete, apiPost, apiPut } from '@/api/http';
 import { makeBizCode } from '@/api/businessCode';
 
-type TabKey = 'items' | 'types' | 'groups' | 'lines';
+type TabKey = 'items' | 'groups' | 'lines';
+
+const DEFAULT_GROUP_ASSET_TYPE = 'DEVICE';
 
 const AssetCategories = () => {
   const qc = useQueryClient();
-  const tQ = useAssetTypes();
   const gQ = useAssetGroups();
   const lQ = useAssetLines();
   const iQ = useAssetItems();
 
-  const assetTypes = useMemo(
-    () =>
-      (tQ.data ?? []).map(t => ({
-        id: String(t.id),
-        code: t.code ?? '',
-        name: t.name ?? '',
-        description: t.description ?? '',
-        active: t.active !== false,
-      })),
-    [tQ.data],
-  );
   const assetGroups = useMemo(
     () =>
       (gQ.data ?? []).map(g => ({
         id: String(g.id),
         code: g.code ?? '',
         name: g.name ?? '',
-        typeId: String(g.assetType?.id ?? ''),
+        description: (g as any).description ?? '',
+        typeId: String(g.assetType ?? ''),
         active: g.active !== false,
       })),
     [gQ.data],
@@ -60,6 +50,7 @@ const AssetCategories = () => {
         id: String(l.id),
         code: l.code ?? '',
         name: l.name ?? '',
+        description: (l as any).description ?? '',
         groupId: String(l.assetGroup?.id ?? ''),
         active: l.active !== false,
       })),
@@ -68,7 +59,6 @@ const AssetCategories = () => {
   const assetItems = useMemo(() => (iQ.data ?? []).map(mapAssetItemDto), [iQ.data]);
 
   const invalidateAll = () => {
-    void qc.invalidateQueries({ queryKey: ['api', 'asset-types'] });
     void qc.invalidateQueries({ queryKey: ['api', 'asset-groups'] });
     void qc.invalidateQueries({ queryKey: ['api', 'asset-lines'] });
     void qc.invalidateQueries({ queryKey: ['api', 'asset-items'] });
@@ -77,14 +67,16 @@ const AssetCategories = () => {
   const [tab, setTab] = useState<TabKey>('items');
   const [filters, setFilters] = useState<Record<string, string>>({});
   const [page, setPage] = useState(1);
+  const [pageGroups, setPageGroups] = useState(1);
+  const [pageLines, setPageLines] = useState(1);
   const [busy, setBusy] = useState(false);
 
   const [addOpen, setAddOpen] = useState(false);
   const [addKind, setAddKind] = useState<TabKey>('items');
-  const [typeAdd, setTypeAdd] = useState({ name: '', description: '' });
-  const [groupAdd, setGroupAdd] = useState({ typeId: '', name: '', description: '' });
+  const [groupAdd, setGroupAdd] = useState({ name: '', description: '' });
   const [lineAdd, setLineAdd] = useState({ groupId: '', name: '', description: '' });
   const [itemAdd, setItemAdd] = useState({
+    groupId: '',
     lineId: '',
     name: '',
     managementType: 'DEVICE' as 'DEVICE' | 'CONSUMABLE',
@@ -113,10 +105,10 @@ const AssetCategories = () => {
 
   const openAdd = () => {
     setAddKind(tab);
-    setTypeAdd({ name: '', description: '' });
-    setGroupAdd({ typeId: '', name: '', description: '' });
+    setGroupAdd({ name: '', description: '' });
     setLineAdd({ groupId: '', name: '', description: '' });
     setItemAdd({
+      groupId: '',
       lineId: '',
       name: '',
       managementType: 'DEVICE',
@@ -131,23 +123,15 @@ const AssetCategories = () => {
   const submitAdd = async () => {
     setBusy(true);
     try {
-      if (addKind === 'types') {
-        if (!typeAdd.name.trim()) throw new Error('Nhập tên loại');
-        await apiPost('/api/asset-types', {
-          code: makeBizCode('LT'),
-          name: typeAdd.name.trim(),
-          description: typeAdd.description.trim() || undefined,
-          active: true,
-        });
-        toast.success('Đã thêm loại tài sản');
-      } else if (addKind === 'groups') {
-        if (!groupAdd.typeId || !groupAdd.name.trim()) throw new Error('Chọn loại và nhập tên nhóm');
+      if (addKind === 'groups') {
+        if (!groupAdd.name.trim()) throw new Error('Nhập tên nhóm');
         await apiPost('/api/asset-groups', {
           code: makeBizCode('NG'),
           name: groupAdd.name.trim(),
           description: groupAdd.description.trim() || undefined,
           active: true,
-          assetType: { id: Number(groupAdd.typeId) },
+          // Backend vẫn yêu cầu assetType (non-null) nhưng nghiệp vụ UI không phân tách theo loại ở cấp Nhóm.
+          assetType: DEFAULT_GROUP_ASSET_TYPE,
         });
         toast.success('Đã thêm nhóm');
       } else if (addKind === 'lines') {
@@ -189,13 +173,11 @@ const AssetCategories = () => {
     setBusy(true);
     try {
       const path =
-        deleteCtx.kind === 'types'
-          ? `/api/asset-types/${deleteCtx.id}`
-          : deleteCtx.kind === 'groups'
-            ? `/api/asset-groups/${deleteCtx.id}`
-            : deleteCtx.kind === 'lines'
-              ? `/api/asset-lines/${deleteCtx.id}`
-              : `/api/asset-items/${deleteCtx.id}`;
+        deleteCtx.kind === 'groups'
+          ? `/api/asset-groups/${deleteCtx.id}`
+          : deleteCtx.kind === 'lines'
+            ? `/api/asset-lines/${deleteCtx.id}`
+            : `/api/asset-items/${deleteCtx.id}`;
       await apiDelete(path);
       toast.success('Đã xóa');
       setDeleteCtx(null);
@@ -210,33 +192,28 @@ const AssetCategories = () => {
   const handleEditSave = async () => {
     setBusy(true);
     try {
-      if (editKind === 'types') {
+      if (editKind === 'groups') {
         const name = editFields.find(f => f.key === 'name')?.value ?? '';
-        const desc = editFields.find(f => f.key === 'description')?.value ?? '';
-        await apiPut(`/api/asset-types/${editId}`, {
-          id: editId,
-          code: editCode,
-          name: name.trim(),
-          description: desc.trim() || undefined,
-          active: true,
-        });
-      } else if (editKind === 'groups') {
-        const name = editFields.find(f => f.key === 'name')?.value ?? '';
-        const typeId = editFields.find(f => f.key === 'typeId')?.value ?? '';
+        const description = editFields.find(f => f.key === 'description')?.value ?? '';
+        const typeId =
+          assetGroups.find(g => Number(g.id) === editId)?.typeId || DEFAULT_GROUP_ASSET_TYPE;
         await apiPut(`/api/asset-groups/${editId}`, {
           id: editId,
           code: editCode,
           name: name.trim(),
+          description: description.trim() || undefined,
           active: true,
-          assetType: { id: Number(typeId) },
+          assetType: typeId,
         });
       } else if (editKind === 'lines') {
         const name = editFields.find(f => f.key === 'name')?.value ?? '';
+        const description = editFields.find(f => f.key === 'description')?.value ?? '';
         const groupId = editFields.find(f => f.key === 'groupId')?.value ?? '';
         await apiPut(`/api/asset-lines/${editId}`, {
           id: editId,
           code: editCode,
           name: name.trim(),
+          description: description.trim() || undefined,
           active: true,
           assetGroup: { id: Number(groupId) },
         });
@@ -292,7 +269,6 @@ const AssetCategories = () => {
 
   const filteredItems = assetItems.filter(item => {
     if (filters.search && !item.name.toLowerCase().includes(filters.search.toLowerCase()) && !item.code.toLowerCase().includes(filters.search.toLowerCase())) return false;
-    if (filters.type && item.typeId !== filters.type) return false;
     if (filters.managementType && item.managementType !== filters.managementType) return false;
     return true;
   });
@@ -300,26 +276,36 @@ const AssetCategories = () => {
   const itemColumns: Column<AssetItem>[] = [
     { key: 'code', label: 'Mã', render: r => <span className="font-mono text-sm font-medium">{r.code}</span> },
     { key: 'name', label: 'Tên tài sản' },
+    {
+      key: 'line',
+      label: 'Dòng',
+      render: r => {
+        const l = assetLines.find(x => x.id === r.lineId);
+        return l ? `${l.code} — ${l.name}` : '';
+      },
+    },
     { key: 'managementType', label: 'Loại QL', render: r => (
       <span className={`status-badge ${r.managementType === 'DEVICE' ? 'bg-blue-100 text-blue-800' : 'bg-emerald-100 text-emerald-800'}`}>
         {r.managementType === 'DEVICE' ? 'Thiết bị' : 'Vật tư'}
       </span>
     )},
-    { key: 'type', label: 'Loại', render: r => assetTypes.find(t => t.id === r.typeId)?.name },
-    { key: 'group', label: 'Nhóm', render: r => assetGroups.find(g => g.id === r.groupId)?.name },
     { key: 'unit', label: 'ĐVT' },
-    { key: 'depreciation', label: 'Khấu hao', render: r => r.enableDepreciation ? '✓' : '—' },
+    { key: 'depreciation', label: 'Khấu hao', render: r => (r.managementType === 'DEVICE' ? (r.enableDepreciation ? '✓' : '—') : '') },
+    { key: 'serial', label: 'Serial', render: r => (r.managementType === 'DEVICE' ? (r.enableSerial ? '✓' : '—') : '') },
     { key: 'actions', label: 'Thao tác', render: r => (
       <ActionsCell
         onView={() => {
           setDetailTitle('Chi tiết item tài sản');
+          const line = assetLines.find(x => x.id === r.lineId);
           setDetailData({
-            Mã: r.code, Tên: r.name,
+            Mã: r.code,
+            Tên: r.name,
+            Dòng: line ? `${line.code} — ${line.name}` : '',
             'Loại QL': r.managementType === 'DEVICE' ? 'Thiết bị' : 'Vật tư',
-            Loại: assetTypes.find(t => t.id === r.typeId)?.name || '',
-            Nhóm: assetGroups.find(g => g.id === r.groupId)?.name || '',
-            ĐVT: r.unit, 'Khấu hao': r.enableDepreciation ? 'Có' : 'Không',
-            Serial: r.enableSerial ? 'Bắt buộc' : 'Không',
+            ĐVT: r.unit,
+            'Khấu hao': r.managementType === 'DEVICE' ? (r.enableDepreciation ? 'Có' : 'Không') : '',
+            Serial: r.managementType === 'DEVICE' ? (r.enableSerial ? 'Bắt buộc' : 'Không') : '',
+            'Ghi chú': (r.description ?? '').trim(),
           });
           setDetailOpen(true);
         }}
@@ -344,42 +330,18 @@ const AssetCategories = () => {
     )},
   ];
 
-  const typeColumns: Column<(typeof assetTypes)[0]>[] = [
-    { key: 'code', label: 'Mã', render: r => <span className="font-mono text-sm">{r.code}</span> },
-    { key: 'name', label: 'Tên loại' },
-    { key: 'description', label: 'Mô tả' },
-    { key: 'actions', label: 'Thao tác', render: r => (
-      <ActionsCell
-        onView={() => {
-          setDetailTitle('Chi tiết loại tài sản');
-          setDetailData({ Mã: r.code, Tên: r.name, 'Mô tả': r.description || '' });
-          setDetailOpen(true);
-        }}
-        onEdit={() => {
-          setEditKind('types');
-          setEditId(Number(r.id));
-          setEditCode(r.code);
-          setEditFields([
-            { key: 'name', label: 'Tên', value: r.name },
-            { key: 'description', label: 'Mô tả', value: r.description || '' },
-          ]);
-          setEditTitle('Sửa loại tài sản');
-          setEditOpen(true);
-        }}
-        onDelete={() => setDeleteCtx({ kind: 'types', id: Number(r.id), label: r.name })}
-      />
-    )},
-  ];
-
   const groupColumns: Column<(typeof assetGroups)[0]>[] = [
     { key: 'code', label: 'Mã', render: r => <span className="font-mono text-sm">{r.code}</span> },
     { key: 'name', label: 'Tên nhóm' },
-    { key: 'type', label: 'Loại', render: r => assetTypes.find(t => t.id === r.typeId)?.name },
     { key: 'actions', label: 'Thao tác', render: r => (
       <ActionsCell
         onView={() => {
           setDetailTitle('Chi tiết nhóm tài sản');
-          setDetailData({ Mã: r.code, Tên: r.name, Loại: assetTypes.find(t => t.id === r.typeId)?.name || '' });
+          setDetailData({
+            Mã: r.code,
+            Tên: r.name,
+            'Mô tả': r.description.trim(),
+          });
           setDetailOpen(true);
         }}
         onEdit={() => {
@@ -388,7 +350,7 @@ const AssetCategories = () => {
           setEditCode(r.code);
           setEditFields([
             { key: 'name', label: 'Tên', value: r.name },
-            { key: 'typeId', label: 'typeId', value: r.typeId },
+            { key: 'description', label: 'Mô tả', value: (r as any).description ?? '' },
           ]);
           setEditTitle('Sửa nhóm tài sản');
           setEditOpen(true);
@@ -406,7 +368,12 @@ const AssetCategories = () => {
       <ActionsCell
         onView={() => {
           setDetailTitle('Chi tiết dòng tài sản');
-          setDetailData({ Mã: r.code, Tên: r.name, Nhóm: assetGroups.find(g => g.id === r.groupId)?.name || '' });
+          setDetailData({
+            Mã: r.code,
+            Tên: r.name,
+            Nhóm: assetGroups.find(g => g.id === r.groupId)?.name || '',
+            'Mô tả': r.description.trim(),
+          });
           setDetailOpen(true);
         }}
         onEdit={() => {
@@ -416,6 +383,7 @@ const AssetCategories = () => {
           setEditFields([
             { key: 'name', label: 'Tên', value: r.name },
             { key: 'groupId', label: 'groupId', value: r.groupId },
+            { key: 'description', label: 'Mô tả', value: (r as any).description ?? '' },
           ]);
           setEditTitle('Sửa dòng tài sản');
           setEditOpen(true);
@@ -427,30 +395,13 @@ const AssetCategories = () => {
 
   const filterFields: FilterField[] = [
     { key: 'search', label: 'Tìm kiếm', type: 'text', placeholder: 'Mã, tên tài sản...' },
-    { key: 'type', label: 'Loại', type: 'select', options: assetTypes.map(t => ({ value: t.id, label: t.name })) },
     { key: 'managementType', label: 'Quản lý', type: 'select', options: [{ value: 'DEVICE', label: 'Thiết bị' }, { value: 'CONSUMABLE', label: 'Vật tư' }] },
   ];
 
   const addFormBody = () => {
-    if (addKind === 'types') {
-      return (
-        <div className="space-y-4">
-          <div><Label>Tên loại <span className="text-destructive">*</span></Label><Input value={typeAdd.name} onChange={e => setTypeAdd(p => ({ ...p, name: e.target.value }))} /></div>
-          <div><Label>Mô tả</Label><Input value={typeAdd.description} onChange={e => setTypeAdd(p => ({ ...p, description: e.target.value }))} /></div>
-          <p className="text-xs text-muted-foreground">Mã loại sinh tự động (LT + 6 số).</p>
-        </div>
-      );
-    }
     if (addKind === 'groups') {
       return (
         <div className="space-y-4">
-          <div>
-            <Label>Loại tài sản <span className="text-destructive">*</span></Label>
-            <Select value={groupAdd.typeId} onValueChange={v => setGroupAdd(p => ({ ...p, typeId: v }))}>
-              <SelectTrigger><SelectValue placeholder="Chọn loại" /></SelectTrigger>
-              <SelectContent>{assetTypes.map(t => <SelectItem key={t.id} value={t.id}>{t.name}</SelectItem>)}</SelectContent>
-            </Select>
-          </div>
           <div><Label>Tên nhóm <span className="text-destructive">*</span></Label><Input value={groupAdd.name} onChange={e => setGroupAdd(p => ({ ...p, name: e.target.value }))} /></div>
           <div><Label>Mô tả</Label><Input value={groupAdd.description} onChange={e => setGroupAdd(p => ({ ...p, description: e.target.value }))} /></div>
         </div>
@@ -471,13 +422,32 @@ const AssetCategories = () => {
         </div>
       );
     }
+    const groupsForType = assetGroups;
+    const linesForGroup = assetLines.filter(l => !itemAdd.groupId || l.groupId === itemAdd.groupId);
+
     return (
       <div className="space-y-4">
+        <div>
+          <Label>Nhóm tài sản <span className="text-destructive">*</span></Label>
+          <Select
+            value={itemAdd.groupId}
+            onValueChange={v =>
+              setItemAdd(p => ({
+                ...p,
+                groupId: v,
+                lineId: '',
+              }))
+            }
+          >
+            <SelectTrigger><SelectValue placeholder="Chọn nhóm" /></SelectTrigger>
+            <SelectContent>{groupsForType.map(g => <SelectItem key={g.id} value={g.id}>{g.name}</SelectItem>)}</SelectContent>
+          </Select>
+        </div>
         <div>
           <Label>Dòng tài sản <span className="text-destructive">*</span></Label>
           <Select value={itemAdd.lineId} onValueChange={v => setItemAdd(p => ({ ...p, lineId: v }))}>
             <SelectTrigger><SelectValue placeholder="Chọn dòng" /></SelectTrigger>
-            <SelectContent>{assetLines.map(l => <SelectItem key={l.id} value={l.id}>{l.code} — {l.name}</SelectItem>)}</SelectContent>
+            <SelectContent>{linesForGroup.map(l => <SelectItem key={l.id} value={l.id}>{l.code} — {l.name}</SelectItem>)}</SelectContent>
           </Select>
         </div>
         <div><Label>Tên item <span className="text-destructive">*</span></Label><Input value={itemAdd.name} onChange={e => setItemAdd(p => ({ ...p, name: e.target.value }))} /></div>
@@ -522,10 +492,18 @@ const AssetCategories = () => {
         <Button onClick={openAdd} disabled={busy}><Plus className="h-4 w-4 mr-1" /> Thêm mới</Button>
       </div>
 
-      <Tabs value={tab} onValueChange={v => setTab(v as TabKey)}>
+      <Tabs
+        value={tab}
+        onValueChange={v => {
+          setTab(v as TabKey);
+          // reset trang khi chuyển tab
+          setPage(1);
+          setPageGroups(1);
+          setPageLines(1);
+        }}
+      >
         <TabsList>
           <TabsTrigger value="items">Item tài sản</TabsTrigger>
-          <TabsTrigger value="types">Loại</TabsTrigger>
           <TabsTrigger value="groups">Nhóm</TabsTrigger>
           <TabsTrigger value="lines">Dòng</TabsTrigger>
         </TabsList>
@@ -534,21 +512,28 @@ const AssetCategories = () => {
           <FilterBar fields={filterFields} values={filters} onChange={(k, v) => setFilters(p => ({ ...p, [k]: v }))} onReset={() => setFilters({})} />
           <DataTable columns={itemColumns} data={filteredItems} currentPage={page} onPageChange={setPage} />
         </TabsContent>
-        <TabsContent value="types" className="mt-4">
-          <DataTable columns={typeColumns} data={assetTypes} />
-        </TabsContent>
-        <TabsContent value="groups" className="mt-4">
-          <DataTable columns={groupColumns} data={assetGroups} />
+        <TabsContent value="groups" className="mt4">
+          <DataTable
+            columns={groupColumns}
+            data={assetGroups}
+            currentPage={pageGroups}
+            onPageChange={setPageGroups}
+          />
         </TabsContent>
         <TabsContent value="lines" className="mt-4">
-          <DataTable columns={lineColumns} data={assetLines} />
+          <DataTable
+            columns={lineColumns}
+            data={assetLines}
+            currentPage={pageLines}
+            onPageChange={setPageLines}
+          />
         </TabsContent>
       </Tabs>
 
       <EntityFormModal
         open={addOpen}
         onClose={() => setAddOpen(false)}
-        title={addKind === 'items' ? 'Thêm item' : addKind === 'types' ? 'Thêm loại' : addKind === 'groups' ? 'Thêm nhóm' : 'Thêm dòng'}
+        title={addKind === 'items' ? 'Thêm item' : addKind === 'groups' ? 'Thêm nhóm' : 'Thêm dòng'}
         onSubmit={() => void submitAdd()}
         submitLabel={busy ? 'Đang lưu…' : 'Lưu'}
       >
@@ -571,15 +556,6 @@ const AssetCategories = () => {
 
       <EntityFormModal open={editOpen} onClose={() => setEditOpen(false)} title={editTitle} onSubmit={() => void handleEditSave()} submitLabel={busy ? 'Đang lưu…' : 'Lưu'}>
         <div className="space-y-4">
-          {editKind === 'groups' && (
-            <div>
-              <Label>Loại tài sản</Label>
-              <Select value={editFields.find(f => f.key === 'typeId')?.value} onValueChange={v => setEditFields(prev => prev.map(x => x.key === 'typeId' ? { ...x, value: v } : x))}>
-                <SelectTrigger><SelectValue /></SelectTrigger>
-                <SelectContent>{assetTypes.map(t => <SelectItem key={t.id} value={t.id}>{t.name}</SelectItem>)}</SelectContent>
-              </Select>
-            </div>
-          )}
           {editKind === 'lines' && (
             <div>
               <Label>Nhóm</Label>
@@ -613,7 +589,7 @@ const AssetCategories = () => {
               )}
             </>
           )}
-          {editFields.filter(f => !['typeId', 'groupId'].includes(f.key)).map(f => (
+          {editFields.filter(f => !['groupId'].includes(f.key)).map(f => (
             <div key={f.key} className="space-y-2">
               <Label>{f.label}</Label>
               <Input value={f.value} onChange={e => setEditFields(prev => prev.map(p => p.key === f.key ? { ...p, value: e.target.value } : p))} />

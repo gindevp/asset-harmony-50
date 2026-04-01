@@ -1,10 +1,12 @@
-/* Loose shapes matching Spring/Jackson JSON (camelCase). */
-
-/** Spring Security authority name, e.g. ROLE_ADMIN */
-export type AuthorityDto = { name?: string };
+/**
+ * Types for API responses (DTOs).
+ *
+ * Lưu ý: Backend là Spring/JHipster, nhiều endpoint có thể trả mảng thuần hoặc Page `{ content: [] }`.
+ * Các field đều optional để tương thích dữ liệu seed/phase 1.
+ */
 
 export type DepartmentDto = { id?: number; code?: string; name?: string; active?: boolean };
-export type LocationDto = { id?: number; code?: string; name?: string; address?: string; active?: boolean };
+export type LocationDto = { id?: number; code?: string; name?: string; description?: string; active?: boolean };
 export type EmployeeDto = {
   id?: number;
   code?: string;
@@ -14,6 +16,7 @@ export type EmployeeDto = {
   department?: DepartmentDto;
   location?: LocationDto;
 };
+
 export type SupplierDto = {
   id?: number;
   code?: string;
@@ -22,11 +25,35 @@ export type SupplierDto = {
   phone?: string;
   email?: string;
   address?: string;
+  /** Người liên hệ (phase 1) */
+  contactPerson?: string;
+  /** ISO-8601 từ BE (Instant) */
+  createdDate?: string;
   active?: boolean;
 };
-export type AssetTypeDto = { id?: number; code?: string; name?: string; description?: string; active?: boolean };
-export type AssetGroupDto = { id?: number; code?: string; name?: string; active?: boolean; assetType?: AssetTypeDto };
-export type AssetLineDto = { id?: number; code?: string; name?: string; active?: boolean; assetGroup?: AssetGroupDto };
+
+/** Loại tài sản theo nghiệp vụ Phase 1 */
+export type Asssettype = 'DEVICE' | 'CONSUMABLE';
+
+export type AssetGroupDto = {
+  id?: number;
+  code?: string;
+  name?: string;
+  description?: string;
+  /** Enum/field ở BE (đã bỏ bảng AssetType) */
+  assetType?: string;
+  active?: boolean;
+};
+
+export type AssetLineDto = {
+  id?: number;
+  code?: string;
+  name?: string;
+  description?: string;
+  active?: boolean;
+  assetGroup?: AssetGroupDto;
+};
+
 export type AssetItemDto = {
   id?: number;
   code?: string;
@@ -39,6 +66,7 @@ export type AssetItemDto = {
   active?: boolean;
   assetLine?: AssetLineDto;
 };
+
 export type EquipmentDto = {
   id?: number;
   equipmentCode?: string;
@@ -55,6 +83,7 @@ export type EquipmentDto = {
   assetItem?: AssetItemDto;
   supplier?: SupplierDto;
 };
+
 export type ConsumableStockDto = {
   id?: number;
   quantityOnHand?: number;
@@ -62,6 +91,7 @@ export type ConsumableStockDto = {
   note?: string;
   assetItem?: AssetItemDto;
 };
+
 export type StockReceiptDto = {
   id?: number;
   code?: string;
@@ -71,46 +101,43 @@ export type StockReceiptDto = {
   note?: string;
 };
 
-/** Lịch sử thao tác trên phiếu nhập/xuất (API GET .../events) */
-export type StockDocumentEventDto = {
-  id?: number;
-  occurredAt?: string;
-  login?: string;
-  docType?: string;
-  docId?: number;
-  action?: string;
-  summary?: string;
-  detail?: string | null;
-};
 export type StockReceiptLineDto = {
   id?: number;
   lineNo?: number;
+  lineType?: string;
   quantity?: number;
-  unitPrice?: string | number;
+  unitPrice?: number;
   note?: string;
   receipt?: StockReceiptDto;
   assetItem?: AssetItemDto;
+  equipment?: EquipmentDto;
+  supplier?: SupplierDto;
 };
+
 export type StockIssueDto = {
   id?: number;
   code?: string;
   issueDate?: string;
   status?: string;
-  assigneeType?: string;
   note?: string;
+  /** EMPLOYEE | DEPARTMENT | LOCATION | COMPANY */
+  assigneeType?: string;
   employee?: EmployeeDto;
   department?: DepartmentDto;
   location?: LocationDto;
 };
+
 export type StockIssueLineDto = {
   id?: number;
   lineNo?: number;
+  lineType?: string;
   quantity?: number;
   note?: string;
   issue?: StockIssueDto;
   assetItem?: AssetItemDto;
   equipment?: EquipmentDto;
 };
+
 export type AllocationRequestDto = {
   id?: number;
   code?: string;
@@ -127,6 +154,7 @@ export type AllocationRequestDto = {
   stockIssueId?: number;
   stockIssueCode?: string;
 };
+
 export type AllocationRequestLineDto = {
   id?: number;
   lineNo?: number;
@@ -137,6 +165,7 @@ export type AllocationRequestLineDto = {
   assetItem?: AssetItemDto;
   equipment?: EquipmentDto;
 };
+
 export type RepairRequestDto = {
   id?: number;
   code?: string;
@@ -149,6 +178,46 @@ export type RepairRequestDto = {
   repairOutcome?: string;
   requester?: EmployeeDto;
   equipment?: EquipmentDto;
+};
+
+export type ReturnRequestDto = {
+  id?: number;
+  code?: string;
+  requestDate?: string;
+  reason?: string;
+  status?: string;
+  requester?: EmployeeDto;
+};
+
+export type ReturnRequestLineDto = {
+  id?: number;
+  lineNo?: number;
+  lineType?: string;
+  quantity?: number;
+  selected?: boolean;
+  note?: string;
+  /** TO_STOCK | TO_REPAIR | BROKEN | LOST */
+  disposition?: string;
+  request?: ReturnRequestDto;
+  assetItem?: AssetItemDto;
+  equipment?: EquipmentDto;
+};
+
+/**
+ * GET /api/equipment-assignments — gán thiết bị (người / phòng ban / vị trí).
+ * FE ghép với {@link EquipmentDto} theo `equipmentId` hoặc `equipment.id` / `equipmentCode`.
+ */
+export type EquipmentAssignmentDto = {
+  id?: number;
+  /** FK thiết bị (BE map từ equipment.id) — dùng ghép danh sách, không phụ thuộc object equipment lồng nhau */
+  equipmentId?: number;
+  assignedDate?: string;
+  returnedDate?: string;
+  note?: string;
+  equipment?: EquipmentDto;
+  employee?: EmployeeDto;
+  department?: DepartmentDto;
+  location?: LocationDto;
 };
 
 export type AdminUserDto = {
@@ -173,36 +242,21 @@ export type AppAuditLogDto = {
   uriPath?: string;
   responseStatus?: number;
   /** Sự kiện nghiệp vụ (khi httpMethod = BIZ) */
-  detail?: string | null;
-};
-export type ReturnRequestDto = {
-  id?: number;
-  code?: string;
-  requestDate?: string;
-  note?: string;
-  status?: string;
+  bizEventType?: string;
+  bizEntityType?: string;
+  bizEntityId?: string;
+  message?: string;
   requester?: EmployeeDto;
 };
-export type ReturnRequestLineDto = {
+
+export type AuthorityDto = { name?: string; description?: string };
+
+/** Lịch sử thao tác trên phiếu nhập/xuất (API GET .../events) */
+export type StockDocumentEventDto = {
   id?: number;
-  lineNo?: number;
-  lineType?: string;
-  quantity?: number;
-  selected?: boolean;
-  note?: string;
-  /** TO_STOCK | TO_REPAIR | BROKEN | LOST */
-  disposition?: string;
-  request?: ReturnRequestDto;
-  assetItem?: AssetItemDto;
-  equipment?: EquipmentDto;
+  occurredAt?: string;
+  actor?: string;
+  eventType?: string;
+  message?: string;
 };
-export type EquipmentAssignmentDto = {
-  id?: number;
-  assignedDate?: string;
-  returnedDate?: string;
-  note?: string;
-  equipment?: EquipmentDto;
-  employee?: EmployeeDto;
-  department?: DepartmentDto;
-  location?: LocationDto;
-};
+

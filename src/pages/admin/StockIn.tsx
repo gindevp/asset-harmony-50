@@ -58,6 +58,8 @@ interface DeviceLine {
   itemId: string;
   quantity: number;
   unitPrice: number;
+  depreciationMonths: number;
+  salvageValue: number;
   serials: { equipmentCode: string; serial: string }[];
 }
 
@@ -222,7 +224,18 @@ const StockInPage = () => {
   };
 
   const addDeviceLine = () => {
-    setDeviceLines(prev => [...prev, { id: `dl-${Date.now()}`, itemId: '', quantity: 1, unitPrice: 0, serials: [] }]);
+    setDeviceLines(prev => [
+      ...prev,
+      {
+        id: `dl-${Date.now()}`,
+        itemId: '',
+        quantity: 1,
+        unitPrice: 0,
+        depreciationMonths: 60,
+        salvageValue: 0,
+        serials: [],
+      },
+    ]);
   };
 
   const updateDeviceLine = (id: string, field: string, value: any) => {
@@ -294,8 +307,24 @@ const StockInPage = () => {
     if (emptyItem) { toast.error('Vui lòng chọn tài sản cho tất cả các dòng'); return; }
 
     if (assetType === 'DEVICE') {
-      const emptySerials = deviceLines.some(l => l.serials.some(s => !s.serial));
-      if (emptySerials) { toast.error('Vui lòng nhập đầy đủ serial cho thiết bị'); return; }
+      const emptySerials = deviceLines.some(l => {
+        const item = assetItems.find(i => i.id === l.itemId);
+        if (!item?.enableSerial) return false;
+        return l.serials.some(s => !s.serial || !String(s.serial).trim());
+      });
+      if (emptySerials) {
+        toast.error('Vui lòng nhập đầy đủ serial cho các thiết bị yêu cầu theo dõi serial');
+        return;
+      }
+      const invalidDep = deviceLines.some(l => {
+        const item = assetItems.find(i => i.id === l.itemId);
+        if (!item?.enableDepreciation) return false;
+        return !Number.isFinite(l.depreciationMonths) || l.depreciationMonths <= 0;
+      });
+      if (invalidDep) {
+        toast.error('Nhập số tháng khấu hao > 0 cho các thiết bị có khấu hao');
+        return;
+      }
     }
 
     const apiSource = FE_SOURCE_TO_API[source];
@@ -382,14 +411,18 @@ const StockInPage = () => {
         }
         await apiPost('/api/equipment', {
           equipmentCode: line.equipmentCode,
-          serial: line.serial,
+          ...(line.serial?.trim() ? { serial: line.serial } : {}),
           ...(line.modelName?.trim() ? { modelName: line.modelName.trim() } : {}),
           ...(line.brandName?.trim() ? { brandName: line.brandName.trim() } : {}),
           status: 'IN_STOCK',
-          purchasePrice: line.unitPrice,
-          capitalizationDate: receiptDate,
-          depreciationMonths: item.enableDepreciation ? 60 : 0,
-          salvageValue: 0,
+          ...(item.enableDepreciation
+            ? {
+                purchasePrice: line.unitPrice,
+                capitalizationDate: receiptDate,
+                depreciationMonths: Number(line.depreciationMonths),
+                salvageValue: Number(line.salvageValue ?? 0),
+              }
+            : {}),
           assetItem: { id: itemNum },
           ...(supplierNum ? { supplier: { id: supplierNum } } : {}),
         });
@@ -569,6 +602,31 @@ const StockInPage = () => {
                               <Input type="number" min={0} value={line.unitPrice} onChange={e => updateDeviceLine(line.id, 'unitPrice', Number(e.target.value))} />
                             </div>
                           </div>
+                          {selectedItem?.enableDepreciation && (
+                            <div className="grid grid-cols-3 gap-3">
+                              <div className="space-y-1">
+                                <Label className="text-xs">Số tháng khấu hao <span className="text-destructive">*</span></Label>
+                                <Input
+                                  type="number"
+                                  min={1}
+                                  value={line.depreciationMonths}
+                                  onChange={e => updateDeviceLine(line.id, 'depreciationMonths', Number(e.target.value))}
+                                />
+                              </div>
+                              <div className="space-y-1">
+                                <Label className="text-xs">Giá trị thu hồi cuối kỳ</Label>
+                                <Input
+                                  type="number"
+                                  min={0}
+                                  value={line.salvageValue}
+                                  onChange={e => updateDeviceLine(line.id, 'salvageValue', Number(e.target.value))}
+                                />
+                              </div>
+                              <div className="text-xs text-muted-foreground flex items-end">
+                                Tính giá trị còn lại theo khấu hao đường thẳng.
+                              </div>
+                            </div>
+                          )}
                           {line.quantity > 0 && line.itemId && (
                             <div className="space-y-2">
                               <Label className="text-xs text-muted-foreground">Danh sách thiết bị ({line.serials.length} chiếc)</Label>
@@ -578,7 +636,9 @@ const StockInPage = () => {
                                     <tr className="bg-muted/50 border-b">
                                       <th className="text-left px-3 py-1.5 font-medium text-xs w-12">#</th>
                                       <th className="text-left px-3 py-1.5 font-medium text-xs">Mã TB (tự sinh)</th>
-                                      <th className="text-left px-3 py-1.5 font-medium text-xs">Serial <span className="text-destructive">*</span></th>
+                                      <th className="text-left px-3 py-1.5 font-medium text-xs">
+                                        Serial {selectedItem?.enableSerial ? <span className="text-destructive">*</span> : null}
+                                      </th>
                                     </tr>
                                   </thead>
                                   <tbody>

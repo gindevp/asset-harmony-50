@@ -31,13 +31,34 @@ function num(v: string | number | undefined | null): number {
   return typeof v === 'number' ? v : parseFloat(v) || 0;
 }
 
+/**
+ * Gộp 1 bản ghi thiết bị (EquipmentDto) + tối đa 1 phiếu gán đang hiệu lực (EquipmentAssignmentDto).
+ * Người dùng / phòng ban / vị trí chỉ đến từ `assignment`, không có trong GET /api/equipment.
+ */
 export function mapEquipmentDto(
   e: EquipmentDto,
   assignment?: EquipmentAssignmentDto | null,
 ): Equipment {
   const empId = assignment?.employee?.id != null ? String(assignment.employee.id) : undefined;
-  const deptId = assignment?.department?.id != null ? String(assignment.department.id) : undefined;
-  const locId = assignment?.location?.id != null ? String(assignment.location.id) : undefined;
+  /** Phòng ban / vị trí trên phiếu gán; nếu chỉ có nhân viên (xuất kho theo người) thì lấy từ bản ghi nhân viên trong cùng JSON */
+  const deptId =
+    assignment?.department?.id != null
+      ? String(assignment.department.id)
+      : assignment?.employee?.department?.id != null
+        ? String(assignment.employee.department.id)
+        : undefined;
+  const locId =
+    assignment?.location?.id != null
+      ? String(assignment.location.id)
+      : assignment?.employee?.location?.id != null
+        ? String(assignment.employee.location.id)
+        : undefined;
+  const deptName =
+    assignment?.department?.name ??
+    assignment?.employee?.department?.name ??
+    undefined;
+  const locName =
+    assignment?.location?.name ?? assignment?.employee?.location?.name ?? undefined;
   return {
     id: String(e.id),
     equipmentCode: e.equipmentCode ?? '',
@@ -50,9 +71,19 @@ export function mapEquipmentDto(
     capitalizedDate: e.capitalizationDate ?? '',
     depreciationMonths: e.depreciationMonths ?? 0,
     salvageValue: num(e.salvageValue),
+    bookValueSnapshot:
+      e.bookValueSnapshot !== undefined && e.bookValueSnapshot !== null
+        ? num(e.bookValueSnapshot)
+        : undefined,
     assignedTo: empId,
     assignedDepartment: deptId,
     assignedLocation: locId,
+    assignedToName:
+      assignment?.employee?.fullName?.trim() ||
+      assignment?.employee?.code?.trim() ||
+      undefined,
+    assignedDepartmentName: deptName,
+    assignedLocationName: locName,
     supplierId: String(e.supplier?.id ?? ''),
     stockInCode: '',
     notes: e.conditionNote ?? '',
@@ -63,9 +94,12 @@ export function mapEquipmentDto(
 export function mapConsumableStockDto(cs: ConsumableStockDto): ConsumableStock {
   const onHand = cs.quantityOnHand ?? 0;
   const issued = cs.quantityIssued ?? 0;
+  const itemId = cs.assetItem?.id != null ? String(cs.assetItem.id) : '';
   return {
     id: String(cs.id),
-    itemId: String(cs.assetItem?.id ?? ''),
+    itemId,
+    itemCode: cs.assetItem?.code?.trim() || undefined,
+    itemName: cs.assetItem?.name?.trim() || undefined,
     totalQuantity: onHand + issued,
     inStockQuantity: onHand,
     issuedQuantity: issued,

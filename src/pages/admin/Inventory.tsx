@@ -9,7 +9,6 @@ import {
   useAssetGroups,
   useAssetItems,
   useAssetLines,
-  useAssetTypes,
   useConsumableStocksView,
   useEnrichedEquipmentList,
 } from '@/hooks/useEntityApi';
@@ -29,30 +28,20 @@ interface InventoryRow {
 }
 
 const Inventory = () => {
-  const tQ = useAssetTypes();
   const gQ = useAssetGroups();
   const lQ = useAssetLines();
   const iQ = useAssetItems();
   const eqQ = useEnrichedEquipmentList();
   const csQ = useConsumableStocksView();
 
-  const assetTypes = useMemo(
-    () =>
-      (tQ.data ?? []).map(t => ({
-        id: String(t.id),
-        code: t.code ?? '',
-        name: t.name ?? '',
-        description: t.description ?? '',
-      })),
-    [tQ.data],
-  );
+  const assetTypeLabels: Record<string, string> = { DEVICE: 'Thiết bị', CONSUMABLE: 'Vật tư' };
   const assetGroups = useMemo(
     () =>
       (gQ.data ?? []).map(g => ({
         id: String(g.id),
         code: g.code ?? '',
         name: g.name ?? '',
-        typeId: String(g.assetType?.id ?? ''),
+        typeId: String(g.assetType ?? ''),
       })),
     [gQ.data],
   );
@@ -111,10 +100,6 @@ const Inventory = () => {
         const s = filters.itemName.toLowerCase();
         if (!row.name.toLowerCase().includes(s) && !row.code.toLowerCase().includes(s)) return false;
       }
-      if (filters.type) {
-        const item = assetItems.find(i => i.id === row.id);
-        if (item?.typeId !== filters.type) return false;
-      }
       if (filters.group) {
         const item = assetItems.find(i => i.id === row.id);
         if (item?.groupId !== filters.group) return false;
@@ -132,9 +117,8 @@ const Inventory = () => {
 
   // Dependent filter options
   const groupOptions = useMemo(() => {
-    if (filters.type) return assetGroups.filter(g => g.typeId === filters.type);
     return assetGroups;
-  }, [filters.type, assetGroups]);
+  }, [assetGroups]);
 
   const lineOptions = useMemo(() => {
     if (filters.group) return assetLines.filter(l => l.groupId === filters.group);
@@ -146,7 +130,6 @@ const Inventory = () => {
   const columns: Column<InventoryRow>[] = [
     { key: 'code', label: 'Mã hàng', render: r => <span className="font-mono text-sm">{r.code}</span> },
     { key: 'name', label: 'Tên hàng', render: r => <span className="font-medium">{r.name}</span> },
-    { key: 'groupName', label: 'Nhóm hàng hóa' },
     { key: 'unit', label: 'ĐVT', className: 'text-center' },
     { key: 'inStock', label: 'SL còn trong kho', className: 'text-center', render: r => <span className="font-semibold text-green-700">{r.inStock}</span> },
     { key: 'broken', label: 'SL hỏng', className: 'text-center', render: r => <span className={r.broken > 0 ? 'font-semibold text-red-600' : ''}>{r.broken}</span> },
@@ -155,9 +138,9 @@ const Inventory = () => {
   ];
 
   const handleExport = () => {
-    const headers = ['STT', 'Tên hàng', 'Mã hàng', 'Nhóm hàng hóa', 'ĐVT', 'SL còn trong kho', 'SL hỏng', 'SL tốt', 'Thành tiền'];
+    const headers = ['STT', 'Tên hàng', 'Mã hàng', 'ĐVT', 'SL còn trong kho', 'SL hỏng', 'SL tốt', 'Thành tiền'];
     const rows = filtered.map((r, i) => [
-      i + 1, r.name, r.code, r.groupName, r.unit, r.inStock, r.broken, r.total - r.broken,
+      i + 1, r.name, r.code, r.unit, r.inStock, r.broken, r.total - r.broken,
       r.totalValue > 0 ? r.totalValue : '',
     ]);
     const csv = [headers.join(','), ...rows.map(r => r.join(','))].join('\n');
@@ -205,16 +188,7 @@ const Inventory = () => {
           </div>
 
           {/* Loại tài sản */}
-          <div className="space-y-1">
-            <label className="text-sm text-muted-foreground">Loại tài sản:</label>
-            <Select value={filters.type || 'all'} onValueChange={v => setFilters(p => ({ ...p, type: v === 'all' ? '' : v, group: '', line: '' }))}>
-              <SelectTrigger className="h-9"><SelectValue placeholder="Tất cả" /></SelectTrigger>
-              <SelectContent>
-                <SelectItem value="all">Tất cả</SelectItem>
-                {assetTypes.map(t => <SelectItem key={t.id} value={t.id}>{t.name}</SelectItem>)}
-              </SelectContent>
-            </Select>
-          </div>
+          {/* (Đã bỏ lọc Loại tài sản theo yêu cầu) */}
 
           {showAdvanced && (
             <>

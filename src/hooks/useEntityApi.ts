@@ -1,3 +1,4 @@
+import { useMemo } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { apiGet, PAGE_ALL } from '@/api/http';
 import type {
@@ -6,7 +7,6 @@ import type {
   AssetGroupDto,
   AssetItemDto,
   AssetLineDto,
-  AssetTypeDto,
   ConsumableStockDto,
   DepartmentDto,
   EmployeeDto,
@@ -32,6 +32,7 @@ import {
   mapRepairDto,
 } from '@/api/viewModels';
 import type { AssetItem } from '@/data/mockData';
+import { pickAssignmentForEquipment } from '@/utils/equipmentJoin';
 
 export function useDepartments() {
   return useQuery({
@@ -61,12 +62,7 @@ export function useSuppliers() {
   });
 }
 
-export function useAssetTypes() {
-  return useQuery({
-    queryKey: ['api', 'asset-types'],
-    queryFn: () => apiGet<AssetTypeDto[]>(`/api/asset-types?${PAGE_ALL}`),
-  });
-}
+// AssetType table has been removed; use enum Asssettype instead.
 
 export function useAssetGroups() {
   return useQuery({
@@ -85,7 +81,10 @@ export function useAssetLines() {
 export function useAssetItems() {
   return useQuery({
     queryKey: ['api', 'asset-items'],
-    queryFn: () => apiGet<AssetItemDto[]>(`/api/asset-items?${PAGE_ALL}`),
+    queryFn: async () => {
+      const raw = await apiGet<unknown>(`/api/asset-items?${PAGE_ALL}`);
+      return normalizeListResponse<AssetItemDto>(raw);
+    },
   });
 }
 
@@ -93,7 +92,7 @@ export function useAssetItems() {
 export function mapAssetItemDto(i: AssetItemDto): AssetItem {
   const lineId = String(i.assetLine?.id ?? '');
   const groupId = String(i.assetLine?.assetGroup?.id ?? '');
-  const typeId = String(i.assetLine?.assetGroup?.assetType?.id ?? '');
+  const typeId = String(i.assetLine?.assetGroup?.assetType ?? '');
   return {
     id: String(i.id),
     code: i.code ?? '',
@@ -109,36 +108,55 @@ export function mapAssetItemDto(i: AssetItemDto): AssetItem {
   };
 }
 
+/** Một số proxy/BE có thể trả Spring Page `{ content: [] }` thay vì mảng thuần — tránh .map lỗi / list trống sai. */
+export function normalizeListResponse<T>(raw: unknown): T[] {
+  if (Array.isArray(raw)) return raw;
+  if (raw && typeof raw === 'object' && Array.isArray((raw as { content?: unknown }).content)) {
+    return (raw as { content: T[] }).content;
+  }
+  if (raw != null && typeof raw !== 'object') {
+    console.warn('[useEntityApi] Expected JSON array for list API, got', typeof raw);
+  }
+  return [];
+}
+
 export function useEquipment() {
   return useQuery({
     queryKey: ['api', 'equipment'],
-    queryFn: () => apiGet<EquipmentDto[]>(`/api/equipment?${PAGE_ALL}`),
+    queryFn: async () => {
+      const raw = await apiGet<unknown>(`/api/equipment?${PAGE_ALL}`);
+      return normalizeListResponse<EquipmentDto>(raw);
+    },
   });
 }
 
 export function useEquipmentAssignments() {
   return useQuery({
     queryKey: ['api', 'equipment-assignments'],
-    queryFn: () => apiGet<EquipmentAssignmentDto[]>(`/api/equipment-assignments?${PAGE_ALL}`),
+    /** BE trả toàn bộ list, không phân trang — tránh tham số page/size thừa */
+    queryFn: async () => {
+      const raw = await apiGet<unknown>('/api/equipment-assignments');
+      return normalizeListResponse<EquipmentAssignmentDto>(raw);
+    },
   });
 }
 
-/** Thiết bị + gán hiện tại (equipment-assignments chưa trả). */
+/** Thiết bị + gán hiện tại (equipment-assignments chưa trả — ưu tiên bản ghi id lớn nhất).
+ *  Ghép theo equipmentId (FK phẳng từ BE) hoặc equipmentCode — tránh lỗi khi object equipment lồng nhau thiếu id.
+ *  Nếu assignments lỗi/chưa có, vẫn hiển thị thiết bị (chưa gán). */
 export function useEnrichedEquipmentList() {
   const qe = useEquipment();
   const qa = useEquipmentAssignments();
-  const list =
-    qe.data && qa.data
-      ? qe.data.map(e => {
-          const a = qa.data!.find(x => !x.returnedDate && x.equipment?.id === e.id);
-          return mapEquipmentDto(e, a);
-        })
-      : undefined;
+  const list = useMemo(() => {
+    if (qe.data == null) return undefined;
+    const assigns = qa.data ?? [];
+    return qe.data.map(e => mapEquipmentDto(e, pickAssignmentForEquipment(e, assigns)));
+  }, [qe.data, qa.data]);
   return {
     data: list,
-    isLoading: qe.isLoading || qa.isLoading,
-    isError: qe.isError || qa.isError,
-    error: qe.error ?? qa.error,
+    isLoading: qe.isLoading,
+    isError: qe.isError,
+    error: qe.error,
     refetch: () => {
       void qe.refetch();
       void qa.refetch();
@@ -150,7 +168,8 @@ export function useConsumableStocksView() {
   return useQuery({
     queryKey: ['api', 'consumable-stocks-view'],
     queryFn: async () => {
-      const rows = await apiGet<ConsumableStockDto[]>(`/api/consumable-stocks?${PAGE_ALL}`);
+      const raw = await apiGet<unknown>(`/api/consumable-stocks?${PAGE_ALL}`);
+      const rows = normalizeListResponse<ConsumableStockDto>(raw);
       return rows.map(mapConsumableStockDto);
     },
   });

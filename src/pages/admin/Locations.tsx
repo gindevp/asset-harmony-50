@@ -24,7 +24,8 @@ const Locations = () => {
         id: String(l.id),
         code: l.code ?? '',
         name: l.name ?? '',
-        address: l.address ?? '',
+        // BE dùng field `description` cho "địa chỉ / ghi chú" của vị trí
+        address: l.description ?? '',
         createdAt: '',
       })),
     [locQ.data],
@@ -50,7 +51,7 @@ const Locations = () => {
       await apiPost<LocationDto>('/api/locations', {
         code: makeBizCode('VT'),
         name: addForm.name.trim(),
-        address: addForm.address.trim() || undefined,
+        description: addForm.address.trim() || undefined,
         active: true,
       });
       toast.success('Đã thêm vị trí');
@@ -77,7 +78,7 @@ const Locations = () => {
         id: Number(editTarget.id),
         code: editTarget.code,
         name: editForm.name.trim(),
-        address: editForm.address.trim() || undefined,
+        description: editForm.address.trim() || undefined,
         active: true,
       });
       toast.success('Đã cập nhật');

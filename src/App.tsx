@@ -1,7 +1,7 @@
 import { useEffect } from "react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { BrowserRouter, Route, Routes } from "react-router-dom";
-import { getStoredToken } from "@/api/http";
+import { ApiError, getStoredToken } from "@/api/http";
 import { fetchAndStoreAccountContext } from "@/api/account";
 import { Toaster as Sonner } from "@/components/ui/sonner";
 import { Toaster } from "@/components/ui/toaster";
@@ -31,7 +31,16 @@ import EmployeeRequests from "./pages/employee/EmployeeRequests";
 import MyAssets from "./pages/employee/MyAssets";
 import { Navigate } from "react-router-dom";
 
-const queryClient = new QueryClient();
+const queryClient = new QueryClient({
+  defaultOptions: {
+    queries: {
+      retry: (failureCount, error) => {
+        if (error instanceof ApiError && (error.status === 401 || error.status === 403)) return false;
+        return failureCount < 2;
+      },
+    },
+  },
+});
 
 const ADMIN_ROLES = ["ROLE_ADMIN", "ROLE_ASSET_MANAGER", "ROLE_GD"];
 const EMPLOYEE_ROLES = [

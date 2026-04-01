@@ -29,8 +29,8 @@ const Suppliers = () => {
         phone: s.phone ?? '',
         email: s.email ?? '',
         address: s.address ?? '',
-        contactPerson: '—',
-        createdAt: '',
+        contactPerson: s.contactPerson?.trim() ?? '',
+        createdAt: s.createdDate ?? '',
       })),
     [sQ.data],
   );
@@ -47,7 +47,14 @@ const Suppliers = () => {
 
   const openEdit = (s: Supplier) => {
     setEditTarget(s);
-    setEditForm({ name: s.name, taxCode: s.taxCode, phone: s.phone, email: s.email, contactPerson: s.contactPerson, address: s.address });
+    setEditForm({
+      name: s.name,
+      taxCode: s.taxCode,
+      phone: s.phone,
+      email: s.email,
+      contactPerson: s.contactPerson,
+      address: s.address,
+    });
   };
 
   const handleEdit = async () => {
@@ -66,6 +73,7 @@ const Suppliers = () => {
         phone: editForm.phone || undefined,
         email: editForm.email || undefined,
         address: editForm.address || undefined,
+        contactPerson: editForm.contactPerson.trim(),
         active: true,
       });
       toast.success('Đã cập nhật NCC');
@@ -92,6 +100,7 @@ const Suppliers = () => {
         phone: addForm.phone || undefined,
         email: addForm.email || undefined,
         address: addForm.address || undefined,
+        contactPerson: addForm.contactPerson.trim() || undefined,
         active: true,
       });
       toast.success('Đã thêm NCC');
@@ -126,8 +135,8 @@ const Suppliers = () => {
     { key: 'taxCode', label: 'MST' },
     { key: 'phone', label: 'Điện thoại' },
     { key: 'email', label: 'Email' },
-    { key: 'contactPerson', label: 'Người liên hệ' },
-    { key: 'createdAt', label: 'Ngày tạo', render: r => formatDate(r.createdAt) },
+    { key: 'contactPerson', label: 'Người liên hệ', render: r => r.contactPerson || '—' },
+    { key: 'createdAt', label: 'Ngày tạo', render: r => (r.createdAt ? formatDate(r.createdAt) : '—') },
     { key: 'actions', label: 'Thao tác', render: r => (
       <DropdownMenu>
         <DropdownMenuTrigger asChild>
@@ -183,9 +192,9 @@ const Suppliers = () => {
                 ['MST', detailTarget.taxCode],
                 ['Điện thoại', detailTarget.phone],
                 ['Email', detailTarget.email],
-                ['Người liên hệ', detailTarget.contactPerson],
+                ['Người liên hệ', detailTarget.contactPerson || '—'],
                 ['Địa chỉ', detailTarget.address],
-                ['Ngày tạo', formatDate(detailTarget.createdAt)],
+                ['Ngày tạo', detailTarget.createdAt ? formatDate(detailTarget.createdAt) : '—'],
               ].map(([label, value]) => (
                 <div key={label} className="flex items-start gap-3">
                   <span className="text-sm font-medium text-muted-foreground w-28 shrink-0">{label}:</span>
