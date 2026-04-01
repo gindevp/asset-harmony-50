@@ -9,6 +9,7 @@ import {
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { useState } from 'react';
+import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 
 interface NavItem {
   label: string;
@@ -56,6 +57,7 @@ export const AdminSidebar = () => {
   const navigate = useNavigate();
   const location = useLocation();
   const [collapsed, setCollapsed] = useState(false);
+  const [hoveredGroup, setHoveredGroup] = useState<string | null>(null);
   const [expandedGroups, setExpandedGroups] = useState<string[]>(() => {
     // Auto-expand group containing current path
     return navItems.filter(item =>
@@ -112,24 +114,79 @@ export const AdminSidebar = () => {
               </NavLink>
             ) : (
               <>
-                <button
-                  onClick={() => toggleGroup(item.label)}
-                  className={cn(
-                    'sidebar-nav-item w-full',
-                    isGroupActive(item) ? 'text-primary font-medium' : 'text-sidebar-foreground/70 hover:bg-sidebar-accent hover:text-sidebar-foreground'
-                  )}
-                >
-                  <item.icon className="h-4 w-4 flex-shrink-0" />
-                  {!collapsed && (
+                {collapsed ? (
+                  <Popover
+                    open={hoveredGroup === item.label}
+                    onOpenChange={o => setHoveredGroup(o ? item.label : null)}
+                  >
+                    <PopoverTrigger asChild>
+                      <button
+                        className={cn(
+                          'sidebar-nav-item w-full',
+                          isGroupActive(item)
+                            ? 'text-primary font-medium'
+                            : 'text-sidebar-foreground/70 hover:bg-sidebar-accent hover:text-sidebar-foreground',
+                        )}
+                        onMouseEnter={() => setHoveredGroup(item.label)}
+                        onMouseLeave={() => setHoveredGroup(prev => (prev === item.label ? null : prev))}
+                        onFocus={() => setHoveredGroup(item.label)}
+                        onBlur={() => setHoveredGroup(prev => (prev === item.label ? null : prev))}
+                        type="button"
+                      >
+                        <item.icon className="h-4 w-4 flex-shrink-0" />
+                      </button>
+                    </PopoverTrigger>
+                    <PopoverContent
+                      side="right"
+                      align="start"
+                      sideOffset={8}
+                      className="w-60 p-2"
+                      onMouseEnter={() => setHoveredGroup(item.label)}
+                      onMouseLeave={() => setHoveredGroup(prev => (prev === item.label ? null : prev))}
+                    >
+                      <div className="px-2 py-1.5 text-sm font-medium">{item.label}</div>
+                      <div className="mt-1 space-y-0.5">
+                        {item.children?.map(child => (
+                          <NavLink
+                            key={child.path}
+                            to={child.path}
+                            className={cn(
+                              'sidebar-nav-item text-sm',
+                              isActive(child.path)
+                                ? 'bg-primary/20 text-primary font-medium'
+                                : 'text-sidebar-foreground/70 hover:bg-sidebar-accent hover:text-sidebar-foreground',
+                            )}
+                            onClick={() => setHoveredGroup(null)}
+                          >
+                            <span className="truncate">{child.label}</span>
+                          </NavLink>
+                        ))}
+                      </div>
+                    </PopoverContent>
+                  </Popover>
+                ) : (
+                  <button
+                    onClick={() => toggleGroup(item.label)}
+                    className={cn(
+                      'sidebar-nav-item w-full',
+                      isGroupActive(item)
+                        ? 'text-primary font-medium'
+                        : 'text-sidebar-foreground/70 hover:bg-sidebar-accent hover:text-sidebar-foreground',
+                    )}
+                    type="button"
+                  >
+                    <item.icon className="h-4 w-4 flex-shrink-0" />
                     <>
                       <span className="truncate flex-1 text-left">{item.label}</span>
-                      <ChevronDown className={cn(
-                        'h-3.5 w-3.5 transition-transform',
-                        expandedGroups.includes(item.label) && 'rotate-180'
-                      )} />
+                      <ChevronDown
+                        className={cn(
+                          'h-3.5 w-3.5 transition-transform',
+                          expandedGroups.includes(item.label) && 'rotate-180',
+                        )}
+                      />
                     </>
-                  )}
-                </button>
+                  </button>
+                )}
                 {!collapsed && expandedGroups.includes(item.label) && (
                   <div className="ml-4 pl-3 border-l border-sidebar-border space-y-0.5 mt-0.5">
                     {item.children?.map(child => (

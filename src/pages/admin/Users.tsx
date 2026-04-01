@@ -15,7 +15,8 @@ import { getLocationName, type Employee, type EmployeeStatus } from '@/data/mock
 import { Download, Plus, Trash2, Pencil } from 'lucide-react';
 import { toast } from 'sonner';
 import { useDepartments, useEmployees, useLocations } from '@/hooks/useEntityApi';
-import { apiDelete, apiGet, apiPatch, apiPost, apiPut, getStoredToken } from '@/api/http';
+import { apiDelete, apiGet, apiPatch, apiPost, apiPut, getApiErrorMessage, getStoredToken } from '@/api/http';
+import { isValidEmail } from '@/utils/validation';
 import { hasAnyAuthority } from '@/auth/jwt';
 import { makeBizCode } from '@/api/businessCode';
 
@@ -109,6 +110,10 @@ const UsersPage = () => {
       toast.error('Nhập login và email');
       return;
     }
+    if (!isValidEmail(accForm.email)) {
+      toast.error('Email không hợp lệ (cần dạng user@tenmien.com)');
+      return;
+    }
     setAccBusy(true);
     try {
       await apiPost('/api/admin/users', {
@@ -121,12 +126,12 @@ const UsersPage = () => {
         authorities: [accForm.authority],
         ...(accForm.employeeId ? { employeeId: Number(accForm.employeeId) } : {}),
       });
-      toast.success('Đã tạo tài khoản (mật khẩu gửi email kích hoạt — cấu hình mail server)');
+      toast.success('Đã tạo tài khoản. Người dùng kiểm tra email để đặt mật khẩu qua link (cần cấu hình SMTP trên server).');
       setAccAddOpen(false);
       setAccForm({ login: '', email: '', firstName: '', lastName: '', authority: 'ROLE_EMPLOYEE', employeeId: '' });
       invalidateAccounts();
     } catch (e) {
-      toast.error(e instanceof Error ? e.message : 'Lỗi API');
+      toast.error(getApiErrorMessage(e));
     } finally {
       setAccBusy(false);
     }
@@ -169,7 +174,7 @@ const UsersPage = () => {
       setAccEditOpen(false);
       invalidateAccounts();
     } catch (e) {
-      toast.error(e instanceof Error ? e.message : 'Lỗi API');
+      toast.error(getApiErrorMessage(e));
     } finally {
       setAccBusy(false);
     }
@@ -184,7 +189,7 @@ const UsersPage = () => {
       setAccDeleteLogin(null);
       invalidateAccounts();
     } catch (e) {
-      toast.error(e instanceof Error ? e.message : 'Lỗi API');
+      toast.error(getApiErrorMessage(e));
     } finally {
       setAccBusy(false);
     }

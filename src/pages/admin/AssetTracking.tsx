@@ -134,7 +134,7 @@ const AssetTracking = () => {
       date: selected.capitalizedDate || selected.createdAt,
       title: 'Ghi nhận tài sản',
       description: 'Nhập kho / khởi tạo bản ghi thiết bị',
-      status: 'IN_STOCK',
+      status: equipmentStatusLabels.IN_STOCK ?? 'Tồn kho',
     });
     const forEq = assignmentRows
       .filter(a => a.equipment?.id === sid)
@@ -148,7 +148,7 @@ const AssetTracking = () => {
         date: (a.assignedDate ?? '').slice(0, 10),
         title: 'Bàn giao / cấp phát',
         description: who,
-        status: 'IN_USE',
+        status: equipmentStatusLabels.IN_USE ?? 'Đang sử dụng',
       });
       if (a.returnedDate) {
         events.push({
@@ -156,7 +156,7 @@ const AssetTracking = () => {
           date: a.returnedDate.slice(0, 10),
           title: 'Kết thúc bàn giao',
           description: a.note || 'Thu hồi / hoàn trả',
-          status: selected.status,
+          status: equipmentStatusLabels[selected.status] ?? selected.status,
         });
       }
     }
@@ -169,7 +169,7 @@ const AssetTracking = () => {
         date: r.createdAt,
         title: 'Yêu cầu sửa chữa',
         description: [r.issue, r.description, r.attachmentNote].filter(Boolean).join(' — ') || '—',
-        status: 'UNDER_REPAIR',
+        status: equipmentStatusLabels.UNDER_REPAIR ?? 'Đang sửa chữa',
       });
     }
     return events.sort((x, y) => x.date.localeCompare(y.date));
@@ -378,7 +378,7 @@ const AssetTracking = () => {
                 <div><span className="text-muted-foreground">Trạng thái hiện tại:</span> <StatusBadge status={selected.status} label={equipmentStatusLabels[selected.status]} /></div>
               </div>
               <Card>
-                <CardHeader><CardTitle className="text-base">Timeline</CardTitle></CardHeader>
+                <CardHeader><CardTitle className="text-base">Dòng thời gian</CardTitle></CardHeader>
                 <CardContent>
                   <Timeline
                     events={equipmentTimeline.map(ev => ({

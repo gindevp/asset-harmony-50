@@ -139,9 +139,18 @@ function parseStockReceiptDeviceLineNote(note: string | undefined): {
   serial?: string;
   modelName?: string;
   brandName?: string;
+  depreciationMonths?: number;
+  salvageValue?: number;
 } {
   if (!note) return {};
-  const out: { equipmentCode?: string; serial?: string; modelName?: string; brandName?: string } = {};
+  const out: {
+    equipmentCode?: string;
+    serial?: string;
+    modelName?: string;
+    brandName?: string;
+    depreciationMonths?: number;
+    salvageValue?: number;
+  } = {};
   for (const part of note.split('|')) {
     const idx = part.indexOf(':');
     if (idx < 0) continue;
@@ -151,6 +160,14 @@ function parseStockReceiptDeviceLineNote(note: string | undefined): {
     if (k === 'SN') out.serial = v;
     if (k === 'MODEL') out.modelName = v;
     if (k === 'BRAND') out.brandName = v;
+    if (k === 'DEP') {
+      const n = parseInt(v, 10);
+      if (!Number.isNaN(n)) out.depreciationMonths = n;
+    }
+    if (k === 'SALV') {
+      const n = parseFloat(v);
+      if (!Number.isNaN(n)) out.salvageValue = n;
+    }
   }
   return out;
 }
@@ -173,6 +190,8 @@ export function buildStockIns(receipts: StockReceiptDto[], lines: StockReceiptLi
         serial: dev.serial,
         modelName: dev.modelName,
         brandName: dev.brandName,
+        depreciationMonths: dev.depreciationMonths,
+        salvageValue: dev.salvageValue,
       };
     });
     const totalAmount = mappedLines.reduce((s, x) => s + x.totalPrice, 0);
@@ -221,6 +240,7 @@ export function buildStockOuts(issues: StockIssueDto[], lines: StockIssueLineDto
       code: iss.code ?? '',
       recipientType,
       recipientId,
+      requestId: iss.allocationRequestId != null ? `AR#${iss.allocationRequestId}` : undefined,
       status: (iss.status ?? 'DRAFT') as StockOut['status'],
       lines: mappedLines,
       notes: iss.note ?? '',

@@ -9,6 +9,7 @@ import { TooltipProvider } from "@/components/ui/tooltip";
 import { ProtectedRoute } from "@/components/auth/ProtectedRoute";
 import NotFound from "./pages/NotFound";
 import Login from "./pages/Login";
+import PasswordResetFinish from "./pages/PasswordResetFinish";
 import { AdminLayout } from "./components/layout/AdminLayout";
 import { EmployeeLayout } from "./components/layout/EmployeeLayout";
 import Dashboard from "./pages/admin/Dashboard";
@@ -67,6 +68,7 @@ const App = () => {
         <Routes>
           <Route path="/" element={<Navigate to="/login" replace />} />
           <Route path="/login" element={<Login />} />
+          <Route path="/account/reset/finish" element={<PasswordResetFinish />} />
 
           <Route
             path="/admin"

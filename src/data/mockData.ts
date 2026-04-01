@@ -152,6 +152,8 @@ export interface StockInLine {
   serial?: string;
   modelName?: string;
   brandName?: string;
+  depreciationMonths?: number;
+  salvageValue?: number;
 }
 
 export interface StockIn {
@@ -305,6 +307,7 @@ export function employeeName(
   id: string,
   employees: { id?: number; fullName?: string; code?: string }[],
 ): string {
+  if (!Array.isArray(employees)) return id;
   const e = employees.find(x => String(x.id) === id);
   return e?.fullName ?? id;
 }

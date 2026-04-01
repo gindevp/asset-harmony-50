@@ -1,5 +1,5 @@
 import { useState, useMemo } from 'react';
-import { useQueryClient } from '@tanstack/react-query';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { DataTable, Column } from '@/components/shared/DataTable';
 import { StatusBadge } from '@/components/shared/StatusBadge';
 import { FilterBar, FilterField } from '@/components/shared/FilterBar';
@@ -39,6 +39,7 @@ import { makeBizCode } from '@/api/businessCode';
 import { formatEquipmentCodeDisplay } from '@/utils/formatCodes';
 import { StockDocumentHistoryBlock } from '@/components/shared/StockDocumentHistoryBlock';
 import { buildReceiptNote } from '@/utils/stockReceiptNote';
+import type { StockDocumentEventDto } from '@/api/types';
 
 const FE_SOURCE_TO_API: Record<string, string> = {
   PURCHASE: 'NEW_PURCHASE',
@@ -46,10 +47,36 @@ const FE_SOURCE_TO_API: Record<string, string> = {
   ADJUSTMENT: 'MANUAL_ADJUSTMENT',
 };
 
+const FE_SOURCE_LABELS: Record<keyof typeof FE_SOURCE_TO_API, string> = {
+  PURCHASE: 'Mua mới',
+  RETURN: 'Thu hồi',
+  ADJUSTMENT: 'Điều chỉnh',
+};
+
 const EQ_CODE_RE = /^EQ\d{6}$/;
 
-function formatDeviceLineNote(equipmentCode: string, serial: string): string {
-  return `CODE:${equipmentCode}|SN:${serial}`;
+function formatDeviceLineNote(
+  equipmentCode: string,
+  serial: string,
+  modelName?: string,
+  brandName?: string,
+  depreciationMonths?: number,
+  salvageValue?: number,
+): string {
+  const parts = [`CODE:${equipmentCode}`, `SN:${serial}`];
+  const m = (modelName ?? '').trim();
+  const b = (brandName ?? '').trim();
+  if (m) parts.push(`MODEL:${m}`);
+  if (b) parts.push(`BRAND:${b}`);
+  if (Number.isFinite(depreciationMonths) && (depreciationMonths ?? 0) > 0) parts.push(`DEP:${depreciationMonths}`);
+  if (Number.isFinite(salvageValue) && (salvageValue ?? 0) >= 0) parts.push(`SALV:${salvageValue}`);
+  return parts.join('|');
+}
+
+function genEquipmentCode(seed: number): string {
+  // Sinh mã EQxxxxxx (6 số) — dùng timestamp để giảm trùng khi nhập nhiều dòng.
+  const n = Math.abs(seed) % 1_000_000;
+  return `EQ${String(n).padStart(6, '0')}`;
 }
 
 // Types for form
@@ -60,7 +87,7 @@ interface DeviceLine {
   unitPrice: number;
   depreciationMonths: number;
   salvageValue: number;
-  serials: { equipmentCode: string; serial: string }[];
+  serials: { equipmentCode: string; serial: string; modelName: string; brandName: string }[];
 }
 
 interface ConsumableLine {
@@ -98,7 +125,7 @@ const StockInPage = () => {
 
   // Create form state
   const [createOpen, setCreateOpen] = useState(false);
-  const [assetType, setAssetType] = useState<'DEVICE' | 'CONSUMABLE' | ''>('');
+  const [assetType, setAssetType] = useState<'DEVICE' | 'CONSUMABLE'>('DEVICE');
   const [source, setSource] = useState<string>('PURCHASE');
   const [supplierId, setSupplierId] = useState('');
   const [notes, setNotes] = useState('');
@@ -115,6 +142,17 @@ const StockInPage = () => {
   const [editSupplierId, setEditSupplierId] = useState('');
   const [editUserNotes, setEditUserNotes] = useState('');
   const [editBusy, setEditBusy] = useState(false);
+
+  const selectedIdNum = selected?.id != null && selected.id !== '' ? Number(selected.id) : NaN;
+  const receiptEventsQ = useQuery({
+    queryKey: ['api', 'stock-document-events', 'receipt', selectedIdNum],
+    queryFn: () => apiGet<StockDocumentEventDto[]>(`/api/stock-receipts/${selectedIdNum}/events`),
+    enabled: Number.isFinite(selectedIdNum),
+  });
+  const createdLogin =
+    (receiptEventsQ.data ?? []).find(e => e.action === 'CREATE')?.login ??
+    (receiptEventsQ.data ?? [])[0]?.login ??
+    '';
 
   const downloadReceiptPdf = async () => {
     if (selected?.id == null) return;
@@ -215,7 +253,7 @@ const StockInPage = () => {
 
   // --- Create form helpers ---
   const resetForm = () => {
-    setAssetType('');
+    setAssetType('DEVICE');
     setSource('PURCHASE');
     setSupplierId('');
     setNotes('');
@@ -224,6 +262,7 @@ const StockInPage = () => {
   };
 
   const addDeviceLine = () => {
+    const now = Date.now();
     setDeviceLines(prev => [
       ...prev,
       {
@@ -233,7 +272,7 @@ const StockInPage = () => {
         unitPrice: 0,
         depreciationMonths: 60,
         salvageValue: 0,
-        serials: [],
+        serials: [{ equipmentCode: genEquipmentCode(now), serial: '', modelName: '', brandName: '' }],
       },
     ]);
   };
@@ -248,29 +287,44 @@ const StockInPage = () => {
         updated.quantity = qty;
         const existingSerials = l.serials.slice(0, qty);
         const newSerials = Array.from({ length: qty - existingSerials.length }, (_, i) => ({
-          equipmentCode: `EQ${String(Date.now() + existingSerials.length + i).slice(-6).padStart(6, '0')}`,
+          equipmentCode: genEquipmentCode(Date.now() + existingSerials.length + i),
           serial: '',
+          modelName: '',
+          brandName: '',
         }));
         updated.serials = [...existingSerials, ...newSerials];
       }
-      // When item changes, regenerate serial codes with proper prefix
+      // Khi chọn item mà chưa có serial row, auto tạo theo quantity để nhập serial được ngay.
       if (field === 'itemId') {
-        updated.serials = updated.serials.map((s, i) => ({
-          ...s,
-          equipmentCode: `EQ${String(i + 1).padStart(6, '0')}`,
-          modelName: s.modelName ?? '',
-          brandName: s.brandName ?? '',
-        }));
+        if (!Array.isArray(updated.serials) || updated.serials.length === 0) {
+          const qty = Math.max(1, Number(updated.quantity ?? 1));
+          updated.serials = Array.from({ length: qty }, (_, i) => ({
+            equipmentCode: genEquipmentCode(Date.now() + i),
+            serial: '',
+            modelName: '',
+            brandName: '',
+          }));
+        } else {
+          updated.serials = updated.serials.map(s => ({
+            ...s,
+            modelName: s.modelName ?? '',
+            brandName: s.brandName ?? '',
+          }));
+        }
       }
       return updated;
     }));
   };
 
-  const updateSerial = (lineId: string, index: number, serial: string) => {
+  const updateDeviceSerialRow = (
+    lineId: string,
+    index: number,
+    patch: Partial<{ serial: string; modelName: string; brandName: string }>,
+  ) => {
     setDeviceLines(prev => prev.map(l => {
       if (l.id !== lineId) return l;
       const serials = [...l.serials];
-      serials[index] = { ...serials[index], serial };
+      serials[index] = { ...serials[index], ...patch };
       return { ...l, serials };
     }));
   };
@@ -288,9 +342,10 @@ const StockInPage = () => {
   const removeConsumableLine = (id: string) => setConsumableLines(prev => prev.filter(l => l.id !== id));
 
   const totalAmount = useMemo(() => {
-    if (assetType === 'DEVICE') return deviceLines.reduce((sum, l) => sum + l.quantity * l.unitPrice, 0);
-    return consumableLines.reduce((sum, l) => sum + l.quantity * l.unitPrice, 0);
-  }, [assetType, deviceLines, consumableLines]);
+    const dev = deviceLines.reduce((sum, l) => sum + l.quantity * l.unitPrice, 0);
+    const con = consumableLines.reduce((sum, l) => sum + l.quantity * l.unitPrice, 0);
+    return dev + con;
+  }, [deviceLines, consumableLines]);
 
   const invalidateStock = () => {
     void qc.invalidateQueries({ queryKey: ['api', 'stock-ins-view'] });
@@ -298,15 +353,19 @@ const StockInPage = () => {
   };
 
   const handleCreate = async () => {
-    if (!assetType) { toast.error('Vui lòng chọn loại tài sản nhập'); return; }
-    if (assetType === 'DEVICE' && deviceLines.length === 0) { toast.error('Vui lòng thêm ít nhất 1 dòng thiết bị'); return; }
-    if (assetType === 'CONSUMABLE' && consumableLines.length === 0) { toast.error('Vui lòng thêm ít nhất 1 dòng vật tư'); return; }
+    if (deviceLines.length === 0 && consumableLines.length === 0) {
+      toast.error('Vui lòng thêm ít nhất 1 dòng thiết bị hoặc vật tư');
+      return;
+    }
 
-    const lines = assetType === 'DEVICE' ? deviceLines : consumableLines;
-    const emptyItem = lines.some(l => !l.itemId);
-    if (emptyItem) { toast.error('Vui lòng chọn tài sản cho tất cả các dòng'); return; }
+    const emptyDeviceItem = deviceLines.some(l => !l.itemId);
+    const emptyConsumableItem = consumableLines.some(l => !l.itemId);
+    if (emptyDeviceItem || emptyConsumableItem) {
+      toast.error('Vui lòng chọn tài sản cho tất cả các dòng');
+      return;
+    }
 
-    if (assetType === 'DEVICE') {
+    if (deviceLines.length > 0) {
       const emptySerials = deviceLines.some(l => {
         const item = assetItems.find(i => i.id === l.itemId);
         if (!item?.enableSerial) return false;
@@ -350,20 +409,38 @@ const StockInPage = () => {
       if (rid == null) throw new Error('API không trả id phiếu nhập');
 
       let lineNo = 1;
-      if (assetType === 'DEVICE') {
+      // Lưu cả thiết bị + vật tư nếu user nhập cả hai.
+      if (deviceLines.length > 0) {
         for (const line of deviceLines) {
-          for (const s of line.serials) {
+          const serialRows =
+            Array.isArray(line.serials) && line.serials.length > 0
+              ? line.serials
+              : Array.from({ length: Math.max(1, Number(line.quantity ?? 1)) }, (_, i) => ({
+                  equipmentCode: genEquipmentCode(Date.now() + i),
+                  serial: '',
+                  modelName: '',
+                  brandName: '',
+                }));
+          for (const s of serialRows) {
             await apiPost('/api/stock-receipt-lines', {
               lineNo: lineNo++,
               quantity: 1,
               unitPrice: line.unitPrice,
-              note: formatDeviceLineNote(s.equipmentCode, s.serial, s.modelName, s.brandName),
+              note: formatDeviceLineNote(
+                s.equipmentCode,
+                s.serial,
+                s.modelName,
+                s.brandName,
+                line.depreciationMonths,
+                line.salvageValue,
+              ),
               receipt: { id: rid },
               assetItem: { id: Number(line.itemId) },
             });
           }
         }
-      } else {
+      }
+      if (consumableLines.length > 0) {
         for (const line of consumableLines) {
           await apiPost('/api/stock-receipt-lines', {
             lineNo: lineNo++,
@@ -409,6 +486,12 @@ const StockInPage = () => {
           toast.error(`Mã thiết bị phải dạng EQ + 6 chữ số (vd EQ000001). Sai: ${line.equipmentCode}`);
           return;
         }
+        const depMonths = Number((line as any).depreciationMonths);
+        const salv = Number((line as any).salvageValue ?? 0);
+        if (item.enableDepreciation && (!Number.isFinite(depMonths) || depMonths <= 0)) {
+          toast.error('Thiết bị có khấu hao bắt buộc có số tháng khấu hao. Vui lòng tạo lại phiếu với số tháng khấu hao hợp lệ.');
+          return;
+        }
         await apiPost('/api/equipment', {
           equipmentCode: line.equipmentCode,
           ...(line.serial?.trim() ? { serial: line.serial } : {}),
@@ -419,8 +502,8 @@ const StockInPage = () => {
             ? {
                 purchasePrice: line.unitPrice,
                 capitalizationDate: receiptDate,
-                depreciationMonths: Number(line.depreciationMonths),
-                salvageValue: Number(line.salvageValue ?? 0),
+                depreciationMonths: depMonths,
+                salvageValue: salv,
               }
             : {}),
           assetItem: { id: itemNum },
@@ -542,7 +625,7 @@ const StockInPage = () => {
                 <Select value={source} onValueChange={setSource}>
                   <SelectTrigger><SelectValue /></SelectTrigger>
                   <SelectContent>
-                    {Object.entries(stockInSourceLabels).map(([v, l]) => (
+                    {(Object.entries(FE_SOURCE_LABELS) as Array<[keyof typeof FE_SOURCE_LABELS, string]>).map(([v, l]) => (
                       <SelectItem key={v} value={v}>{l}</SelectItem>
                     ))}
                   </SelectContent>
@@ -562,7 +645,7 @@ const StockInPage = () => {
             {/* Asset type selection */}
             <div className="space-y-2">
               <Label>Loại tài sản nhập <span className="text-destructive">*</span></Label>
-              <Tabs value={assetType} onValueChange={v => { setAssetType(v as 'DEVICE' | 'CONSUMABLE'); setDeviceLines([]); setConsumableLines([]); }}>
+              <Tabs value={assetType} onValueChange={v => { setAssetType(v as 'DEVICE' | 'CONSUMABLE'); }}>
                 <TabsList className="grid w-full grid-cols-2">
                   <TabsTrigger value="DEVICE">🖥 Thiết bị</TabsTrigger>
                   <TabsTrigger value="CONSUMABLE">📦 Vật tư</TabsTrigger>
@@ -639,6 +722,8 @@ const StockInPage = () => {
                                       <th className="text-left px-3 py-1.5 font-medium text-xs">
                                         Serial {selectedItem?.enableSerial ? <span className="text-destructive">*</span> : null}
                                       </th>
+                                      <th className="text-left px-3 py-1.5 font-medium text-xs">Model</th>
+                                      <th className="text-left px-3 py-1.5 font-medium text-xs">Hãng</th>
                                     </tr>
                                   </thead>
                                   <tbody>
@@ -649,13 +734,30 @@ const StockInPage = () => {
                                           {formatEquipmentCodeDisplay(s.equipmentCode)}
                                         </td>
                                         <td className="px-3 py-1.5">
-                                          <Input className="h-7 text-xs" value={s.serial} onChange={e => updateDeviceSerialRow(line.id, si, { serial: e.target.value })} placeholder={`Nhập serial #${si + 1}...`} />
+                                          <Input
+                                            className="h-7 text-xs"
+                                            value={s.serial}
+                                            onChange={e => updateDeviceSerialRow(line.id, si, { serial: e.target.value })}
+                                            placeholder={`Nhập serial #${si + 1}...`}
+                                          />
                                         </td>
                                         <td className="px-3 py-1.5">
-                                          <Input className="h-7 text-xs" value={s.modelName} onChange={e => updateDeviceSerialRow(line.id, si, { modelName: e.target.value })} placeholder="Model" maxLength={150} />
+                                          <Input
+                                            className="h-7 text-xs"
+                                            value={s.modelName}
+                                            onChange={e => updateDeviceSerialRow(line.id, si, { modelName: e.target.value })}
+                                            placeholder="Model"
+                                            maxLength={150}
+                                          />
                                         </td>
                                         <td className="px-3 py-1.5">
-                                          <Input className="h-7 text-xs" value={s.brandName} onChange={e => updateDeviceSerialRow(line.id, si, { brandName: e.target.value })} placeholder="Hãng" maxLength={150} />
+                                          <Input
+                                            className="h-7 text-xs"
+                                            value={s.brandName}
+                                            onChange={e => updateDeviceSerialRow(line.id, si, { brandName: e.target.value })}
+                                            placeholder="Hãng"
+                                            maxLength={150}
+                                          />
                                         </td>
                                       </tr>
                                     ))}
@@ -752,7 +854,7 @@ const StockInPage = () => {
 
       {/* ===== DETAIL DIALOG ===== */}
       <Dialog open={!!selected} onOpenChange={() => setSelected(null)}>
-        <DialogContent className="max-w-3xl">
+        <DialogContent className="max-w-6xl max-h-[90vh] overflow-y-auto">
           <DialogHeader>
             <div className="flex items-start justify-between gap-4 pr-8">
               <DialogTitle className="flex-1 text-left">Chi tiết phiếu nhập {selected?.code}</DialogTitle>
@@ -774,11 +876,16 @@ const StockInPage = () => {
               <div className="grid grid-cols-2 gap-3 text-sm">
                 <div><span className="text-muted-foreground">Nguồn nhập:</span> {stockInSourceLabels[selected.source]}</div>
                 <div><span className="text-muted-foreground">NCC:</span> {selected.supplierId ? getSupplierName(selected.supplierId, suppliers) : '—'}</div>
-                <div><span className="text-muted-foreground">Người tạo:</span> {getEmployeeName(selected.createdBy, employees)}</div>
+                <div><span className="text-muted-foreground">Người tạo:</span> {createdLogin || '—'}</div>
                 <div><span className="text-muted-foreground">Trạng thái:</span> <StatusBadge status={selected.status} label={stockInStatusLabels[selected.status]} /></div>
+                <div className="col-span-2 text-muted-foreground">
+                  Ghi chú:{' '}
+                  <span className="text-foreground break-words whitespace-pre-wrap">
+                    {selected.notes || '—'}
+                  </span>
+                </div>
                 <div><span className="text-muted-foreground">Ngày tạo:</span> {formatDate(selected.createdAt)}</div>
                 {selected.confirmedAt && <div><span className="text-muted-foreground">Ngày XN:</span> {formatDate(selected.confirmedAt)}</div>}
-                <div className="col-span-2"><span className="text-muted-foreground">Ghi chú:</span> {selected.notes}</div>
               </div>
               <DataTable
                 columns={[
@@ -791,6 +898,8 @@ const StockInPage = () => {
                         ? `${formatEquipmentCodeDisplay(r.equipmentCode) || '—'} / ${r.serial ?? ''}`
                         : '—',
                   },
+                  { key: 'modelName', label: 'Model', render: (r: any) => (r.modelName ? String(r.modelName) : '—') },
+                  { key: 'brandName', label: 'Hãng', render: (r: any) => (r.brandName ? String(r.brandName) : '—') },
                   { key: 'quantity', label: 'SL', className: 'text-right' },
                   { key: 'unitPrice', label: 'Đơn giá', render: (r: any) => formatCurrency(r.unitPrice), className: 'text-right' },
                   { key: 'totalPrice', label: 'Thành tiền', render: (r: any) => formatCurrency(r.totalPrice), className: 'text-right' },
@@ -842,7 +951,7 @@ const StockInPage = () => {
                 <Select value={editSource} onValueChange={v => setEditSource(v as StockIn['source'])}>
                   <SelectTrigger><SelectValue /></SelectTrigger>
                   <SelectContent>
-                    {Object.entries(stockInSourceLabels).map(([v, l]) => (
+                    {(Object.entries(FE_SOURCE_LABELS) as Array<[keyof typeof FE_SOURCE_LABELS, string]>).map(([v, l]) => (
                       <SelectItem key={v} value={v}>{l}</SelectItem>
                     ))}
                   </SelectContent>

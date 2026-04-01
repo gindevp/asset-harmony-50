@@ -125,6 +125,8 @@ export type StockIssueDto = {
   employee?: EmployeeDto;
   department?: DepartmentDto;
   location?: LocationDto;
+  /** YC cấp phát nếu phiếu xuất được tạo từ luồng YC */
+  allocationRequestId?: number;
 };
 
 export type StockIssueLineDto = {

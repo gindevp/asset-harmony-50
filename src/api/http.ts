@@ -45,6 +45,57 @@ export class ApiError extends Error {
   }
 }
 
+/** Parse JSON lỗi RFC 7807 / JHipster (fieldErrors) để hiển thị toast. */
+export function parseProblemDetailJson(body: string | undefined): string {
+  if (!body) return '';
+  try {
+    const j = JSON.parse(body) as {
+      detail?: string;
+      title?: string;
+      message?: string;
+      fieldErrors?: Array<{ objectName?: string; field?: string; message?: string }>;
+    };
+    if (Array.isArray(j.fieldErrors) && j.fieldErrors.length > 0) {
+      const label = (field: string) =>
+        field === 'email' ? 'Email' : field === 'login' ? 'Đăng nhập' : field;
+      return j.fieldErrors
+        .map(f => `${label(f.field ?? '')}: ${f.message ?? ''}`.trim())
+        .filter(Boolean)
+        .join(' · ');
+    }
+    if (j.detail && !/^error\.http\.\d+$/.test(j.detail)) return j.detail;
+    if (j.message && !/^error\.http\.\d+$/.test(j.message)) return j.message;
+  } catch {
+    // ignore
+  }
+  return body.slice(0, 400);
+}
+
+export function getApiErrorMessage(err: unknown): string {
+  if (err instanceof ApiError) {
+    const parsed = parseProblemDetailJson(err.body);
+    if (parsed) return parsed;
+    return err.message;
+  }
+  if (err instanceof Error) return err.message;
+  return 'Lỗi không xác định';
+}
+
+function redirectToLoginIfNeeded() {
+  // Tránh loop khi đang ở trang login
+  const p = window.location.pathname || '/';
+  if (p.startsWith('/login')) return;
+  const returnUrl = `${window.location.pathname}${window.location.search}${window.location.hash}`;
+  window.location.replace(`/login?returnUrl=${encodeURIComponent(returnUrl)}`);
+}
+
+function handleUnauthorized(res: Response) {
+  if (res.status !== 401) return;
+  // JWT sai/hết hạn → clear token và đẩy về login
+  setStoredToken(null);
+  redirectToLoginIfNeeded();
+}
+
 export async function apiFetch(path: string, init: RequestInit = {}): Promise<Response> {
   const jsonBody = typeof init.body === 'string';
   const h = new Headers(init.headers);
@@ -54,7 +105,11 @@ export async function apiFetch(path: string, init: RequestInit = {}): Promise<Re
     if (t) h.set('Authorization', `Bearer ${t}`);
   }
   if (jsonBody && !h.has('Content-Type')) h.set('Content-Type', 'application/json');
-  return fetch(url, { ...init, headers: h, credentials: 'include' });
+  const res = await fetch(url, { ...init, headers: h, credentials: 'include' });
+  // Nếu BE trả 401, auto redirect sang /login
+  // (vẫn để các caller xử lý throw ApiError như hiện tại)
+  if (!path.startsWith('/api/authenticate')) handleUnauthorized(res);
+  return res;
 }
 
 export async function apiJson<T>(path: string, init: RequestInit = {}): Promise<T> {
@@ -112,11 +167,7 @@ export async function apiDelete(path: string): Promise<void> {
 
 /** POST multipart (FormData) — không set Content-Type để trình duyệt gửi boundary. */
 export async function apiPostMultipart<T>(path: string, formData: FormData): Promise<T> {
-  const h = new Headers();
-  const t = getStoredToken();
-  if (t) h.set('Authorization', `Bearer ${t}`);
-  const url = resolveApiUrl(path);
-  const res = await fetch(url, { method: 'POST', body: formData, headers: h, credentials: 'include' });
+  const res = await apiFetch(path, { method: 'POST', body: formData });
   const text = await res.text();
   if (!res.ok) {
     throw new ApiError(`${res.status} ${res.statusText}`, res.status, text.slice(0, 500));

@@ -20,18 +20,19 @@ const statusStyleMap: Record<string, string> = {
   DRAFT: 'status-draft',
   CONFIRMED: 'status-confirmed',
   CANCELLED: 'status-cancelled',
-  // Allocation
-  CHO_DUYET: 'status-waiting',
-  DA_DUYET: 'status-approved',
-  TU_CHOI: 'status-rejected',
-  DA_TAO_PHIEU_XUAT: 'status-in-use',
-  HOAN_THANH: 'status-completed',
-  HUY: 'status-cancelled',
-  // Repair
-  MOI_TAO: 'status-waiting',
-  DA_TIEP_NHAN: 'status-in-use',
-  DANG_SUA: 'status-repair',
-  HOAN_TAT: 'status-completed',
+  // Allocation (AllocationRequest)
+  PENDING: 'status-waiting',
+  APPROVED: 'status-approved',
+  REJECTED: 'status-rejected',
+  EXPORT_SLIP_CREATED: 'status-confirmed',
+  COMPLETED: 'status-completed',
+  // ReturnRequest
+  // (dùng chung PENDING/APPROVED/REJECTED/COMPLETED/CANCELLED)
+  // RepairRequest
+  NEW: 'status-waiting',
+  ACCEPTED: 'status-approved',
+  IN_PROGRESS: 'status-repair',
+  // Completed/rejected/cancelled dùng chung (đã cover ở trên: CANCELLED/COMPLETED/REJECTED)
 };
 
 export const StatusBadge = ({ status, label, className }: StatusBadgeProps) => {

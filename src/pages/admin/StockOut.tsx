@@ -1,5 +1,5 @@
 import { useState, useMemo, useCallback } from 'react';
-import { useQueryClient } from '@tanstack/react-query';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { DataTable, Column } from '@/components/shared/DataTable';
 import { StatusBadge } from '@/components/shared/StatusBadge';
 import { FilterBar, FilterField } from '@/components/shared/FilterBar';
@@ -35,7 +35,7 @@ import {
   useStockOutsView,
 } from '@/hooks/useEntityApi';
 import { apiDelete, apiDownloadBlob, apiGet, apiPatch, apiPost, apiPut, openPdfInBrowserTab, PAGE_ALL } from '@/api/http';
-import type { ConsumableStockDto, StockIssueDto, StockIssueLineDto } from '@/api/types';
+import type { ConsumableStockDto, StockDocumentEventDto, StockIssueDto, StockIssueLineDto } from '@/api/types';
 import { makeBizCode } from '@/api/businessCode';
 import { formatEquipmentCodeDisplay } from '@/utils/formatCodes';
 import { StockDocumentHistoryBlock } from '@/components/shared/StockDocumentHistoryBlock';
@@ -107,7 +107,7 @@ const StockOutPage = () => {
 
   // Create form state
   const [createOpen, setCreateOpen] = useState(false);
-  const [assetType, setAssetType] = useState<'DEVICE' | 'CONSUMABLE' | ''>('');
+  const [assetType, setAssetType] = useState<'DEVICE' | 'CONSUMABLE'>('DEVICE');
   const [recipientType, setRecipientType] = useState<string>('EMPLOYEE');
   const [recipientId, setRecipientId] = useState('');
   const [notes, setNotes] = useState('');
@@ -124,6 +124,17 @@ const StockOutPage = () => {
   const [editOutRecipientId, setEditOutRecipientId] = useState('');
   const [editOutNotes, setEditOutNotes] = useState('');
   const [editOutBusy, setEditOutBusy] = useState(false);
+
+  const selectedIdNum = selected?.id != null && selected.id !== '' ? Number(selected.id) : NaN;
+  const issueEventsQ = useQuery({
+    queryKey: ['api', 'stock-document-events', 'issue', selectedIdNum],
+    queryFn: () => apiGet<StockDocumentEventDto[]>(`/api/stock-issues/${selectedIdNum}/events`),
+    enabled: Number.isFinite(selectedIdNum),
+  });
+  const createdLogin =
+    (issueEventsQ.data ?? []).find(e => e.action === 'CREATE')?.login ??
+    (issueEventsQ.data ?? [])[0]?.login ??
+    '';
 
   const editRecipientOptions = useMemo(() => {
     switch (editOutRecipientType) {
@@ -252,7 +263,7 @@ const StockOutPage = () => {
 
   // --- Form helpers ---
   const resetForm = () => {
-    setAssetType('');
+    setAssetType('DEVICE');
     setRecipientType('EMPLOYEE');
     setRecipientId('');
     setNotes('');
@@ -316,16 +327,17 @@ const StockOutPage = () => {
 
   const handleCreate = async () => {
     if (!recipientId && recipientType !== 'COMPANY') { toast.error('Vui lòng chọn đối tượng nhận'); return; }
-    if (!assetType) { toast.error('Vui lòng chọn loại tài sản xuất'); return; }
-    if (assetType === 'DEVICE') {
-      if (deviceLines.length === 0) { toast.error('Vui lòng thêm ít nhất 1 dòng thiết bị'); return; }
-      if (deviceLines.some(l => !l.itemId)) { toast.error('Vui lòng chọn tài sản cho tất cả các dòng'); return; }
+    if (deviceLines.length === 0 && consumableLines.length === 0) {
+      toast.error('Vui lòng thêm ít nhất 1 dòng thiết bị hoặc vật tư');
+      return;
+    }
+    if (deviceLines.length > 0) {
+      if (deviceLines.some(l => !l.itemId)) { toast.error('Vui lòng chọn tài sản cho tất cả các dòng thiết bị'); return; }
       if (deviceLines.some(l => l.selectedEquipmentIds.length === 0)) { toast.error('Vui lòng chọn ít nhất 1 thiết bị cho mỗi dòng'); return; }
     }
-    if (assetType === 'CONSUMABLE') {
-      if (consumableLines.length === 0) { toast.error('Vui lòng thêm ít nhất 1 dòng vật tư'); return; }
+    if (consumableLines.length > 0) {
       if (consumableLines.some(l => !l.itemId)) { toast.error('Vui lòng chọn vật tư cho tất cả các dòng'); return; }
-      if (consumableLines.some(l => l.quantity < 1)) { toast.error('Số lượng phải lớn hơn 0'); return; }
+      if (consumableLines.some(l => l.quantity < 1)) { toast.error('Số lượng vật tư phải lớn hơn 0'); return; }
     }
 
     const code = makeBizCode('PX');
@@ -347,7 +359,8 @@ const StockOutPage = () => {
       const issueId = created.id;
       if (issueId == null) throw new Error('API không trả id phiếu');
       let lineNo = 1;
-      if (assetType === 'DEVICE') {
+      // Lưu cả thiết bị + vật tư nếu user nhập cả hai.
+      if (deviceLines.length > 0) {
         for (const line of deviceLines) {
           for (const eqId of line.selectedEquipmentIds) {
             await apiPost('/api/stock-issue-lines', {
@@ -359,7 +372,8 @@ const StockOutPage = () => {
             });
           }
         }
-      } else {
+      }
+      if (consumableLines.length > 0) {
         for (const line of consumableLines) {
           await apiPost('/api/stock-issue-lines', {
             lineNo: lineNo++,
@@ -540,7 +554,7 @@ const StockOutPage = () => {
             {/* Asset type tabs */}
             <div className="space-y-2">
               <Label>Loại tài sản xuất <span className="text-destructive">*</span></Label>
-              <Tabs value={assetType} onValueChange={v => { setAssetType(v as 'DEVICE' | 'CONSUMABLE'); setDeviceLines([]); setConsumableLines([]); }}>
+              <Tabs value={assetType} onValueChange={v => { setAssetType(v as 'DEVICE' | 'CONSUMABLE'); }}>
                 <TabsList className="grid w-full grid-cols-2">
                   <TabsTrigger value="DEVICE">🖥 Thiết bị</TabsTrigger>
                   <TabsTrigger value="CONSUMABLE">📦 Vật tư</TabsTrigger>
@@ -686,8 +700,13 @@ const StockOutPage = () => {
             {assetType && (
               <div className="flex items-center justify-between pt-4 border-t">
                 <div className="text-sm text-muted-foreground">
-                  Tổng: <span className="font-semibold text-foreground">
-                    {assetType === 'DEVICE' ? `${totalDeviceCount} thiết bị` : `${totalConsumableCount} vật tư`}
+                  Tổng:{' '}
+                  <span className="font-semibold text-foreground">
+                    {totalDeviceCount} thiết bị
+                  </span>
+                  {' • '}
+                  <span className="font-semibold text-foreground">
+                    {totalConsumableCount} vật tư
                   </span>
                 </div>
                 <div className="flex gap-2">
@@ -724,7 +743,7 @@ const StockOutPage = () => {
               <div className="grid grid-cols-2 gap-3 text-sm">
                 <div><span className="text-muted-foreground">Đối tượng nhận:</span> {recipientTypeLabels[selected.recipientType]} – {getRecipientName(selected.recipientType, selected.recipientId)}</div>
                 <div><span className="text-muted-foreground">Trạng thái:</span> <StatusBadge status={selected.status} label={stockOutStatusLabels[selected.status]} /></div>
-                <div><span className="text-muted-foreground">Người tạo:</span> {getEmployeeName(selected.createdBy)}</div>
+                <div><span className="text-muted-foreground">Người tạo:</span> {createdLogin || '—'}</div>
                 <div><span className="text-muted-foreground">Ngày tạo:</span> {formatDate(selected.createdAt)}</div>
                 <div className="col-span-2"><span className="text-muted-foreground">Ghi chú:</span> {selected.notes}</div>
               </div>
