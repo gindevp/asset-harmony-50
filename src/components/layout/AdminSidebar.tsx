@@ -1,7 +1,9 @@
 import { NavLink, useLocation, useNavigate } from 'react-router-dom';
-import { LogOut } from 'lucide-react';
-import { Button } from '@/components/ui/button';
-import { setStoredToken } from '@/api/http';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
+import { SidebarUserPanel } from '@/components/layout/SidebarUserPanel';
+import { apiGet, getStoredToken, setStoredToken } from '@/api/http';
+import { getAccountDisplayLabel } from '@/api/account';
+import type { AdminUserDto } from '@/api/types';
 import {
   LayoutDashboard, Package, FolderTree, List, Truck, ArrowDownToLine, ArrowUpFromLine,
   ClipboardCheck, FileText, Wrench, RotateCcw, Users, Shield, ScrollText,
@@ -60,9 +62,18 @@ function isRouteActive(pathname: string, path: string) {
 
 export const AdminSidebar = () => {
   const navigate = useNavigate();
+  const queryClient = useQueryClient();
   const location = useLocation();
   const pathname = location.pathname;
   const [collapsed, setCollapsed] = useState(false);
+
+  const accountQ = useQuery({
+    queryKey: ['api', 'account'],
+    queryFn: () => apiGet<AdminUserDto>('/api/account'),
+    enabled: !!getStoredToken(),
+    staleTime: 60_000,
+  });
+  const accountLabel = getAccountDisplayLabel(accountQ.data ?? undefined);
   const [hoveredGroup, setHoveredGroup] = useState<string | null>(null);
   const [expandedGroups, setExpandedGroups] = useState<string[]>(() => {
     // Auto-expand group containing current path
@@ -218,19 +229,16 @@ export const AdminSidebar = () => {
 
       {/* Footer */}
       {!collapsed && (
-        <div className="p-3 border-t border-sidebar-border space-y-2">
-          <Button
-            variant="outline"
-            size="sm"
-            className="w-full justify-start"
-            onClick={() => {
+        <div className="border-t border-sidebar-border p-3 pt-3.5">
+          <SidebarUserPanel
+            displayName={accountLabel}
+            isLoading={accountQ.isLoading}
+            onLogout={() => {
               setStoredToken(null);
+              void queryClient.removeQueries({ queryKey: ['api', 'account'] });
               navigate('/login');
             }}
-          >
-            <LogOut className="h-4 w-4 mr-2" />
-            Đăng xuất
-          </Button>
+          />
         </div>
       )}
     </aside>

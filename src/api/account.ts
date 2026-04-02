@@ -3,6 +3,18 @@ import type { AdminUserDto } from '@/api/types';
 
 const EMPLOYEE_ID_KEY = 'asset_app_employee_id';
 
+/** Hiển thị tên đăng nhập / họ tên cho UI (sidebar, …). */
+export function getAccountDisplayLabel(acc: AdminUserDto | null | undefined): string {
+  if (!acc) return '';
+  const fn = (acc.firstName ?? '').trim();
+  const ln = (acc.lastName ?? '').trim();
+  const full = [fn, ln].filter(Boolean).join(' ').trim();
+  if (full) return full;
+  if (acc.login?.trim()) return acc.login.trim();
+  if (acc.email?.trim()) return acc.email.trim();
+  return 'Người dùng';
+}
+
 /** Đồng bộ từ GET /api/account (sau đăng nhập hoặc F5). */
 export async function fetchAndStoreAccountContext(): Promise<AdminUserDto | null> {
   try {
