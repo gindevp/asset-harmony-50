@@ -19,6 +19,16 @@ import { downloadCsv, reportFilename, rowsToCsv } from '@/utils/csvExport';
 
 const COLORS = ['#ee0033', '#3b82f6', '#10b981', '#f59e0b', '#8b5cf6', '#ec4899'];
 
+/** Nhãn trục Y ngắn (tránh số VND dài bị cắt trên biểu đồ). */
+function formatVndAxisValue(n: number): string {
+  if (!Number.isFinite(n)) return '';
+  const abs = Math.abs(n);
+  if (abs >= 1_000_000_000) return `${(n / 1_000_000_000).toFixed(1)} tỷ`;
+  if (abs >= 1_000_000) return `${(n / 1_000_000).toFixed(1)} tr`;
+  if (abs >= 1_000) return `${(n / 1_000).toFixed(0)} n`;
+  return String(Math.round(n));
+}
+
 const Reports = () => {
   const [tab, setTab] = useState('asset');
   const gQ = useAssetGroups();
@@ -70,10 +80,10 @@ const Reports = () => {
   const byStatus = useMemo(
     () =>
       [
-        { name: 'Tồn kho', value: equipments.filter(e => e.status === 'IN_STOCK').length },
-        { name: 'Đang dùng', value: equipments.filter(e => e.status === 'IN_USE').length },
-        { name: 'Đang sửa', value: equipments.filter(e => e.status === 'UNDER_REPAIR').length },
-        { name: 'Hỏng', value: equipments.filter(e => e.status === 'BROKEN').length },
+        { name: 'Tồn kho', value: equipments.filter(e => e.status === 'IN_STOCK').length, fill: COLORS[0] },
+        { name: 'Đang dùng', value: equipments.filter(e => e.status === 'IN_USE').length, fill: COLORS[1] },
+        { name: 'Đang sửa', value: equipments.filter(e => e.status === 'UNDER_REPAIR').length, fill: COLORS[2] },
+        { name: 'Hỏng', value: equipments.filter(e => e.status === 'BROKEN').length, fill: COLORS[3] },
       ].filter(d => d.value > 0),
     [equipments],
   );
@@ -195,14 +205,49 @@ const Reports = () => {
             <Card>
               <CardHeader><CardTitle className="text-base">Phân bổ trạng thái</CardTitle></CardHeader>
               <CardContent>
-                <ResponsiveContainer width="100%" height={300}>
-                  <PieChart>
-                    <Pie data={byStatus} cx="50%" cy="50%" outerRadius={100} dataKey="value" label={({ name, value }) => `${name}: ${value}`}>
-                      {byStatus.map((_, i) => <Cell key={i} fill={COLORS[i % COLORS.length]} />)}
-                    </Pie>
-                    <Tooltip />
-                  </PieChart>
-                </ResponsiveContainer>
+                {byStatus.length === 0 ? (
+                  <p className="py-8 text-center text-sm text-muted-foreground">Chưa có dữ liệu thiết bị</p>
+                ) : (
+                  <div className="flex flex-col gap-4 lg:flex-row lg:items-center">
+                    <div className="min-h-[260px] w-full min-w-0 flex-1 lg:max-w-[58%]">
+                      <ResponsiveContainer width="100%" height={260}>
+                        <PieChart>
+                          <Pie
+                            data={byStatus}
+                            cx="50%"
+                            cy="50%"
+                            innerRadius={0}
+                            outerRadius={100}
+                            dataKey="value"
+                            nameKey="name"
+                            label={false}
+                            labelLine={false}
+                            paddingAngle={1}
+                          >
+                            {byStatus.map((d, i) => (
+                              <Cell key={i} fill={d.fill} stroke="hsl(var(--background))" strokeWidth={1} />
+                            ))}
+                          </Pie>
+                          <Tooltip formatter={(v: number) => [v, 'Số lượng']} />
+                        </PieChart>
+                      </ResponsiveContainer>
+                    </div>
+                    <div className="w-full flex-1 border-t border-border pt-4 lg:border-l lg:border-t-0 lg:pl-5 lg:pt-0">
+                      <p className="mb-3 text-xs font-semibold uppercase tracking-wide text-muted-foreground">Phụ lục</p>
+                      <ul className="space-y-2.5 text-sm">
+                        {byStatus.map((s, i) => (
+                          <li key={i} className="flex items-center justify-between gap-3">
+                            <span className="flex min-w-0 items-center gap-2">
+                              <span className="h-3 w-3 shrink-0 rounded-sm" style={{ backgroundColor: s.fill }} aria-hidden />
+                              <span className="truncate">{s.name}</span>
+                            </span>
+                            <span className="shrink-0 font-semibold tabular-nums">{s.value}</span>
+                          </li>
+                        ))}
+                      </ul>
+                    </div>
+                  </div>
+                )}
               </CardContent>
             </Card>
           </div>
@@ -298,15 +343,26 @@ const Reports = () => {
               {procurementByMonth.length === 0 ? (
                 <p className="text-sm text-muted-foreground">Chưa có dữ liệu phiếu nhập mua.</p>
               ) : (
-                <ResponsiveContainer width="100%" height={320}>
-                  <BarChart data={procurementByMonth.map(r => ({ name: r.month, value: r.amount }))}>
-                    <CartesianGrid strokeDasharray="3 3" />
-                    <XAxis dataKey="name" />
-                    <YAxis />
-                    <Tooltip formatter={(v: number) => formatCurrency(v)} />
-                    <Bar dataKey="value" fill="hsl(347, 100%, 47%)" radius={[4, 4, 0, 0]} />
-                  </BarChart>
-                </ResponsiveContainer>
+                <div className="min-w-0 -mx-1 px-1">
+                  <ResponsiveContainer width="100%" height={320}>
+                    <BarChart
+                      data={procurementByMonth.map(r => ({ name: r.month, value: r.amount }))}
+                      margin={{ top: 8, right: 8, left: 4, bottom: 8 }}
+                    >
+                      <CartesianGrid strokeDasharray="3 3" vertical={false} />
+                      <XAxis dataKey="name" tick={{ fontSize: 11 }} tickMargin={8} />
+                      <YAxis
+                        tick={{ fontSize: 11 }}
+                        tickFormatter={formatVndAxisValue}
+                        tickMargin={6}
+                        width={56}
+                        domain={[0, 'auto']}
+                      />
+                      <Tooltip formatter={(v: number) => formatCurrency(v)} />
+                      <Bar dataKey="value" fill="hsl(347, 100%, 47%)" radius={[4, 4, 0, 0]} />
+                    </BarChart>
+                  </ResponsiveContainer>
+                </div>
               )}
             </CardContent>
           </Card>

@@ -18,7 +18,9 @@ import AssetList from "./pages/admin/AssetList";
 import Suppliers from "./pages/admin/Suppliers";
 import Locations from "./pages/admin/Locations";
 import StockIn from "./pages/admin/StockIn";
+import StockInNew from "./pages/admin/StockInNew";
 import StockOut from "./pages/admin/StockOut";
+import StockOutNew from "./pages/admin/StockOutNew";
 import AssetTracking from "./pages/admin/AssetTracking";
 import AllocationRequests from "./pages/admin/AllocationRequests";
 import RepairRequests from "./pages/admin/RepairRequests";
@@ -84,7 +86,9 @@ const App = () => {
             <Route path="suppliers" element={<Suppliers />} />
             <Route path="locations" element={<Locations />} />
             <Route path="stock-in" element={<StockIn />} />
+            <Route path="stock-in/new" element={<StockInNew />} />
             <Route path="stock-out" element={<StockOut />} />
+            <Route path="stock-out/new" element={<StockOutNew />} />
             <Route path="inventory" element={<Inventory />} />
             <Route path="asset-tracking" element={<AssetTracking />} />
             <Route path="allocation-requests" element={<AllocationRequests />} />

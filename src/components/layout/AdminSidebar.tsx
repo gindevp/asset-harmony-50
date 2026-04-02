@@ -53,15 +53,21 @@ const navItems: NavItem[] = [
   { label: 'Nhật ký & lịch sử thao tác', path: '/admin/system-logs', icon: ScrollText },
 ];
 
+/** Exact match or sub-route (e.g. /admin/stock-in/new highlights Nhập kho). */
+function isRouteActive(pathname: string, path: string) {
+  return pathname === path || pathname.startsWith(`${path}/`);
+}
+
 export const AdminSidebar = () => {
   const navigate = useNavigate();
   const location = useLocation();
+  const pathname = location.pathname;
   const [collapsed, setCollapsed] = useState(false);
   const [hoveredGroup, setHoveredGroup] = useState<string | null>(null);
   const [expandedGroups, setExpandedGroups] = useState<string[]>(() => {
     // Auto-expand group containing current path
     return navItems.filter(item =>
-      item.children?.some(c => location.pathname === c.path)
+      item.children?.some(c => isRouteActive(location.pathname, c.path))
     ).map(item => item.label);
   });
 
@@ -71,9 +77,10 @@ export const AdminSidebar = () => {
     );
   };
 
-  const isActive = (path: string) => location.pathname === path;
+  const isActive = (path: string) => pathname === path;
+  const isChildActive = (path: string) => isRouteActive(pathname, path);
   const isGroupActive = (item: NavItem) =>
-    item.children?.some(c => location.pathname === c.path) ?? false;
+    item.children?.some(c => isRouteActive(pathname, c.path)) ?? false;
 
   return (
     <aside className={cn(
@@ -152,7 +159,7 @@ export const AdminSidebar = () => {
                             to={child.path}
                             className={cn(
                               'sidebar-nav-item text-sm',
-                              isActive(child.path)
+                              isChildActive(child.path)
                                 ? 'bg-primary/20 text-primary font-medium'
                                 : 'text-sidebar-foreground/70 hover:bg-sidebar-accent hover:text-sidebar-foreground',
                             )}
@@ -195,7 +202,7 @@ export const AdminSidebar = () => {
                         to={child.path}
                         className={cn(
                           'sidebar-nav-item text-sm',
-                          isActive(child.path) ? 'bg-primary/20 text-primary font-medium' : 'text-sidebar-foreground/60 hover:bg-sidebar-accent hover:text-sidebar-foreground'
+                          isChildActive(child.path) ? 'bg-primary/20 text-primary font-medium' : 'text-sidebar-foreground/60 hover:bg-sidebar-accent hover:text-sidebar-foreground'
                         )}
                       >
                         <span className="truncate">{child.label}</span>

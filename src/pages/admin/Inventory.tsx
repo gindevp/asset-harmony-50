@@ -1,4 +1,5 @@
 import { useState, useMemo } from 'react';
+import { useQuery } from '@tanstack/react-query';
 import { DataTable, Column } from '@/components/shared/DataTable';
 import { Button } from '@/components/ui/button';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
@@ -12,6 +13,41 @@ import {
   useConsumableStocksView,
   useEnrichedEquipmentList,
 } from '@/hooks/useEntityApi';
+import { apiGet, PAGE_ALL } from '@/api/http';
+import type { StockReceiptDto, StockReceiptLineDto } from '@/api/types';
+
+/** Đơn giá BQGQ từ phiếu nhập đã xác nhận (dòng vật tư, không gắn thiết bị). */
+function buildConsumableAvgUnitPriceByItemId(
+  receipts: StockReceiptDto[],
+  lines: StockReceiptLineDto[],
+): Map<number, number> {
+  const statusByReceiptId = new Map<number, string>();
+  for (const r of receipts) {
+    if (r.id != null) statusByReceiptId.set(r.id, r.status ?? '');
+  }
+  const acc = new Map<number, { qty: number; val: number }>();
+  for (const l of lines) {
+    if (l.equipment != null) continue;
+    const itemId = l.assetItem?.id;
+    if (itemId == null) continue;
+    const rid = l.receipt?.id;
+    const status = l.receipt?.status ?? (rid != null ? statusByReceiptId.get(rid) : undefined);
+    if (status !== 'CONFIRMED') continue;
+    const q = l.quantity ?? 0;
+    if (q <= 0) continue;
+    const p = Number(l.unitPrice ?? 0);
+    if (!Number.isFinite(p)) continue;
+    const cur = acc.get(itemId) ?? { qty: 0, val: 0 };
+    cur.qty += q;
+    cur.val += q * p;
+    acc.set(itemId, cur);
+  }
+  const out = new Map<number, number>();
+  for (const [id, { qty, val }] of acc) {
+    if (qty > 0) out.set(id, val / qty);
+  }
+  return out;
+}
 
 interface InventoryRow {
   id: string;
@@ -59,6 +95,22 @@ const Inventory = () => {
   const equipments = eqQ.data ?? [];
   const consumableStocks = csQ.data ?? [];
 
+  const receiptQ = useQuery({
+    queryKey: ['api', 'stock-receipts', 'lines', 'inventory-value'],
+    queryFn: async () => {
+      const [receipts, lines] = await Promise.all([
+        apiGet<StockReceiptDto[]>(`/api/stock-receipts?${PAGE_ALL}`),
+        apiGet<StockReceiptLineDto[]>(`/api/stock-receipt-lines?${PAGE_ALL}`),
+      ]);
+      return { receipts, lines };
+    },
+  });
+
+  const consumableAvgUnitByItemId = useMemo(
+    () => buildConsumableAvgUnitPriceByItemId(receiptQ.data?.receipts ?? [], receiptQ.data?.lines ?? []),
+    [receiptQ.data?.receipts, receiptQ.data?.lines],
+  );
+
   const [filters, setFilters] = useState<Record<string, string>>({});
   const [page, setPage] = useState(1);
   const [showAdvanced, setShowAdvanced] = useState(false);
@@ -81,18 +133,23 @@ const Inventory = () => {
       } else {
         const cs = consumableStocks.find(c => c.itemId === item.id);
         const group = assetGroups.find(g => g.id === item.groupId);
+        const onHand = cs?.inStockQuantity ?? 0;
+        const itemNum = Number(item.id);
+        const avg =
+          Number.isFinite(itemNum) && itemNum > 0 ? consumableAvgUnitByItemId.get(itemNum) ?? 0 : 0;
+        const totalValue = onHand * avg;
         return {
           id: item.id, code: item.code, name: item.name, managementType: item.managementType,
           groupName: group?.name || '', unit: item.unit,
-          inStock: cs?.inStockQuantity || 0,
+          inStock: onHand,
           inUse: cs?.issuedQuantity || 0,
           broken: cs?.brokenQuantity || 0,
           total: cs?.totalQuantity || 0,
-          totalValue: 0,
+          totalValue,
         };
       }
     });
-  }, [assetItems, equipments, consumableStocks, assetGroups]);
+  }, [assetItems, equipments, consumableStocks, assetGroups, consumableAvgUnitByItemId]);
 
   const filtered = useMemo(() => {
     return inventoryData.filter(row => {

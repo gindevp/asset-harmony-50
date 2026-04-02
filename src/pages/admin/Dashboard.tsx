@@ -163,24 +163,45 @@ const Dashboard = () => {
             <CardTitle className="text-base">Phân bổ theo trạng thái</CardTitle>
           </CardHeader>
           <CardContent>
-            <ResponsiveContainer width="100%" height={250}>
-              <PieChart>
-                <Pie
-                  data={statusChart}
-                  cx="50%"
-                  cy="50%"
-                  innerRadius={60}
-                  outerRadius={90}
-                  dataKey="value"
-                  label={({ name, value }) => `${name}: ${value}`}
-                >
-                  {statusChart.map((entry, i) => (
-                    <Cell key={i} fill={entry.fill} />
+            <div className="flex flex-col gap-4 lg:flex-row lg:items-center">
+              <div className="min-h-[220px] w-full min-w-0 flex-1 lg:max-w-[58%]">
+                <ResponsiveContainer width="100%" height={220}>
+                  <PieChart>
+                    <Pie
+                      data={statusChart}
+                      cx="50%"
+                      cy="50%"
+                      innerRadius={56}
+                      outerRadius={88}
+                      dataKey="value"
+                      nameKey="name"
+                      label={false}
+                      labelLine={false}
+                      paddingAngle={1}
+                    >
+                      {statusChart.map((entry, i) => (
+                        <Cell key={i} fill={entry.fill} stroke="hsl(var(--background))" strokeWidth={1} />
+                      ))}
+                    </Pie>
+                    <Tooltip formatter={(v: number) => [v, 'Số lượng']} />
+                  </PieChart>
+                </ResponsiveContainer>
+              </div>
+              <div className="w-full flex-1 border-t border-border pt-4 lg:border-l lg:border-t-0 lg:pl-5 lg:pt-0">
+                <p className="mb-3 text-xs font-semibold uppercase tracking-wide text-muted-foreground">Phụ lục</p>
+                <ul className="space-y-2.5 text-sm">
+                  {statusChart.map((s, i) => (
+                    <li key={i} className="flex items-center justify-between gap-3">
+                      <span className="flex min-w-0 items-center gap-2">
+                        <span className="h-3 w-3 shrink-0 rounded-sm" style={{ backgroundColor: s.fill }} aria-hidden />
+                        <span className="truncate">{s.name}</span>
+                      </span>
+                      <span className="shrink-0 font-semibold tabular-nums">{s.value}</span>
+                    </li>
                   ))}
-                </Pie>
-                <Tooltip />
-              </PieChart>
-            </ResponsiveContainer>
+                </ul>
+              </div>
+            </div>
           </CardContent>
         </Card>
         <Card>
