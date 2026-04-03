@@ -165,9 +165,6 @@ const Reports = () => {
       <div className="page-header">
         <div>
           <h1 className="page-title">Báo cáo – Thống kê</h1>
-          <p className="page-description">
-            Tổng hợp tài sản, tồn kho, khấu hao — <strong>Xuất CSV</strong> theo tab đang mở (mở bằng Excel/LibreOffice).
-          </p>
         </div>
         <Button
           variant="outline"

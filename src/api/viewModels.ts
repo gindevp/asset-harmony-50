@@ -283,6 +283,7 @@ export function buildAllocationRequests(
     const mapped: AllocationRequestLine[] = rlines.map(l => ({
       id: String(l.id),
       itemId: String(l.assetItem?.id ?? ''),
+      assetLineId: l.assetLine?.id != null ? String(l.assetLine.id) : undefined,
       quantity: l.quantity ?? 0,
       notes: l.note ?? '',
       equipmentId: l.equipment?.id != null ? String(l.equipment.id) : undefined,
@@ -294,6 +295,7 @@ export function buildAllocationRequests(
       requesterId: String(req.requester?.id ?? ''),
       departmentId: String(req.requester?.department?.id ?? ''),
       reason: req.reason ?? '',
+      attachmentNote: req.attachmentNote ?? undefined,
       beneficiaryNote: req.beneficiaryNote ?? undefined,
       assigneeType,
       assigneeSummary,

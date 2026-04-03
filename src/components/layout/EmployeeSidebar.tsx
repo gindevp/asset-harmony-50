@@ -1,17 +1,42 @@
 import { NavLink, useLocation, useNavigate } from 'react-router-dom';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { Package, Wrench, RotateCcw, ClipboardList, Menu, X } from 'lucide-react';
+import { ClipboardList, Menu, Package, RotateCcw, Wrench, X } from 'lucide-react';
+import { AccountInfoDialog } from '@/components/layout/AccountInfoDialog';
 import { SidebarUserPanel } from '@/components/layout/SidebarUserPanel';
 import { apiGet, getStoredToken, setStoredToken } from '@/api/http';
+import { showEmployeePersonalNavLinks } from '@/auth/jwt';
 import { getAccountDisplayLabel } from '@/api/account';
-import type { AdminUserDto } from '@/api/types';
+import type { AdminUserDto, EmployeeDto } from '@/api/types';
 import { cn } from '@/lib/utils';
-import { useState } from 'react';
+import { useState, type ComponentType } from 'react';
 
-const navItems = [
-  { label: 'Yêu cầu cấp phát', path: '/employee/allocation-requests', icon: ClipboardList },
-  { label: 'Yêu cầu sửa chữa', path: '/employee/repair-requests', icon: Wrench },
-  { label: 'Yêu cầu thu hồi', path: '/employee/return-requests', icon: RotateCcw },
+interface NavItem {
+  label: string;
+  path: string;
+  icon: ComponentType<{ className?: string }>;
+  /** Highlight khi đang tạo YC tại /employee/request-new?kind=... */
+  requestNewKind?: 'allocation' | 'repair' | 'return';
+}
+
+const navItems: NavItem[] = [
+  {
+    label: 'Yêu cầu cấp phát',
+    path: '/employee/allocation-requests',
+    icon: ClipboardList,
+    requestNewKind: 'allocation',
+  },
+  {
+    label: 'Yêu cầu sửa chữa',
+    path: '/employee/repair-requests',
+    icon: Wrench,
+    requestNewKind: 'repair',
+  },
+  {
+    label: 'Yêu cầu thu hồi',
+    path: '/employee/return-requests',
+    icon: RotateCcw,
+    requestNewKind: 'return',
+  },
   { label: 'Tài sản của tôi', path: '/employee/my-assets', icon: Package },
 ];
 
@@ -19,21 +44,46 @@ export const EmployeeSidebar = () => {
   const navigate = useNavigate();
   const queryClient = useQueryClient();
   const location = useLocation();
+  const pathname = location.pathname;
   const [collapsed, setCollapsed] = useState(false);
 
   const accountQ = useQuery({
     queryKey: ['api', 'account'],
     queryFn: () => apiGet<AdminUserDto>('/api/account'),
     enabled: !!getStoredToken(),
-    staleTime: 60_000,
+    staleTime: 0,
+    refetchOnWindowFocus: true,
   });
   const accountLabel = getAccountDisplayLabel(accountQ.data ?? undefined);
+  const [accountDialogOpen, setAccountDialogOpen] = useState(false);
+  const employeeId = accountQ.data?.employeeId != null ? Number(accountQ.data.employeeId) : NaN;
+  const employeeQ = useQuery({
+    queryKey: ['api', 'employees', 'me-linked', employeeId],
+    queryFn: () => apiGet<EmployeeDto>(`/api/employees/${employeeId}`),
+    enabled: Number.isFinite(employeeId),
+    staleTime: 0,
+    refetchOnWindowFocus: true,
+  });
+
+  const showPersonalNav = showEmployeePersonalNavLinks(getStoredToken());
+  const visibleNavItems = showPersonalNav ? navItems : [];
+
+  const navActive = (item: NavItem) => {
+    if (pathname.startsWith('/employee/request-new')) {
+      if (!item.requestNewKind) return false;
+      const kind = new URLSearchParams(location.search).get('kind') || 'allocation';
+      return item.requestNewKind === kind;
+    }
+    return pathname === item.path || pathname.startsWith(`${item.path}/`);
+  };
 
   return (
-    <aside className={cn(
-      'h-screen bg-sidebar text-sidebar-foreground flex flex-col transition-all duration-300 sticky top-0',
-      collapsed ? 'w-16' : 'w-60'
-    )}>
+    <aside
+      className={cn(
+        'h-screen bg-sidebar text-sidebar-foreground flex flex-col transition-all duration-300 sticky top-0',
+        collapsed ? 'w-16' : 'w-60',
+      )}
+    >
       <div className="h-14 flex items-center px-4 border-b border-sidebar-border flex-shrink-0">
         {!collapsed && (
           <div className="flex items-center gap-2 flex-1 min-w-0">
@@ -49,15 +99,14 @@ export const EmployeeSidebar = () => {
       </div>
 
       <nav className="flex-1 overflow-y-auto py-3 px-2 space-y-0.5">
-        {navItems.map(item => (
+        {visibleNavItems.map(item => (
           <NavLink
             key={item.path}
             to={item.path}
             className={cn(
               'sidebar-nav-item',
-              location.pathname === item.path
-                ? 'bg-primary/20 text-primary font-medium'
-                : 'text-sidebar-foreground/70 hover:bg-sidebar-accent hover:text-sidebar-foreground'
+              navActive(item) && 'bg-primary/20 text-primary font-medium',
+              !navActive(item) && 'text-sidebar-foreground/70 hover:bg-sidebar-accent hover:text-sidebar-foreground',
             )}
           >
             <item.icon className="h-4 w-4 flex-shrink-0" />
@@ -71,6 +120,11 @@ export const EmployeeSidebar = () => {
           <SidebarUserPanel
             displayName={accountLabel}
             isLoading={accountQ.isLoading}
+            onOpenDetails={() => {
+              void accountQ.refetch();
+              void employeeQ.refetch();
+              setAccountDialogOpen(true);
+            }}
             onLogout={() => {
               setStoredToken(null);
               void queryClient.removeQueries({ queryKey: ['api', 'account'] });
@@ -79,6 +133,15 @@ export const EmployeeSidebar = () => {
           />
         </div>
       )}
+
+      <AccountInfoDialog
+        open={accountDialogOpen}
+        onOpenChange={setAccountDialogOpen}
+        account={accountQ.data}
+        accountLoading={accountQ.isLoading}
+        employee={employeeQ.data}
+        employeeLoading={employeeQ.isLoading}
+      />
     </aside>
   );
 };

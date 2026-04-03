@@ -19,13 +19,14 @@ interface SidebarUserPanelProps {
   displayName: string;
   isLoading: boolean;
   onLogout: () => void;
+  onOpenDetails?: () => void;
   className?: string;
 }
 
 /**
  * Khối người dùng + đăng xuất cuối sidebar (admin / nhân viên).
  */
-export function SidebarUserPanel({ displayName, isLoading, onLogout, className }: SidebarUserPanelProps) {
+export function SidebarUserPanel({ displayName, isLoading, onLogout, onOpenDetails, className }: SidebarUserPanelProps) {
   const show = isLoading ? null : displayName || '—';
   const initials = initialsFromDisplayName(displayName || '');
 
@@ -36,7 +37,18 @@ export function SidebarUserPanel({ displayName, isLoading, onLogout, className }
           'relative overflow-hidden rounded-xl border border-sidebar-border/80',
           'bg-gradient-to-br from-primary/[0.07] via-sidebar-accent/60 to-sidebar-accent/30',
           'p-3 shadow-sm ring-1 ring-black/[0.04] dark:ring-white/[0.06]',
+          onOpenDetails && 'cursor-pointer transition hover:-translate-y-0.5 hover:border-primary/50 hover:shadow-md',
         )}
+        role={onOpenDetails ? 'button' : undefined}
+        tabIndex={onOpenDetails ? 0 : undefined}
+        onClick={onOpenDetails}
+        onKeyDown={e => {
+          if (!onOpenDetails) return;
+          if (e.key === 'Enter' || e.key === ' ') {
+            e.preventDefault();
+            onOpenDetails();
+          }
+        }}
       >
         <div
           className="pointer-events-none absolute -right-6 -top-6 h-24 w-24 rounded-full bg-primary/[0.12] blur-2xl"

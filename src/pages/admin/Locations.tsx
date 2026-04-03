@@ -131,7 +131,6 @@ const Locations = () => {
       <div className="page-header">
         <div>
           <h1 className="page-title">Danh mục vị trí</h1>
-          <p className="page-description">Khu vực / vị trí phục vụ xuất kho (Công ty / vị trí) — CRUD /api/locations</p>
         </div>
         <Button size="sm" onClick={() => setAddOpen(true)}>
           <Plus className="h-4 w-4 mr-1" /> Thêm vị trí

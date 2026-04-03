@@ -341,7 +341,6 @@ const StockOutPage = () => {
       <div className="page-header">
         <div>
           <h1 className="page-title">Xuất kho</h1>
-          <p className="page-description">Quản lý phiếu xuất kho / cấp phát</p>
         </div>
         <Button asChild>
           <Link to="/admin/stock-out/new">
@@ -429,9 +428,6 @@ const StockOutPage = () => {
           </DialogHeader>
           {editOutDraft && (
             <div className="space-y-4">
-              <p className="text-sm text-muted-foreground">
-                Chỉnh ngày phiếu, đối tượng nhận và ghi chú. Dòng xuất đã tạo không đổi từ đây — xóa phiếu và tạo lại nếu cần sửa dòng.
-              </p>
               <div className="space-y-2">
                 <Label>Ngày phiếu</Label>
                 <Input type="date" value={editOutDate} onChange={e => setEditOutDate(e.target.value)} />

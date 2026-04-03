@@ -6,7 +6,7 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { ArrowLeft, PlusCircle, Trash2 } from 'lucide-react';
 import { formatCurrency } from '@/data/mockData';
@@ -362,17 +362,13 @@ const StockInNewPage = () => {
             </Link>
           </Button>
           <h1 className="page-title">Tạo phiếu nhập kho</h1>
-          <p className="page-description max-w-2xl">
-            Thông tin chung bên trái, chi tiết từng dòng hàng bên phải — mã phiếu tự sinh khi lưu.
-          </p>
         </div>
       </header>
 
       <div className="grid grid-cols-1 gap-6 xl:grid-cols-[minmax(280px,380px)_minmax(0,1fr)] xl:items-start xl:gap-8">
         <Card className="xl:sticky xl:top-6 h-fit shadow-sm">
           <CardHeader className="pb-3">
-            <CardTitle className="text-base">Thông tin phiếu</CardTitle>
-            <CardDescription>Nguồn, nhà cung cấp và ghi chú chung.</CardDescription>
+            <CardTitle className="text-base text-primary">Thông tin phiếu</CardTitle>
           </CardHeader>
           <CardContent className="space-y-4">
             <div className="space-y-2">
@@ -414,10 +410,7 @@ const StockInNewPage = () => {
 
         <Card className="min-w-0 shadow-sm">
           <CardHeader className="pb-3">
-            <CardTitle className="text-base">Chi tiết hàng nhập</CardTitle>
-            <CardDescription>
-              Chọn loại tab (thiết bị / vật tư), thêm dòng và điền đủ thông tin từng dòng.
-            </CardDescription>
+            <CardTitle className="text-base text-primary">Chi tiết hàng nhập</CardTitle>
           </CardHeader>
           <CardContent className="space-y-4">
             <div className="space-y-3">
@@ -435,7 +428,7 @@ const StockInNewPage = () => {
                   <Card key={line.id}>
                     <CardHeader className="py-3 px-4">
                       <div className="flex items-center justify-between">
-                        <CardTitle className="text-sm">Dòng {idx + 1}</CardTitle>
+                        <CardTitle className="text-sm text-primary">Dòng {idx + 1}</CardTitle>
                         <Button variant="ghost" size="icon" className="h-7 w-7 text-muted-foreground hover:text-destructive" onClick={() => removeDeviceLine(line.id)}>
                           <Trash2 className="h-4 w-4" />
                         </Button>

@@ -40,7 +40,6 @@ const RolesPage = () => {
       <div className="page-header">
         <div>
           <h1 className="page-title">Vai trò & Quyền</h1>
-          <p className="page-description">Ma trận phân quyền hệ thống</p>
         </div>
       </div>
 

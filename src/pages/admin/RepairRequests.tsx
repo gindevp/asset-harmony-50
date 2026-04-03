@@ -1,13 +1,25 @@
 import { useEffect, useMemo, useState } from 'react';
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from '@/components/ui/alert-dialog';
 import { useQueryClient } from '@tanstack/react-query';
 import { DataTable, Column } from '@/components/shared/DataTable';
 import { StatusBadge } from '@/components/shared/StatusBadge';
 import { FilterBar } from '@/components/shared/FilterBar';
 import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { Eye } from 'lucide-react';
+import { Textarea } from '@/components/ui/textarea';
+import { Eye, Pencil, Trash2 } from 'lucide-react';
 import type { RepairRequest } from '@/data/mockData';
 import {
   repairStatusLabels,
@@ -19,6 +31,7 @@ import {
 import { toast } from 'sonner';
 import { formatBizCodeDisplay, formatEquipmentCodeDisplay } from '@/utils/formatCodes';
 import { ApprovalActionBar } from '@/components/shared/ApprovalActionBar';
+import { RequesterEmployeeInfo } from '@/components/shared/RequesterEmployeeInfo';
 import {
   mapAssetItemDto,
   useAssetItems,
@@ -27,36 +40,15 @@ import {
   useEnrichedEquipmentList,
   useRepairRequestsView,
 } from '@/hooks/useEntityApi';
-import { apiPatch } from '@/api/http';
+import { ApiError, apiDelete, apiPatch, parseProblemDetailJson } from '@/api/http';
+import { AttachmentNoteView } from '@/components/shared/AttachmentNoteView';
+import { canDeleteRepairRequest, canEditRepairRequestFields } from '@/utils/requestRecordActions';
 
 const outcomeLabels: Record<string, string> = {
   RETURN_USER: 'Trả lại người dùng',
   RETURN_STOCK: 'Trả về kho',
   MARK_BROKEN: 'Đánh dấu hỏng',
 };
-
-function RepairAttachmentNoteView({ text }: { text: string }) {
-  const lines = text.split('\n').map(l => l.trim()).filter(Boolean);
-  const textLines: string[] = [];
-  const files: string[] = [];
-  for (const line of lines) {
-    if (line.startsWith('FILE:')) files.push(line.slice(5).trim());
-    else textLines.push(line);
-  }
-  return (
-    <div className="space-y-2">
-      <span className="text-muted-foreground">Đính kèm / ghi chú:</span>
-      {textLines.length > 0 ? (
-        <p className="text-sm whitespace-pre-wrap">{textLines.join('\n')}</p>
-      ) : null}
-      {files.map(u => (
-        <a key={u} href={u} target="_blank" rel="noopener noreferrer" className="text-sm text-primary underline block">
-          Mở file đính kèm
-        </a>
-      ))}
-    </div>
-  );
-}
 
 const RepairRequests = () => {
   const qc = useQueryClient();
@@ -75,8 +67,20 @@ const RepairRequests = () => {
   const [filters, setFilters] = useState<Record<string, string>>({});
   const [page, setPage] = useState(1);
   const [selected, setSelected] = useState<RepairRequest | null>(null);
+  const [dialogMode, setDialogMode] = useState<'view' | 'edit'>('view');
+  const [editIssue, setEditIssue] = useState('');
+  const [editDesc, setEditDesc] = useState('');
+  const [editAttachment, setEditAttachment] = useState('');
+  const [deleteTarget, setDeleteTarget] = useState<RepairRequest | null>(null);
   const [outcome, setOutcome] = useState<string>('RETURN_USER');
   const [busy, setBusy] = useState(false);
+
+  useEffect(() => {
+    if (!selected || dialogMode !== 'edit') return;
+    setEditIssue(selected.issue ?? '');
+    setEditDesc(selected.description ?? '');
+    setEditAttachment(selected.attachmentNote ?? '');
+  }, [selected?.id, dialogMode, selected?.issue, selected?.description, selected?.attachmentNote]);
 
   useEffect(() => {
     if (!selected) return;
@@ -93,9 +97,53 @@ const RepairRequests = () => {
       await apiPatch(`/api/repair-requests/${selected.id}`, { id: Number(selected.id), ...body });
       toast.success('Đã cập nhật yêu cầu sửa chữa');
       setSelected(null);
+      setDialogMode('view');
       invalidate();
     } catch (e) {
-      toast.error(e instanceof Error ? e.message : 'Lỗi API');
+      const bodyErr = e instanceof ApiError ? e.body : undefined;
+      toast.error(parseProblemDetailJson(bodyErr ?? '') || (e instanceof Error ? e.message : 'Lỗi API'));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const saveRepairContent = async () => {
+    if (!selected) return;
+    setBusy(true);
+    try {
+      await apiPatch(`/api/repair-requests/${selected.id}`, {
+        id: Number(selected.id),
+        problemCategory: editIssue.trim().slice(0, 100),
+        description: editDesc.trim() || undefined,
+        attachmentNote: editAttachment.trim() || undefined,
+      });
+      toast.success('Đã lưu thay đổi');
+      setDialogMode('view');
+      setSelected(null);
+      invalidate();
+    } catch (e) {
+      const bodyErr = e instanceof ApiError ? e.body : undefined;
+      toast.error(parseProblemDetailJson(bodyErr ?? '') || (e instanceof Error ? e.message : 'Lỗi API'));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const confirmDeleteRepair = async () => {
+    if (!deleteTarget) return;
+    setBusy(true);
+    try {
+      await apiDelete(`/api/repair-requests/${deleteTarget.id}`);
+      toast.success('Đã xóa yêu cầu');
+      if (selected?.id === deleteTarget.id) {
+        setSelected(null);
+        setDialogMode('view');
+      }
+      setDeleteTarget(null);
+      invalidate();
+    } catch (e) {
+      const bodyErr = e instanceof ApiError ? e.body : undefined;
+      toast.error(parseProblemDetailJson(bodyErr ?? '') || (e instanceof Error ? e.message : 'Lỗi API'));
     } finally {
       setBusy(false);
     }
@@ -144,11 +192,51 @@ const RepairRequests = () => {
     { key: 'createdAt', label: 'Ngày tạo', render: r => formatDate(r.createdAt) },
     {
       key: 'actions',
-      label: '',
+      label: 'Thao tác',
+      className: 'w-[9rem]',
       render: r => (
-        <Button variant="ghost" size="sm" onClick={e => { e.stopPropagation(); setSelected(r); }}>
-          <Eye className="h-4 w-4" />
-        </Button>
+        <div className="flex items-center gap-0.5" onClick={e => e.stopPropagation()}>
+          <Button
+            type="button"
+            variant="ghost"
+            size="icon"
+            className="h-8 w-8"
+            title="Xem"
+            onClick={() => {
+              setDialogMode('view');
+              setSelected(r);
+            }}
+          >
+            <Eye className="h-4 w-4" />
+          </Button>
+          {canEditRepairRequestFields(r.status) ? (
+            <Button
+              type="button"
+              variant="ghost"
+              size="icon"
+              className="h-8 w-8"
+              title="Sửa"
+              onClick={() => {
+                setDialogMode('edit');
+                setSelected(r);
+              }}
+            >
+              <Pencil className="h-4 w-4" />
+            </Button>
+          ) : null}
+          {canDeleteRepairRequest(r.status) ? (
+            <Button
+              type="button"
+              variant="ghost"
+              size="icon"
+              className="h-8 w-8 text-destructive hover:text-destructive"
+              title="Xóa"
+              onClick={() => setDeleteTarget(r)}
+            >
+              <Trash2 className="h-4 w-4" />
+            </Button>
+          ) : null}
+        </div>
       ),
     },
   ];
@@ -158,7 +246,6 @@ const RepairRequests = () => {
       <div className="page-header">
         <div>
           <h1 className="page-title">Yêu cầu sửa chữa</h1>
-          <p className="page-description">Tiếp nhận và xử lý yêu cầu sửa chữa thiết bị</p>
         </div>
       </div>
       <FilterBar
@@ -172,16 +259,27 @@ const RepairRequests = () => {
       />
       <DataTable columns={columns} data={sorted} currentPage={page} onPageChange={setPage} />
 
-      <Dialog open={!!selected} onOpenChange={() => setSelected(null)}>
+      <Dialog
+        open={!!selected}
+        onOpenChange={open => {
+          if (!open) {
+            setSelected(null);
+            setDialogMode('view');
+          }
+        }}
+      >
         <DialogContent className="max-w-2xl">
           <DialogHeader>
-            <DialogTitle>Chi tiết yêu cầu sửa chữa {selected ? formatBizCodeDisplay(selected.code) : ''}</DialogTitle>
+            <DialogTitle>
+              {dialogMode === 'edit' ? 'Sửa yêu cầu' : 'Chi tiết yêu cầu'} sửa chữa{' '}
+              {selected ? formatBizCodeDisplay(selected.code) : ''}
+            </DialogTitle>
           </DialogHeader>
           {selected && (
             <div className="space-y-4">
+              <RequesterEmployeeInfo requesterId={selected.requesterId} employees={employees} />
               <div className="grid grid-cols-2 gap-3 text-sm">
-                <div><span className="text-muted-foreground">Người yêu cầu:</span> {getEmployeeName(selected.requesterId, employees)}</div>
-                <div><span className="text-muted-foreground">Phòng ban:</span> {getDepartmentName(selected.departmentId, departments)}</div>
+                <div><span className="text-muted-foreground">Phòng ban (trên phiếu):</span> {getDepartmentName(selected.departmentId, departments)}</div>
                 <div>
                   <span className="text-muted-foreground">Thiết bị:</span>{' '}
                   {(() => {
@@ -197,15 +295,40 @@ const RepairRequests = () => {
                   <div><span className="text-muted-foreground">Kết quả xử lý:</span> {outcomeLabels[selected.result] ?? selected.result}</div>
                 )}
               </div>
-              <div className="p-3 rounded-md bg-muted">
-                <p className="text-sm font-medium mb-1">Vấn đề: {selected.issue}</p>
-                <p className="text-sm text-muted-foreground">{selected.description}</p>
-                {selected.attachmentNote ? (
-                  <div className="mt-2">
-                    <RepairAttachmentNoteView text={selected.attachmentNote} />
+              {dialogMode === 'edit' && canEditRepairRequestFields(selected.status) ? (
+                <div className="space-y-3 border rounded-md p-3 bg-muted/20">
+                  <div className="space-y-2">
+                    <Label>Vấn đề (tối đa 100 ký tự)</Label>
+                    <Input value={editIssue} onChange={e => setEditIssue(e.target.value)} maxLength={100} disabled={busy} />
                   </div>
-                ) : null}
-              </div>
+                  <div className="space-y-2">
+                    <Label>Mô tả chi tiết</Label>
+                    <Textarea value={editDesc} onChange={e => setEditDesc(e.target.value)} rows={3} disabled={busy} />
+                  </div>
+                  <div className="space-y-2">
+                    <Label>Ghi chú / link đính kèm (FILE:url…)</Label>
+                    <Textarea value={editAttachment} onChange={e => setEditAttachment(e.target.value)} rows={2} disabled={busy} />
+                  </div>
+                  <div className="flex flex-wrap gap-2">
+                    <Button type="button" size="sm" disabled={busy} onClick={() => void saveRepairContent()}>
+                      Lưu
+                    </Button>
+                    <Button type="button" size="sm" variant="outline" disabled={busy} onClick={() => setDialogMode('view')}>
+                      Xem (thoát sửa)
+                    </Button>
+                  </div>
+                </div>
+              ) : (
+                <div className="p-3 rounded-md bg-muted">
+                  <p className="text-sm font-medium mb-1">Vấn đề: {selected.issue}</p>
+                  <p className="text-sm text-muted-foreground">{selected.description}</p>
+                  {selected.attachmentNote ? (
+                    <div className="mt-2">
+                      <AttachmentNoteView text={selected.attachmentNote} />
+                    </div>
+                  ) : null}
+                </div>
+              )}
               {selected.status === 'NEW' && (
                 <ApprovalActionBar
                   approveLabel="Tiếp nhận"
@@ -247,6 +370,30 @@ const RepairRequests = () => {
           )}
         </DialogContent>
       </Dialog>
+
+      <AlertDialog open={!!deleteTarget} onOpenChange={open => { if (!open) setDeleteTarget(null); }}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Xóa yêu cầu sửa chữa?</AlertDialogTitle>
+            <AlertDialogDescription>
+              {deleteTarget ? `Không hoàn tác. Mã: ${formatBizCodeDisplay(deleteTarget.code)}` : ''}
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={busy}>Hủy</AlertDialogCancel>
+            <AlertDialogAction
+              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+              disabled={busy}
+              onClick={e => {
+                e.preventDefault();
+                void confirmDeleteRepair();
+              }}
+            >
+              Xóa
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 };

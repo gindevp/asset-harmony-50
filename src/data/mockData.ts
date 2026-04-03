@@ -206,7 +206,10 @@ export type AllocationRequestStatus =
 
 export interface AllocationRequestLine {
   id: string;
+  /** Vật tư: mã item; thiết bị theo dòng tài sản có thể để trống */
   itemId: string;
+  /** Thiết bị: dòng tài sản (master) trên phiếu yêu cầu */
+  assetLineId?: string;
   quantity: number;
   equipmentId?: string;
   notes: string;
@@ -220,6 +223,8 @@ export interface AllocationRequest {
   requesterId: string;
   departmentId: string;
   reason: string;
+  /** Ghi chú / FILE:url đính kèm */
+  attachmentNote?: string;
   /** Đối tượng nhận / ghi chú người hưởng (theo tài liệu) */
   beneficiaryNote?: string;
   assigneeType: AllocationAssigneeType;
@@ -344,6 +349,19 @@ export function itemCode(
   return i?.code ?? id;
 }
 
+/** Hiển thị dòng tài sản (danh mục) theo id */
+export function assetLineDisplay(
+  id: string,
+  lines: { id?: number; code?: string; name?: string }[],
+): string {
+  if (!id) return '—';
+  const l = lines.find(x => String(x.id) === id);
+  if (!l) return id;
+  const c = (l.code ?? '').trim();
+  const n = (l.name ?? '').trim();
+  return c && n ? `${c} — ${n}` : n || c || id;
+}
+
 export function supplierName(
   id: string,
   suppliers: { id?: number; name?: string }[],
@@ -359,6 +377,7 @@ export const getLocationName = locationName;
 export const getItemName = itemName;
 export const getItemCode = itemCode;
 export const getSupplierName = supplierName;
+export const getAssetLineDisplay = assetLineDisplay;
 
 export const formatCurrency = (amount: number) =>
   new Intl.NumberFormat('vi-VN', { style: 'currency', currency: 'VND' }).format(amount);

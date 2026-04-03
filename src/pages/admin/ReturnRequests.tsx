@@ -1,12 +1,24 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from '@/components/ui/alert-dialog';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { DataTable, Column } from '@/components/shared/DataTable';
 import { StatusBadge } from '@/components/shared/StatusBadge';
 import { FilterBar } from '@/components/shared/FilterBar';
 import { Button } from '@/components/ui/button';
+import { Label } from '@/components/ui/label';
+import { Textarea } from '@/components/ui/textarea';
 import { Checkbox } from '@/components/ui/checkbox';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
-import { Eye } from 'lucide-react';
+import { Eye, Pencil, Trash2 } from 'lucide-react';
 import type { ReturnRequest } from '@/data/mockData';
 import {
   returnStatusLabels,
@@ -18,6 +30,7 @@ import {
 import { toast } from 'sonner';
 import { formatBizCodeDisplay, formatEquipmentCodeDisplay } from '@/utils/formatCodes';
 import { ApprovalActionBar } from '@/components/shared/ApprovalActionBar';
+import { RequesterEmployeeInfo } from '@/components/shared/RequesterEmployeeInfo';
 import {
   mapAssetItemDto,
   useAssetItems,
@@ -25,8 +38,9 @@ import {
   useEmployees,
   useReturnRequestsView,
 } from '@/hooks/useEntityApi';
-import { apiGet, apiPatch, PAGE_ALL } from '@/api/http';
+import { ApiError, apiDelete, apiGet, apiPatch, parseProblemDetailJson, PAGE_ALL } from '@/api/http';
 import type { ReturnRequestLineDto } from '@/api/types';
+import { canDeleteReturnRequest, canEditReturnRequestFields } from '@/utils/requestRecordActions';
 
 const ReturnRequests = () => {
   const qc = useQueryClient();
@@ -42,7 +56,15 @@ const ReturnRequests = () => {
   const [filters, setFilters] = useState<Record<string, string>>({});
   const [page, setPage] = useState(1);
   const [selected, setSelected] = useState<ReturnRequest | null>(null);
+  const [dialogMode, setDialogMode] = useState<'view' | 'edit'>('view');
+  const [editReturnReason, setEditReturnReason] = useState('');
+  const [deleteTarget, setDeleteTarget] = useState<ReturnRequest | null>(null);
   const [busy, setBusy] = useState(false);
+
+  useEffect(() => {
+    if (!selected || dialogMode !== 'edit') return;
+    setEditReturnReason(selected.reason ?? '');
+  }, [selected?.id, dialogMode, selected?.reason]);
 
   const rawLinesQ = useQuery({
     queryKey: ['api', 'return-request-lines', 'for', selected?.id],
@@ -62,6 +84,46 @@ const ReturnRequests = () => {
     void qc.invalidateQueries({ queryKey: ['api', 'consumable-stocks-view'] });
   };
 
+  const saveReturnNote = async () => {
+    if (!selected) return;
+    setBusy(true);
+    try {
+      await apiPatch(`/api/return-requests/${selected.id}`, {
+        id: Number(selected.id),
+        note: editReturnReason.trim(),
+      });
+      toast.success('Đã lưu thay đổi');
+      setDialogMode('view');
+      setSelected(null);
+      invalidate();
+    } catch (e) {
+      const bodyErr = e instanceof ApiError ? e.body : undefined;
+      toast.error(parseProblemDetailJson(bodyErr ?? '') || (e instanceof Error ? e.message : 'Lỗi API'));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const confirmDeleteReturn = async () => {
+    if (!deleteTarget) return;
+    setBusy(true);
+    try {
+      await apiDelete(`/api/return-requests/${deleteTarget.id}`);
+      toast.success('Đã xóa yêu cầu');
+      if (selected?.id === deleteTarget.id) {
+        setSelected(null);
+        setDialogMode('view');
+      }
+      setDeleteTarget(null);
+      invalidate();
+    } catch (e) {
+      const bodyErr = e instanceof ApiError ? e.body : undefined;
+      toast.error(parseProblemDetailJson(bodyErr ?? '') || (e instanceof Error ? e.message : 'Lỗi API'));
+    } finally {
+      setBusy(false);
+    }
+  };
+
   const patchReturnStatus = async (status: string) => {
     if (!selected) return;
     setBusy(true);
@@ -73,12 +135,15 @@ const ReturnRequests = () => {
       } else if (status === 'REJECTED') {
         toast.success('Đã từ chối yêu cầu');
         setSelected(null);
+        setDialogMode('view');
       } else if (status === 'COMPLETED') {
         toast.success('Đã hoàn thành thu hồi (cập nhật kho & bàn giao)');
         setSelected(null);
+        setDialogMode('view');
       } else {
         toast.success('Đã cập nhật yêu cầu');
         setSelected(null);
+        setDialogMode('view');
       }
       invalidate();
     } catch (e) {
@@ -155,11 +220,51 @@ const ReturnRequests = () => {
     { key: 'createdAt', label: 'Ngày tạo', render: r => formatDate(r.createdAt) },
     {
       key: 'actions',
-      label: '',
+      label: 'Thao tác',
+      className: 'w-[9rem]',
       render: r => (
-        <Button variant="ghost" size="sm" onClick={e => { e.stopPropagation(); setSelected(r); }}>
-          <Eye className="h-4 w-4" />
-        </Button>
+        <div className="flex items-center gap-0.5" onClick={e => e.stopPropagation()}>
+          <Button
+            type="button"
+            variant="ghost"
+            size="icon"
+            className="h-8 w-8"
+            title="Xem"
+            onClick={() => {
+              setDialogMode('view');
+              setSelected(r);
+            }}
+          >
+            <Eye className="h-4 w-4" />
+          </Button>
+          {canEditReturnRequestFields(r.status) ? (
+            <Button
+              type="button"
+              variant="ghost"
+              size="icon"
+              className="h-8 w-8"
+              title="Sửa"
+              onClick={() => {
+                setDialogMode('edit');
+                setSelected(r);
+              }}
+            >
+              <Pencil className="h-4 w-4" />
+            </Button>
+          ) : null}
+          {canDeleteReturnRequest(r.status) ? (
+            <Button
+              type="button"
+              variant="ghost"
+              size="icon"
+              className="h-8 w-8 text-destructive hover:text-destructive"
+              title="Xóa"
+              onClick={() => setDeleteTarget(r)}
+            >
+              <Trash2 className="h-4 w-4" />
+            </Button>
+          ) : null}
+        </div>
       ),
     },
   ];
@@ -186,9 +291,6 @@ const ReturnRequests = () => {
       <div className="page-header">
         <div>
           <h1 className="page-title">Yêu cầu thu hồi</h1>
-          <p className="page-description">
-            Duyệt → chọn dòng thu hồi và hướng xử lý (kho / sửa / hỏng / mất) → hoàn tất để cập nhật kho và trạng thái thiết bị
-          </p>
         </div>
       </div>
       <FilterBar
@@ -202,17 +304,44 @@ const ReturnRequests = () => {
       />
       <DataTable columns={columns} data={sorted} currentPage={page} onPageChange={setPage} />
 
-      <Dialog open={!!selected} onOpenChange={() => setSelected(null)}>
+      <Dialog
+        open={!!selected}
+        onOpenChange={open => {
+          if (!open) {
+            setSelected(null);
+            setDialogMode('view');
+          }
+        }}
+      >
         <DialogContent className="max-w-3xl max-h-[90vh] overflow-y-auto">
-          <DialogHeader><DialogTitle>Chi tiết yêu cầu thu hồi {selected?.code}</DialogTitle></DialogHeader>
+          <DialogHeader>
+            <DialogTitle>
+              {dialogMode === 'edit' ? 'Sửa yêu cầu' : 'Chi tiết yêu cầu'} thu hồi {selected?.code}
+            </DialogTitle>
+          </DialogHeader>
           {selected && (
             <div className="space-y-4">
+              <RequesterEmployeeInfo requesterId={selected.requesterId} employees={employees} />
               <div className="grid grid-cols-2 gap-3 text-sm">
-                <div><span className="text-muted-foreground">Người yêu cầu:</span> {getEmployeeName(selected.requesterId, employees)}</div>
-                <div><span className="text-muted-foreground">Phòng ban:</span> {getDepartmentName(selected.departmentId, departments)}</div>
+                <div><span className="text-muted-foreground">Phòng ban (trên phiếu):</span> {getDepartmentName(selected.departmentId, departments)}</div>
                 <div><span className="text-muted-foreground">Ngày tạo:</span> {formatDate(selected.createdAt)}</div>
                 <div><span className="text-muted-foreground">Trạng thái:</span> <StatusBadge status={selected.status} label={returnStatusLabels[selected.status]} /></div>
-                <div className="col-span-2"><span className="text-muted-foreground">Lý do:</span> {selected.reason}</div>
+                {dialogMode === 'edit' && canEditReturnRequestFields(selected.status) ? (
+                  <div className="col-span-2 space-y-2 border rounded-md p-3 bg-muted/20">
+                    <Label>Lý do / ghi chú</Label>
+                    <Textarea value={editReturnReason} onChange={e => setEditReturnReason(e.target.value)} rows={3} disabled={busy} />
+                    <div className="flex flex-wrap gap-2 pt-1">
+                      <Button type="button" size="sm" disabled={busy} onClick={() => void saveReturnNote()}>
+                        Lưu
+                      </Button>
+                      <Button type="button" size="sm" variant="outline" disabled={busy} onClick={() => setDialogMode('view')}>
+                        Xem (thoát sửa)
+                      </Button>
+                    </div>
+                  </div>
+                ) : (
+                  <div className="col-span-2"><span className="text-muted-foreground">Lý do:</span> {selected.reason}</div>
+                )}
               </div>
 
               {selected.status === 'APPROVED' ? (
@@ -302,6 +431,30 @@ const ReturnRequests = () => {
           )}
         </DialogContent>
       </Dialog>
+
+      <AlertDialog open={!!deleteTarget} onOpenChange={open => { if (!open) setDeleteTarget(null); }}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Xóa yêu cầu thu hồi?</AlertDialogTitle>
+            <AlertDialogDescription>
+              {deleteTarget ? `Không hoàn tác. Mã: ${formatBizCodeDisplay(deleteTarget.code)}` : ''}
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={busy}>Hủy</AlertDialogCancel>
+            <AlertDialogAction
+              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+              disabled={busy}
+              onClick={e => {
+                e.preventDefault();
+                void confirmDeleteReturn();
+              }}
+            >
+              Xóa
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 };

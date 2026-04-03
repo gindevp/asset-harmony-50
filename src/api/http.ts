@@ -63,6 +63,19 @@ export function parseProblemDetailJson(body: string | undefined): string {
         .filter(Boolean)
         .join(' · ');
     }
+    const problemKeys: Record<string, string> = {
+      'error.nostock':
+        'Chưa có bản ghi tồn kho cho vật tư trong yêu cầu. Cần nhập kho mã vật tư đó trước (Tồn kho).',
+      'error.insufficientstock':
+        'Không đủ tồn kho vật tư (duyệt hoặc hoàn thành cấp phát) — kiểm tra số lượng yêu cầu và nhập kho bổ sung.',
+      'error.equipmentrequired':
+        'Mỗi dòng thiết bị phải chọn thiết bị tồn kho trước khi duyệt / hoàn thành.',
+      'error.devicerequiresline':
+        'Dòng thiết bị phải chọn dòng tài sản (danh mục), không chọn item cụ thể trên phiếu yêu cầu.',
+      'error.consumablerequiresitem': 'Dòng vật tư phải chọn mã tài sản (item).',
+      'error.notinstock': 'Thiết bị chọn không còn ở trạng thái tồn kho (IN_STOCK).',
+    };
+    if (j.message && problemKeys[j.message]) return problemKeys[j.message];
     if (j.detail && !/^error\.http\.\d+$/.test(j.detail)) return j.detail;
     if (j.message && !/^error\.http\.\d+$/.test(j.message)) return j.message;
   } catch {

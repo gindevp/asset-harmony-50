@@ -1,9 +1,11 @@
 import { NavLink, useLocation, useNavigate } from 'react-router-dom';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
+import { AccountInfoDialog } from '@/components/layout/AccountInfoDialog';
 import { SidebarUserPanel } from '@/components/layout/SidebarUserPanel';
 import { apiGet, getStoredToken, setStoredToken } from '@/api/http';
+import { showEmployeePersonalNavLinks } from '@/auth/jwt';
 import { getAccountDisplayLabel } from '@/api/account';
-import type { AdminUserDto } from '@/api/types';
+import type { AdminUserDto, EmployeeDto } from '@/api/types';
 import {
   LayoutDashboard, Package, FolderTree, List, Truck, ArrowDownToLine, ArrowUpFromLine,
   ClipboardCheck, FileText, Wrench, RotateCcw, Users, Shield, ScrollText,
@@ -39,7 +41,7 @@ const navItems: NavItem[] = [
   },
   { label: 'Quản lý trạng thái', path: '/admin/asset-tracking', icon: ClipboardCheck },
   {
-    label: 'Yêu cầu', icon: FileText, children: [
+    label: 'Quản lý yêu cầu', icon: FileText, children: [
       { label: 'Yêu cầu cấp phát', path: '/admin/allocation-requests' },
       { label: 'Yêu cầu sửa chữa', path: '/admin/repair-requests' },
       { label: 'Yêu cầu thu hồi', path: '/admin/return-requests' },
@@ -71,9 +73,18 @@ export const AdminSidebar = () => {
     queryKey: ['api', 'account'],
     queryFn: () => apiGet<AdminUserDto>('/api/account'),
     enabled: !!getStoredToken(),
-    staleTime: 60_000,
+    staleTime: 0,
+    refetchOnWindowFocus: true,
   });
   const accountLabel = getAccountDisplayLabel(accountQ.data ?? undefined);
+  const employeeId = accountQ.data?.employeeId != null ? Number(accountQ.data.employeeId) : NaN;
+  const employeeQ = useQuery({
+    queryKey: ['api', 'employees', 'me-linked', employeeId],
+    queryFn: () => apiGet<EmployeeDto>(`/api/employees/${employeeId}`),
+    enabled: Number.isFinite(employeeId),
+    staleTime: 0,
+    refetchOnWindowFocus: true,
+  });
   const [hoveredGroup, setHoveredGroup] = useState<string | null>(null);
   const [expandedGroups, setExpandedGroups] = useState<string[]>(() => {
     // Auto-expand group containing current path
@@ -88,10 +99,22 @@ export const AdminSidebar = () => {
     );
   };
 
+  const [accountDialogOpen, setAccountDialogOpen] = useState(false);
+  const showPersonalRequestNav = showEmployeePersonalNavLinks(getStoredToken());
+
   const isActive = (path: string) => pathname === path;
   const isChildActive = (path: string) => isRouteActive(pathname, path);
-  const isGroupActive = (item: NavItem) =>
-    item.children?.some(c => isRouteActive(pathname, c.path)) ?? false;
+  const isGroupActive = (item: NavItem) => {
+    if (item.children?.some(c => isRouteActive(pathname, c.path))) return true;
+    if (item.label === 'Quản lý yêu cầu' && showPersonalRequestNav) {
+      return (
+        isRouteActive(pathname, '/admin/request-create') ||
+        isRouteActive(pathname, '/admin/my-assets') ||
+        isRouteActive(pathname, '/admin/request-new')
+      );
+    }
+    return false;
+  };
 
   return (
     <aside className={cn(
@@ -179,6 +202,34 @@ export const AdminSidebar = () => {
                             <span className="truncate">{child.label}</span>
                           </NavLink>
                         ))}
+                        {item.label === 'Quản lý yêu cầu' && showPersonalRequestNav && (
+                          <>
+                            <NavLink
+                              to="/admin/request-create"
+                              className={cn(
+                                'sidebar-nav-item text-sm',
+                                isChildActive('/admin/request-create')
+                                  ? 'bg-primary/20 text-primary font-medium'
+                                  : 'text-sidebar-foreground/70 hover:bg-sidebar-accent hover:text-sidebar-foreground',
+                              )}
+                              onClick={() => setHoveredGroup(null)}
+                            >
+                              <span className="truncate">Tạo yêu cầu</span>
+                            </NavLink>
+                            <NavLink
+                              to="/admin/my-assets"
+                              className={cn(
+                                'sidebar-nav-item text-sm',
+                                isChildActive('/admin/my-assets')
+                                  ? 'bg-primary/20 text-primary font-medium'
+                                  : 'text-sidebar-foreground/70 hover:bg-sidebar-accent hover:text-sidebar-foreground',
+                              )}
+                              onClick={() => setHoveredGroup(null)}
+                            >
+                              <span className="truncate">Tài sản của tôi</span>
+                            </NavLink>
+                          </>
+                        )}
                       </div>
                     </PopoverContent>
                   </Popover>
@@ -219,6 +270,32 @@ export const AdminSidebar = () => {
                         <span className="truncate">{child.label}</span>
                       </NavLink>
                     ))}
+                    {item.label === 'Quản lý yêu cầu' && showPersonalRequestNav && (
+                      <>
+                        <NavLink
+                          to="/admin/request-create"
+                          className={cn(
+                            'sidebar-nav-item text-sm',
+                            isChildActive('/admin/request-create')
+                              ? 'bg-primary/20 text-primary font-medium'
+                              : 'text-sidebar-foreground/60 hover:bg-sidebar-accent hover:text-sidebar-foreground',
+                          )}
+                        >
+                          <span className="truncate">Tạo yêu cầu</span>
+                        </NavLink>
+                        <NavLink
+                          to="/admin/my-assets"
+                          className={cn(
+                            'sidebar-nav-item text-sm',
+                            isChildActive('/admin/my-assets')
+                              ? 'bg-primary/20 text-primary font-medium'
+                              : 'text-sidebar-foreground/60 hover:bg-sidebar-accent hover:text-sidebar-foreground',
+                          )}
+                        >
+                          <span className="truncate">Tài sản của tôi</span>
+                        </NavLink>
+                      </>
+                    )}
                   </div>
                 )}
               </>
@@ -233,6 +310,11 @@ export const AdminSidebar = () => {
           <SidebarUserPanel
             displayName={accountLabel}
             isLoading={accountQ.isLoading}
+            onOpenDetails={() => {
+              void accountQ.refetch();
+              void employeeQ.refetch();
+              setAccountDialogOpen(true);
+            }}
             onLogout={() => {
               setStoredToken(null);
               void queryClient.removeQueries({ queryKey: ['api', 'account'] });
@@ -241,6 +323,15 @@ export const AdminSidebar = () => {
           />
         </div>
       )}
+
+      <AccountInfoDialog
+        open={accountDialogOpen}
+        onOpenChange={setAccountDialogOpen}
+        account={accountQ.data}
+        accountLoading={accountQ.isLoading}
+        employee={employeeQ.data}
+        employeeLoading={employeeQ.isLoading}
+      />
     </aside>
   );
 };

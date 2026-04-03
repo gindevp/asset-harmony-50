@@ -112,11 +112,6 @@ const SystemLogs = () => {
       <div className="page-header">
         <div>
           <h1 className="page-title">Nhật ký hệ thống & lịch sử thao tác</h1>
-          <p className="page-description">
-            Theo tài liệu STT 43: ghi nhận thao tác ghi (POST/PUT/PATCH/DELETE) thành công (2xx) và sự kiện nghiệp vụ (method{' '}
-            <strong>BIZ</strong>), tối đa 500 bản ghi mới nhất — <strong>ROLE_ADMIN</strong> /{' '}
-            <strong>ROLE_ASSET_MANAGER</strong> / <strong>ROLE_GD</strong>. GET không ghi log HTTP ở backend hiện tại.
-          </p>
         </div>
         <Button variant="outline" size="sm" onClick={exportCsv} disabled={q.isLoading || rows.length === 0}>
           <FileDown className="h-4 w-4 mr-1" /> Xuất CSV (đã lọc)

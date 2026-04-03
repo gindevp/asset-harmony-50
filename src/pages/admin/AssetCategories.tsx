@@ -487,7 +487,6 @@ const AssetCategories = () => {
       <div className="page-header">
         <div>
           <h1 className="page-title">Danh mục tài sản</h1>
-          <p className="page-description">CRUD loại → nhóm → dòng → item (theo tài liệu nghiệp vụ)</p>
         </div>
         <Button onClick={openAdd} disabled={busy}><Plus className="h-4 w-4 mr-1" /> Thêm mới</Button>
       </div>

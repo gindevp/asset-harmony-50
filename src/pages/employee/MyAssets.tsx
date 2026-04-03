@@ -96,17 +96,6 @@ const MyAssets = () => {
       <div className="page-header">
         <div>
           <h1 className="page-title">Tài sản của tôi</h1>
-          <p className="page-description">
-            {empId
-              ? <>
-                  Thiết bị đang gán <strong>cá nhân</strong>, <strong>phòng ban</strong> của bạn (theo HRM), hoặc{' '}
-                  <strong>vị trí</strong> nếu đã cấu hình (dev: <code className="text-xs">VITE_DEV_LOCATION_ID</code>).
-                  {isDeptCoordinator && (
-                    <> Với vai trò <strong>điều phối phòng ban</strong>, bạn còn xem thiết bị đang gán cho đồng nghiệp cùng phòng.</>
-                  )}
-                </>
-              : <>Chưa liên kết nhân viên với tài khoản — liên hệ Admin.</>}
-          </p>
         </div>
       </div>
 

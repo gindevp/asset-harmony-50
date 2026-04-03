@@ -145,6 +145,7 @@ export type AllocationRequestDto = {
   code?: string;
   requestDate?: string;
   reason?: string;
+  attachmentNote?: string;
   status?: string;
   beneficiaryNote?: string;
   /** EMPLOYEE | DEPARTMENT | LOCATION | COMPANY */
@@ -165,6 +166,8 @@ export type AllocationRequestLineDto = {
   note?: string;
   request?: AllocationRequestDto;
   assetItem?: AssetItemDto;
+  /** Dòng thiết bị: nhân viên chọn dòng tài sản; QLTS chọn thiết bị cụ thể khi duyệt */
+  assetLine?: AssetLineDto;
   equipment?: EquipmentDto;
 };
 

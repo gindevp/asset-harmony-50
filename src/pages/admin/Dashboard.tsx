@@ -145,7 +145,6 @@ const Dashboard = () => {
       <div className="page-header">
         <div>
           <h1 className="page-title">Dashboard</h1>
-          <p className="page-description">Dữ liệu từ API backend (DB). Tổng vật tư: {totalConsumable}</p>
         </div>
       </div>
 

@@ -240,7 +240,6 @@ const AssetTracking = () => {
       <div className="page-header print:hidden">
         <div>
           <h1 className="page-title">Quản lý trạng thái tài sản</h1>
-          <p className="page-description">Theo dõi trạng thái vận hành thiết bị và vật tư</p>
         </div>
         <Button type="button" variant="outline" size="sm" onClick={() => window.print()}>
           <Printer className="h-4 w-4 mr-1" /> In trang

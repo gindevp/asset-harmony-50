@@ -8,7 +8,7 @@ import { apiPost, setStoredToken } from '@/api/http';
 import { fetchAndStoreAccountContext } from '@/api/account';
 import { hasAnyAuthority } from '@/auth/jwt';
 import { toast } from 'sonner';
-import { Package } from 'lucide-react';
+import { Eye, EyeOff, Package } from 'lucide-react';
 
 type JwtResponse = { id_token: string };
 
@@ -19,6 +19,7 @@ const Login = () => {
 
   const [username, setUsername] = useState('admin');
   const [password, setPassword] = useState('admin');
+  const [showPassword, setShowPassword] = useState(false);
   const [rememberMe, setRememberMe] = useState(false);
   const [loading, setLoading] = useState(false);
 
@@ -101,13 +102,24 @@ const Login = () => {
               </div>
               <div className="space-y-2">
                 <Label htmlFor="p">Mật khẩu</Label>
-                <Input
-                  id="p"
-                  type="password"
-                  value={password}
-                  onChange={e => setPassword(e.target.value)}
-                  autoComplete="current-password"
-                />
+                <div className="relative">
+                  <Input
+                    id="p"
+                    type={showPassword ? 'text' : 'password'}
+                    value={password}
+                    onChange={e => setPassword(e.target.value)}
+                    autoComplete="current-password"
+                    className="pr-10"
+                  />
+                  <button
+                    type="button"
+                    className="absolute right-2 top-1/2 -translate-y-1/2 rounded-md p-1.5 text-muted-foreground hover:text-foreground focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2"
+                    aria-label={showPassword ? 'Ẩn mật khẩu' : 'Hiện mật khẩu'}
+                    onClick={() => setShowPassword(v => !v)}
+                  >
+                    {showPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                  </button>
+                </div>
               </div>
               <label className="flex items-center gap-2 text-sm">
                 <input type="checkbox" checked={rememberMe} onChange={e => setRememberMe(e.target.checked)} />

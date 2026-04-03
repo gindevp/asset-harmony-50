@@ -63,7 +63,7 @@ interface InventoryRow {
   totalValue: number;
 }
 
-const Inventory = () => {
+export default function Inventory() {
   const gQ = useAssetGroups();
   const lQ = useAssetLines();
   const iQ = useAssetItems();
@@ -213,7 +213,6 @@ const Inventory = () => {
       <div className="page-header">
         <div>
           <h1 className="page-title">Tra cứu tồn kho</h1>
-          <p className="page-description">Tra cứu số lượng tồn kho theo từng tài sản</p>
         </div>
       </div>
 
@@ -311,6 +310,4 @@ const Inventory = () => {
       <DataTable columns={columns} data={filtered} currentPage={page} onPageChange={setPage} />
     </div>
   );
-};
-
-export default Inventory;
+}

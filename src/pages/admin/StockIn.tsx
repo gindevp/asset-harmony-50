@@ -334,7 +334,6 @@ const StockInPage = () => {
       <div className="page-header">
         <div>
           <h1 className="page-title">Nhập kho</h1>
-          <p className="page-description">Quản lý phiếu nhập kho</p>
         </div>
         <Button asChild>
           <Link to="/admin/stock-in/new"><Plus className="h-4 w-4 mr-1" /> Tạo phiếu nhập</Link>
@@ -430,9 +429,6 @@ const StockInPage = () => {
           </DialogHeader>
           {editReceiptDraft && (
             <div className="space-y-4">
-              <p className="text-sm text-muted-foreground">
-                Chỉnh ngày phiếu, nguồn, NCC và ghi chú. Dòng hàng đã tạo không đổi từ đây — xóa phiếu và tạo lại nếu cần sửa dòng.
-              </p>
               <div className="space-y-2">
                 <Label>Ngày phiếu</Label>
                 <Input type="date" value={editReceiptDate} onChange={e => setEditReceiptDate(e.target.value)} />

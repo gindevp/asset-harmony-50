@@ -32,6 +32,7 @@ import Reports from "./pages/admin/Reports";
 import Inventory from "./pages/admin/Inventory";
 import EmployeeRequests from "./pages/employee/EmployeeRequests";
 import MyAssets from "./pages/employee/MyAssets";
+import RequestNew from "./pages/shared/RequestNew";
 import { Navigate } from "react-router-dom";
 
 const queryClient = new QueryClient({
@@ -94,6 +95,9 @@ const App = () => {
             <Route path="allocation-requests" element={<AllocationRequests />} />
             <Route path="repair-requests" element={<RepairRequests />} />
             <Route path="return-requests" element={<ReturnRequests />} />
+            <Route path="request-create" element={<EmployeeRequests />} />
+            <Route path="my-assets" element={<MyAssets />} />
+            <Route path="request-new" element={<RequestNew />} />
             <Route path="users" element={<Users />} />
             <Route path="roles" element={<Roles />} />
             <Route path="system-logs" element={<SystemLogs />} />
@@ -112,6 +116,7 @@ const App = () => {
             <Route path="repair-requests" element={<EmployeeRequests />} />
             <Route path="return-requests" element={<EmployeeRequests />} />
             <Route path="my-assets" element={<MyAssets />} />
+            <Route path="request-new" element={<RequestNew />} />
           </Route>
 
           <Route path="*" element={<NotFound />} />

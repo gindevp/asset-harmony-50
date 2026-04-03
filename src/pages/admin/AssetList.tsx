@@ -429,10 +429,6 @@ const AssetList = () => {
       <div className="page-header">
         <div>
           <h1 className="page-title">Danh sách tài sản</h1>
-          <p className="page-description">
-            Danh sách từng thiết bị (mã TB, serial, trạng thái, người/phòng ban sử dụng, nguyên giá, GT còn lại theo khấu hao đường thẳng).
-            Tra cứu thêm theo mục 9: mã item, mã TB, serial, nhân viên, phòng ban, vị trí, trạng thái.
-          </p>
         </div>
         <Button variant="outline" onClick={handleExport}>
           <FileDown className="h-4 w-4 mr-1" /> Xuất CSV

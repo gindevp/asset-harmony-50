@@ -130,6 +130,7 @@ const UsersPage = () => {
       setAccAddOpen(false);
       setAccForm({ login: '', email: '', firstName: '', lastName: '', authority: 'ROLE_EMPLOYEE', employeeId: '' });
       invalidateAccounts();
+      void qc.invalidateQueries({ queryKey: ['api', 'account'] });
     } catch (e) {
       toast.error(getApiErrorMessage(e));
     } finally {
@@ -173,6 +174,7 @@ const UsersPage = () => {
       toast.success('Đã cập nhật tài khoản');
       setAccEditOpen(false);
       invalidateAccounts();
+      void qc.invalidateQueries({ queryKey: ['api', 'account'] });
     } catch (e) {
       toast.error(getApiErrorMessage(e));
     } finally {
@@ -386,11 +388,6 @@ const UsersPage = () => {
       <div className="page-header">
         <div>
           <h1 className="page-title">Người dùng & phân quyền</h1>
-          <p className="page-description">
-            {section === 'employees'
-              ? 'Nhân viên master (HRM) — đồng bộ qua API /api/employees'
-              : 'Tài khoản đăng nhập JHipster — chỉ ROLE_ADMIN quản lý'}
-          </p>
         </div>
         {section === 'employees' && (
           <div className="flex items-center gap-2">

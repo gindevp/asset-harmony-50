@@ -167,7 +167,6 @@ const Suppliers = () => {
       <div className="page-header">
         <div>
           <h1 className="page-title">Nhà cung cấp</h1>
-          <p className="page-description">Quản lý danh sách nhà cung cấp (CRUD qua API)</p>
         </div>
         <Button onClick={() => setShowModal(true)} disabled={busy}><Plus className="h-4 w-4 mr-1" /> Thêm NCC</Button>
       </div>
