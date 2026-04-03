@@ -43,8 +43,7 @@ const navItems: NavItem[] = [
 export const EmployeeSidebar = () => {
   const navigate = useNavigate();
   const queryClient = useQueryClient();
-  const location = useLocation();
-  const pathname = location.pathname;
+  const { pathname } = useLocation();
   const [collapsed, setCollapsed] = useState(false);
 
   const accountQ = useQuery({
