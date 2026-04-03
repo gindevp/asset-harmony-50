@@ -62,6 +62,27 @@ function isRouteActive(pathname: string, path: string) {
   return pathname === path || pathname.startsWith(`${path}/`);
 }
 
+/** Đang tạo YC: /admin/request-new | .../repair | .../return */
+function adminRequestNewKind(pathname: string): 'allocation' | 'repair' | 'return' | null {
+  if (!pathname.startsWith('/admin/request-new')) return null;
+  if (pathname.startsWith('/admin/request-new/repair')) return 'repair';
+  if (pathname.startsWith('/admin/request-new/return')) return 'return';
+  return 'allocation';
+}
+
+/** Highlight đúng mục «Yêu cầu …» khi đang ở form tạo cùng loại. */
+function isRequestMgmtListActive(pathname: string, listPath: string): boolean {
+  if (isRouteActive(pathname, listPath)) return true;
+  const kind = adminRequestNewKind(pathname);
+  if (!kind) return false;
+  const byKind: Record<'allocation' | 'repair' | 'return', string> = {
+    allocation: '/admin/allocation-requests',
+    repair: '/admin/repair-requests',
+    return: '/admin/return-requests',
+  };
+  return byKind[kind] === listPath;
+}
+
 export const AdminSidebar = () => {
   const navigate = useNavigate();
   const queryClient = useQueryClient();
@@ -104,6 +125,8 @@ export const AdminSidebar = () => {
 
   const isActive = (path: string) => pathname === path;
   const isChildActive = (path: string) => isRouteActive(pathname, path);
+  const isQuanLyYeuCauChildActive = (childPath: string) =>
+    isRequestMgmtListActive(pathname, childPath);
   const isGroupActive = (item: NavItem) => {
     if (item.children?.some(c => isRouteActive(pathname, c.path))) return true;
     if (item.label === 'Quản lý yêu cầu' && showPersonalRequestNav) {
@@ -193,7 +216,9 @@ export const AdminSidebar = () => {
                             to={child.path}
                             className={cn(
                               'sidebar-nav-item text-sm',
-                              isChildActive(child.path)
+                              (item.label === 'Quản lý yêu cầu'
+                                ? isQuanLyYeuCauChildActive(child.path)
+                                : isChildActive(child.path))
                                 ? 'bg-primary/20 text-primary font-medium'
                                 : 'text-sidebar-foreground/70 hover:bg-sidebar-accent hover:text-sidebar-foreground',
                             )}
@@ -264,7 +289,11 @@ export const AdminSidebar = () => {
                         to={child.path}
                         className={cn(
                           'sidebar-nav-item text-sm',
-                          isChildActive(child.path) ? 'bg-primary/20 text-primary font-medium' : 'text-sidebar-foreground/60 hover:bg-sidebar-accent hover:text-sidebar-foreground'
+                          (item.label === 'Quản lý yêu cầu'
+                            ? isQuanLyYeuCauChildActive(child.path)
+                            : isChildActive(child.path))
+                            ? 'bg-primary/20 text-primary font-medium'
+                            : 'text-sidebar-foreground/60 hover:bg-sidebar-accent hover:text-sidebar-foreground',
                         )}
                       >
                         <span className="truncate">{child.label}</span>

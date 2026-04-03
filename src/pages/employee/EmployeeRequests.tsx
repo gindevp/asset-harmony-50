@@ -105,8 +105,10 @@ const EmployeeRequests = () => {
   };
 
   const goNew = (kind: 'allocation' | 'repair' | 'return') => {
-    const base = location.pathname.startsWith('/admin') ? '/admin/request-new' : '/employee/request-new';
-    navigate(`${base}?kind=${encodeURIComponent(kind)}`);
+    const p = location.pathname.startsWith('/admin') ? '/admin' : '/employee';
+    if (kind === 'allocation') navigate(`${p}/request-new`);
+    else if (kind === 'repair') navigate(`${p}/request-new/repair`);
+    else navigate(`${p}/request-new/return`);
   };
 
   const [cancelBusy, setCancelBusy] = useState<string | null>(null);

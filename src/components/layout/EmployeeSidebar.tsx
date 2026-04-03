@@ -14,7 +14,7 @@ interface NavItem {
   label: string;
   path: string;
   icon: ComponentType<{ className?: string }>;
-  /** Highlight khi đang tạo YC tại /employee/request-new?kind=... */
+  /** Highlight khi đang tạo YC tại /employee/request-new (và /repair, /return) */
   requestNewKind?: 'allocation' | 'repair' | 'return';
 }
 
@@ -68,11 +68,19 @@ export const EmployeeSidebar = () => {
   const showPersonalNav = showEmployeePersonalNavLinks(getStoredToken());
   const visibleNavItems = showPersonalNav ? navItems : [];
 
+  /** Loại YC đang tạo theo path (/request-new, /repair, /return) — không dùng ?kind= nữa. */
+  const requestNewKindFromPath = (): 'allocation' | 'repair' | 'return' | null => {
+    if (!pathname.startsWith('/employee/request-new')) return null;
+    if (pathname.startsWith('/employee/request-new/repair')) return 'repair';
+    if (pathname.startsWith('/employee/request-new/return')) return 'return';
+    return 'allocation';
+  };
+
   const navActive = (item: NavItem) => {
-    if (pathname.startsWith('/employee/request-new')) {
+    const creating = requestNewKindFromPath();
+    if (creating != null) {
       if (!item.requestNewKind) return false;
-      const kind = new URLSearchParams(location.search).get('kind') || 'allocation';
-      return item.requestNewKind === kind;
+      return item.requestNewKind === creating;
     }
     return pathname === item.path || pathname.startsWith(`${item.path}/`);
   };
