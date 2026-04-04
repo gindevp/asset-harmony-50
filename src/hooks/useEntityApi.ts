@@ -92,7 +92,10 @@ export function useAssetItems() {
 export function mapAssetItemDto(i: AssetItemDto): AssetItem {
   const lineId = String(i.assetLine?.id ?? '');
   const groupId = String(i.assetLine?.assetGroup?.id ?? '');
-  const typeId = String(i.assetLine?.assetGroup?.assetType ?? '');
+  const rawType = String(i.assetLine?.assetType ?? i.assetLine?.assetGroup?.assetType ?? '')
+    .trim()
+    .toUpperCase();
+  const typeId: AssetItem['managementType'] = rawType === 'CONSUMABLE' ? 'CONSUMABLE' : 'DEVICE';
   return {
     id: String(i.id),
     code: i.code ?? '',

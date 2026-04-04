@@ -51,6 +51,8 @@ export type AssetLineDto = {
   name?: string;
   description?: string;
   active?: boolean;
+  /** Thiết bị / Vật tư — nguồn chính (cấp dòng, không phụ thuộc nhóm) */
+  assetType?: string;
   assetGroup?: AssetGroupDto;
 };
 

@@ -69,13 +69,13 @@ export default function RequestNew() {
   const consumableItems = useMemo(() => assetItems.filter(i => i.managementType === 'CONSUMABLE'), [assetItems]);
   const deviceAssetLineOptions = useMemo(() => {
     const raw = linesQ.data ?? [];
-    const byGroupType = raw.filter(
-      l => (l.assetGroup?.assetType ?? '').toUpperCase() === 'DEVICE' && l.active !== false,
+    const byLineType = raw.filter(
+      l => (l.assetType ?? l.assetGroup?.assetType ?? '').toUpperCase() === 'DEVICE' && l.active !== false,
     );
-    /** BE từng chỉ map assetGroup { id, name } (thiếu assetType) — suy ra dòng DEVICE từ master mã hàng */
+    /** Fallback: BE cũ / thiếu assetType trên dòng — suy ra từ mã hàng thiết bị gắn dòng */
     const deviceLines =
-      byGroupType.length > 0
-        ? byGroupType
+      byLineType.length > 0
+        ? byLineType
         : raw.filter(l => {
             if (l.active === false) return false;
             const id = String(l.id ?? '');
