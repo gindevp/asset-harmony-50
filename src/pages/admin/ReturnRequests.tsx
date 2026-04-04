@@ -17,7 +17,8 @@ import { Button } from '@/components/ui/button';
 import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
 import { Checkbox } from '@/components/ui/checkbox';
-import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
+import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Eye, Pencil, Trash2 } from 'lucide-react';
 import type { ReturnRequest } from '@/data/mockData';
 import {
@@ -319,6 +320,9 @@ const ReturnRequests = () => {
             <DialogTitle>
               {dialogMode === 'edit' ? 'Sửa yêu cầu' : 'Chi tiết yêu cầu'} thu hồi {selected?.code}
             </DialogTitle>
+            <DialogDescription className="sr-only">
+              Xem hoặc chỉnh sửa yêu cầu thu hồi, chọn hướng xử lý từng dòng khi phiếu đã duyệt.
+            </DialogDescription>
           </DialogHeader>
           {selected && (
             <div className="space-y-4">
