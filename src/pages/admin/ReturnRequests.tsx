@@ -22,6 +22,7 @@ import { Eye, Pencil, Trash2 } from 'lucide-react';
 import type { ReturnRequest } from '@/data/mockData';
 import {
   returnStatusLabels,
+  returnDispositionLabels,
   getEmployeeName,
   getDepartmentName,
   getItemName,

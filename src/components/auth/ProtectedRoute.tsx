@@ -6,16 +6,18 @@ type Props = {
   children: React.ReactNode;
   /** Bất kỳ authority nào trong danh sách (ROLE_*) */
   anyAuthority?: string[];
+  /** Đã đăng nhập nhưng không có quyền — mặc định `/` */
+  redirectWhenForbidden?: string;
 };
 
-export const ProtectedRoute = ({ children, anyAuthority }: Props) => {
+export const ProtectedRoute = ({ children, anyAuthority, redirectWhenForbidden = '/' }: Props) => {
   const location = useLocation();
   const token = getStoredToken();
   if (!token) {
     return <Navigate to="/login" state={{ from: location.pathname }} replace />;
   }
   if (anyAuthority?.length && !hasAnyAuthority(token, anyAuthority)) {
-    return <Navigate to="/" replace />;
+    return <Navigate to={redirectWhenForbidden} replace />;
   }
   return <>{children}</>;
 };

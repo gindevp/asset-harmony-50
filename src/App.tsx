@@ -49,10 +49,9 @@ const queryClient = new QueryClient({
 });
 
 const ADMIN_ROLES = ["ROLE_ADMIN", "ROLE_ASSET_MANAGER", "ROLE_GD"];
-const EMPLOYEE_ROLES = [
-  "ROLE_ADMIN",
-  "ROLE_ASSET_MANAGER",
-  "ROLE_GD",
+/** Cổng nhân viên: không gồm quản trị — admin vào nhầm sẽ về /admin */
+const EMPLOYEE_PORTAL_ROLES = [
+  "ROLE_USER",
   "ROLE_EMPLOYEE",
   "ROLE_DEPARTMENT_COORDINATOR",
 ];
@@ -111,11 +110,12 @@ const App = () => {
           <Route
             path="/employee"
             element={
-              <ProtectedRoute anyAuthority={EMPLOYEE_ROLES}>
+              <ProtectedRoute anyAuthority={EMPLOYEE_PORTAL_ROLES} redirectWhenForbidden="/admin">
                 <EmployeeLayout />
               </ProtectedRoute>
             }
           >
+            <Route index element={<Navigate to="allocation-requests" replace />} />
             <Route path="allocation-requests" element={<EmployeeRequests />} />
             <Route path="repair-requests" element={<EmployeeRequests />} />
             <Route path="return-requests" element={<EmployeeRequests />} />
