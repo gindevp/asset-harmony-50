@@ -69,19 +69,29 @@ export default function RequestNew() {
   const consumableItems = useMemo(() => assetItems.filter(i => i.managementType === 'CONSUMABLE'), [assetItems]);
   const deviceAssetLineOptions = useMemo(() => {
     const raw = linesQ.data ?? [];
-    return raw
-      .filter(l => (l.assetGroup?.assetType ?? '').toUpperCase() === 'DEVICE' && l.active !== false)
-      .map(l => {
-        const id = String(l.id ?? '');
-        const code = (l.code ?? '').trim() || id;
-        const name = (l.name ?? '').trim() || '—';
-        return {
-          value: id,
-          label: `${code} — ${name}`,
-          searchText: `${code} ${name} ${(l.description ?? '').trim()}`,
-        };
-      });
-  }, [linesQ.data]);
+    const byGroupType = raw.filter(
+      l => (l.assetGroup?.assetType ?? '').toUpperCase() === 'DEVICE' && l.active !== false,
+    );
+    /** BE từng chỉ map assetGroup { id, name } (thiếu assetType) — suy ra dòng DEVICE từ master mã hàng */
+    const deviceLines =
+      byGroupType.length > 0
+        ? byGroupType
+        : raw.filter(l => {
+            if (l.active === false) return false;
+            const id = String(l.id ?? '');
+            return assetItems.some(i => i.managementType === 'DEVICE' && i.lineId === id);
+          });
+    return deviceLines.map(l => {
+      const id = String(l.id ?? '');
+      const code = (l.code ?? '').trim() || id;
+      const name = (l.name ?? '').trim() || '—';
+      return {
+        value: id,
+        label: `${code} — ${name}`,
+        searchText: `${code} ${name} ${(l.description ?? '').trim()}`,
+      };
+    });
+  }, [linesQ.data, assetItems]);
 
   const myEmpIdStr = resolveEmployeeIdForRequests();
   const allocationRequesterSummary = useMemo(() => {
