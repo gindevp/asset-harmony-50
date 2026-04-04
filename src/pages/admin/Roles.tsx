@@ -27,6 +27,17 @@ const matrix: Record<string, boolean[]> = {
   ADMIN: [true, true, true, true, true, true, true, true, true, true, true, true, true, true],
 };
 
+/** Với Quản lý Tài sản / Quản trị: không liệt kê 5 quyền nền (trùng các vai trò khác), chỉ hiện phần từ “Duyệt yêu cầu” trở đi. */
+const MANAGER_ROLES_HIDE_FIRST_PERMISSION_ROWS = 5;
+
+function visiblePermissionIndices(roleKey: string): number[] {
+  const all = permissions.map((_, i) => i);
+  if (roleKey === 'ASSET_MANAGER' || roleKey === 'ADMIN') {
+    return all.slice(MANAGER_ROLES_HIDE_FIRST_PERMISSION_ROWS);
+  }
+  return all;
+}
+
 const RolesPage = () => {
   const canAdmin = hasAnyAuthority(getStoredToken(), ['ROLE_ADMIN']);
   const authoritiesQ = useQuery({
@@ -79,16 +90,20 @@ const RolesPage = () => {
             <CardContent>
               <p className="text-sm text-muted-foreground mb-3">{role.description}</p>
               <div className="space-y-1.5">
-                {permissions.map((perm, idx) => (
-                  <div key={perm} className="flex items-center gap-2 text-sm">
-                    {matrix[role.key][idx] ? (
-                      <Check className="h-4 w-4 text-emerald-600 flex-shrink-0" />
-                    ) : (
-                      <X className="h-4 w-4 text-muted-foreground/30 flex-shrink-0" />
-                    )}
-                    <span className={matrix[role.key][idx] ? '' : 'text-muted-foreground/50'}>{perm}</span>
-                  </div>
-                ))}
+                {visiblePermissionIndices(role.key).map(idx => {
+                  const perm = permissions[idx];
+                  const granted = matrix[role.key][idx];
+                  return (
+                    <div key={`${role.key}-${idx}`} className="flex items-center gap-2 text-sm">
+                      {granted ? (
+                        <Check className="h-4 w-4 text-emerald-600 flex-shrink-0" />
+                      ) : (
+                        <X className="h-4 w-4 text-muted-foreground/30 flex-shrink-0" />
+                      )}
+                      <span className={granted ? '' : 'text-muted-foreground/50'}>{perm}</span>
+                    </div>
+                  );
+                })}
               </div>
             </CardContent>
           </Card>
