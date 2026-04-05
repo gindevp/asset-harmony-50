@@ -31,6 +31,10 @@ export default defineConfig(async ({ mode }) => {
     },
     build: {
       reportCompressedSize: false,
+      /** Giảm song song file khi build — hạ đỉnh RAM (tránh OOM im lặng trên CI 2 vCPU / 8GB) */
+      rollupOptions: {
+        maxParallelFileOps: 4,
+      },
     },
   };
 });

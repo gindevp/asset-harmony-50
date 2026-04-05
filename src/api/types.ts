@@ -175,6 +175,12 @@ export type AllocationRequestLineDto = {
   equipment?: EquipmentDto;
 };
 
+export type RepairRequestLineDto = {
+  id?: number;
+  lineNo?: number;
+  equipment?: EquipmentDto;
+};
+
 export type RepairRequestDto = {
   id?: number;
   code?: string;
@@ -189,6 +195,7 @@ export type RepairRequestDto = {
   repairOutcome?: string;
   requester?: EmployeeDto;
   equipment?: EquipmentDto;
+  lines?: RepairRequestLineDto[];
 };
 
 export type ReturnRequestDto = {
