@@ -3,17 +3,23 @@ import type { Plugin } from "vite";
 import react from "@vitejs/plugin-react-swc";
 import path from "path";
 
-/** Trên Vercel, giai đoạn transforming... không in thêm dòng — log mỗi N module để tránh tưởng build treo */
+/** CI (Vercel) ít log trong lúc transform — in ngay khi Rollup bắt đầu + mỗi N module (không phụ thuộc biến VERCEL) */
 function transformProgressLogger(): Plugin {
   let count = 0;
   return {
     name: "transform-progress-logger",
+    buildStart() {
+      console.log("[vite] rollup: buildStart");
+    },
     transform() {
       count++;
-      if (count % 500 === 0) {
-        console.log(`[vite] transforming... ${count} modules processed`);
+      if (count % 200 === 0) {
+        console.log(`[vite] rollup: ${count} modules transformed`);
       }
-      return null;
+      return undefined;
+    },
+    buildEnd() {
+      console.log(`[vite] rollup: buildEnd (transforms=${count})`);
     },
   };
 }
@@ -22,7 +28,7 @@ function transformProgressLogger(): Plugin {
 // lovable-tagger chỉ dynamic-import trong dev — tránh Vercel phân tích gói này khi build production
 export default defineConfig(async ({ mode }) => {
   const plugins = [react()];
-  if (process.env.VERCEL === "1") {
+  if (mode === "production") {
     plugins.push(transformProgressLogger());
   }
   if (mode === "development") {
@@ -52,7 +58,7 @@ export default defineConfig(async ({ mode }) => {
       reportCompressedSize: false,
       /** Giảm song song file khi build — hạ đỉnh RAM (tránh OOM im lặng trên CI 2 vCPU / 8GB) */
       rollupOptions: {
-        maxParallelFileOps: 4,
+        maxParallelFileOps: 2,
       },
     },
   };
