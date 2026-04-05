@@ -322,12 +322,20 @@ export function buildAllocationRequests(
 }
 
 export function mapRepairDto(r: RepairRequestDto): RepairRequest {
+  const sortedLines = [...(r.lines ?? [])].sort((a, b) => (a.lineNo ?? 0) - (b.lineNo ?? 0));
+  const lineIds = sortedLines
+    .map(l => l.equipment?.id)
+    .filter((x): x is number => x != null)
+    .map(String);
+  const equipmentLineIds = lineIds.length > 0 ? lineIds : r.equipment?.id != null ? [String(r.equipment.id)] : [];
+  const equipmentId = equipmentLineIds[0] ?? String(r.equipment?.id ?? '');
   return {
     id: String(r.id),
     code: r.code ?? '',
     requesterId: String(r.requester?.id ?? ''),
     departmentId: String(r.requester?.department?.id ?? ''),
-    equipmentId: String(r.equipment?.id ?? ''),
+    equipmentId,
+    equipmentLineIds: equipmentLineIds.length > 0 ? equipmentLineIds : undefined,
     issue: r.problemCategory ?? '',
     description: r.description ?? '',
     attachmentNote: r.attachmentNote ?? undefined,

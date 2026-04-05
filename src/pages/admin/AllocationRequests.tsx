@@ -47,8 +47,9 @@ import {
 } from '@/hooks/useEntityApi';
 import {
   type AllocationDetailRow,
+  allocationRequestListNoteDisplay,
   buildAllocationDetailRows,
-  countAllocationDisplayRows,
+  sumAllocationLineQuantities,
 } from '@/utils/allocationDisplayRows';
 import { canDeleteAllocationRequest, canEditAllocationRequestFields } from '@/utils/requestRecordActions';
 
@@ -137,7 +138,6 @@ const AllocationRequests = () => {
   const [dialogMode, setDialogMode] = useState<'view' | 'edit'>('view');
   const [editReason, setEditReason] = useState('');
   const [editAttach, setEditAttach] = useState('');
-  const [editBen, setEditBen] = useState('');
   const [deleteTarget, setDeleteTarget] = useState<AllocationRequest | null>(null);
   const [rejectOpen, setRejectOpen] = useState(false);
   const [rejectReason, setRejectReason] = useState('');
@@ -147,8 +147,7 @@ const AllocationRequests = () => {
     if (!selected || dialogMode !== 'edit') return;
     setEditReason(selected.reason ?? '');
     setEditAttach(selected.attachmentNote ?? '');
-    setEditBen(selected.beneficiaryNote ?? '');
-  }, [selected?.id, dialogMode, selected?.reason, selected?.attachmentNote, selected?.beneficiaryNote]);
+  }, [selected?.id, dialogMode, selected?.reason, selected?.attachmentNote]);
 
   const filtered = allocationRequests
     .filter(r => {
@@ -173,6 +172,15 @@ const AllocationRequests = () => {
       render: r => <span className="max-w-[12rem] truncate block" title={r.assigneeSummary}>{r.assigneeSummary}</span>,
     },
     {
+      key: 'noteList',
+      label: 'Ghi chú',
+      render: r => (
+        <span className="max-w-[12rem] truncate block" title={allocationRequestListNoteDisplay(r) || undefined}>
+          {allocationRequestListNoteDisplay(r) || '—'}
+        </span>
+      ),
+    },
+    {
       key: 'stockIssue',
       label: 'Phiếu xuất',
       render: r =>
@@ -182,7 +190,7 @@ const AllocationRequests = () => {
           <span className="text-muted-foreground">—</span>
         ),
     },
-    { key: 'lines', label: 'Số lượng', render: r => countAllocationDisplayRows(r.lines) },
+    { key: 'lines', label: 'Số lượng', render: r => sumAllocationLineQuantities(r.lines) },
     { key: 'status', label: 'Trạng thái', render: r => <StatusBadge status={r.status} label={allocationStatusLabels[r.status]} /> },
     { key: 'createdAt', label: 'Ngày tạo', render: r => formatDate(r.createdAt) },
     {
@@ -258,7 +266,6 @@ const AllocationRequests = () => {
         id: Number(selected.id),
         reason: editReason.trim() || undefined,
         attachmentNote: editAttach.trim() || undefined,
-        beneficiaryNote: editBen.trim() || undefined,
       });
       toast.success('Đã lưu thay đổi');
       setDialogMode('view');
@@ -706,12 +713,8 @@ const AllocationRequests = () => {
                       <Textarea value={editReason} onChange={e => setEditReason(e.target.value)} rows={3} disabled={busy} />
                     </div>
                     <div className="space-y-2">
-                      <Label>Ghi chú / đính kèm</Label>
+                      <Label>Ghi chú</Label>
                       <Textarea value={editAttach} onChange={e => setEditAttach(e.target.value)} rows={2} disabled={busy} />
-                    </div>
-                    <div className="space-y-2">
-                      <Label>Ghi chú thêm</Label>
-                      <Textarea value={editBen} onChange={e => setEditBen(e.target.value)} rows={2} disabled={busy} />
                     </div>
                     <div className="flex flex-wrap gap-2 pt-1">
                       <Button type="button" size="sm" disabled={busy} onClick={() => void saveAllocationContent()}>
@@ -726,12 +729,10 @@ const AllocationRequests = () => {
                   <>
                     <div className="col-span-2"><span className="text-muted-foreground">Lý do:</span> {selected.reason}</div>
                     {selected.attachmentNote ? (
-                      <div className="col-span-2">
-                        <AttachmentNoteView text={selected.attachmentNote} />
+                      <div className="col-span-2 space-y-1">
+                        <div className="text-muted-foreground">Ghi chú</div>
+                        <AttachmentNoteView text={selected.attachmentNote} showCaption={false} />
                       </div>
-                    ) : null}
-                    {selected.beneficiaryNote ? (
-                      <div className="col-span-2"><span className="text-muted-foreground">Ghi chú thêm:</span> {selected.beneficiaryNote}</div>
                     ) : null}
                   </>
                 )}

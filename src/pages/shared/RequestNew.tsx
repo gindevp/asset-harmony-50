@@ -33,9 +33,16 @@ type AllocLineForm = {
   quantity: number;
 };
 
-const newAllocLine = (): AllocLineForm => ({
+const newConsumableLine = (): AllocLineForm => ({
   localId: `L-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`,
   lineType: 'CONSUMABLE',
+  assetLineId: '',
+  quantity: 1,
+});
+
+const newDeviceLine = (): AllocLineForm => ({
+  localId: `L-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`,
+  lineType: 'DEVICE',
   assetLineId: '',
   quantity: 1,
 });
@@ -136,22 +143,24 @@ export default function RequestNew() {
   const [beneficiaryEmployeeId, setBeneficiaryEmployeeId] = useState(myEmpIdStr ?? '');
   const [beneficiaryDepartmentId, setBeneficiaryDepartmentId] = useState('');
   const [beneficiaryLocationId, setBeneficiaryLocationId] = useState('');
-  const [allocLines, setAllocLines] = useState<AllocLineForm[]>([newAllocLine()]);
+  const [consumableLines, setConsumableLines] = useState<AllocLineForm[]>([newConsumableLine()]);
+  const [deviceLines, setDeviceLines] = useState<AllocLineForm[]>([newDeviceLine()]);
   const [allocAttachmentNote, setAllocAttachmentNote] = useState('');
   const [allocFile, setAllocFile] = useState<File | null>(null);
   const [allocBusy, setAllocBusy] = useState(false);
 
   const submitAllocation = async () => {
     if (!allocReason.trim()) return toast.error('Nhập lý do');
-    if (allocLines.length === 0) return toast.error('Thêm ít nhất một dòng');
-    for (const line of allocLines) {
-      if (line.lineType === 'CONSUMABLE') {
-        if (!line.assetLineId) return toast.error('Chọn dòng vật tư cho mọi dòng vật tư');
-        if (line.quantity < 1) return toast.error('Số lượng vật tư không hợp lệ');
-      } else {
-        if (!line.assetLineId) return toast.error('Chọn dòng tài sản (thiết bị) cho mọi dòng thiết bị');
-        if (line.quantity < 1) return toast.error('Số lượng thiết bị không hợp lệ');
-      }
+    if (consumableLines.length === 0 && deviceLines.length === 0) {
+      return toast.error('Thêm ít nhất một dòng vật tư hoặc thiết bị');
+    }
+    for (const line of consumableLines) {
+      if (!line.assetLineId) return toast.error('Chọn tên dòng vật tư cho mọi dòng vật tư');
+      if (line.quantity < 1) return toast.error('Số lượng vật tư không hợp lệ');
+    }
+    for (const line of deviceLines) {
+      if (!line.assetLineId) return toast.error('Chọn tên dòng thiết bị cho mọi dòng thiết bị');
+      if (line.quantity < 1) return toast.error('Số lượng thiết bị không hợp lệ');
     }
     const reqEid = requireEmployeeId();
     if (reqEid == null) return;
@@ -196,28 +205,27 @@ export default function RequestNew() {
 
       const created = await apiPost<{ id: number }>('/api/allocation-requests', body);
       let lineNo = 1;
-      for (const line of allocLines) {
-        if (line.lineType === 'CONSUMABLE') {
+      for (const line of consumableLines) {
+        const payload: Record<string, unknown> = {
+          lineNo: lineNo++,
+          lineType: 'CONSUMABLE',
+          quantity: line.quantity,
+          request: { id: created.id },
+          assetLine: { id: Number(line.assetLineId) },
+        };
+        await apiPost('/api/allocation-request-lines', payload);
+      }
+      for (const line of deviceLines) {
+        const n = Math.max(1, Math.floor(Number(line.quantity)));
+        for (let i = 0; i < n; i++) {
           const payload: Record<string, unknown> = {
             lineNo: lineNo++,
-            lineType: 'CONSUMABLE',
-            quantity: line.quantity,
+            lineType: 'DEVICE',
+            quantity: 1,
             request: { id: created.id },
             assetLine: { id: Number(line.assetLineId) },
           };
           await apiPost('/api/allocation-request-lines', payload);
-        } else {
-          const n = Math.max(1, Math.floor(Number(line.quantity)));
-          for (let i = 0; i < n; i++) {
-            const payload: Record<string, unknown> = {
-              lineNo: lineNo++,
-              lineType: 'DEVICE',
-              quantity: 1,
-              request: { id: created.id },
-              assetLine: { id: Number(line.assetLineId) },
-            };
-            await apiPost('/api/allocation-request-lines', payload);
-          }
         }
       }
       toast.success('Đã gửi yêu cầu cấp phát');
@@ -279,7 +287,7 @@ export default function RequestNew() {
             <Textarea value={allocReason} onChange={e => setAllocReason(e.target.value)} rows={2} />
           </div>
           <div className="space-y-2">
-            <Label>Link / ghi chú đính kèm (tùy chọn)</Label>
+            <Label>Ghi chú</Label>
             <Textarea
               value={allocAttachmentNote}
               onChange={e => setAllocAttachmentNote(e.target.value)}
@@ -288,7 +296,7 @@ export default function RequestNew() {
             />
           </div>
           <div className="space-y-2">
-            <Label>Tải ảnh, PDF hoặc video (tùy chọn, tối đa ~50 MB)</Label>
+            <Label>Tài liệu đính kèm (tối đa 50 MB)</Label>
             <Input
               type="file"
               accept="image/jpeg,image/png,image/gif,image/webp,application/pdf,video/mp4,video/webm,video/quicktime,.mp4,.webm,.mov"
@@ -372,108 +380,146 @@ export default function RequestNew() {
                 <p className="text-xs text-muted-foreground">Tài sản dùng chung toàn công ty.</p>
               )}
             </div>
-          ) : (
-            <p className="text-xs text-muted-foreground">
-              Đối tượng nhận: <strong>bạn</strong>. Điều phối phòng ban / QLTS có thể chọn phòng ban hoặc vị trí.
-            </p>
-          )}
+          ) : null}
 
-          <div className="space-y-2">
-            <div className="flex items-center justify-between">
-              <Label>Các tài sản yêu cầu</Label>
-              <Button type="button" variant="outline" size="sm" onClick={() => setAllocLines(p => [...p, newAllocLine()])}>
-                <PlusCircle className="h-4 w-4 mr-1" /> Thêm dòng
-              </Button>
+          <div className="space-y-6">
+            <Label className="text-base font-semibold">Các tài sản yêu cầu</Label>
+
+            {/* Phần 1: Vật tư */}
+            <div className="space-y-2 rounded-lg border bg-card p-4">
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <span className="text-sm font-semibold">Vật tư</span>
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  onClick={() => setConsumableLines(p => [...p, newConsumableLine()])}
+                >
+                  <PlusCircle className="h-4 w-4 mr-1" /> Thêm dòng
+                </Button>
+              </div>
+              <div className="space-y-3">
+                {consumableLines.length === 0 ? (
+                  <p className="text-sm text-muted-foreground">Chưa có dòng vật tư. Nhấn «Thêm dòng» để thêm.</p>
+                ) : (
+                  consumableLines.map((line, idx) => (
+                    <div key={line.localId} className="space-y-2 rounded-md border border-dashed p-3 bg-muted/20">
+                      <div className="flex items-center justify-between">
+                        <span className="text-xs font-medium text-muted-foreground">Dòng {idx + 1}</span>
+                        <Button
+                          type="button"
+                          variant="ghost"
+                          size="icon"
+                          className="h-8 w-8 shrink-0 text-destructive hover:text-destructive"
+                          title="Xóa dòng"
+                          onClick={() => setConsumableLines(p => p.filter(l => l.localId !== line.localId))}
+                        >
+                          <Trash2 className="h-4 w-4" />
+                        </Button>
+                      </div>
+                      <div className="grid gap-3 sm:grid-cols-2">
+                        <div className="space-y-1">
+                          <Label className="text-xs">Tên dòng</Label>
+                          <SearchableSelect
+                            value={line.assetLineId}
+                            onValueChange={v =>
+                              setConsumableLines(p => p.map(l => (l.localId === line.localId ? { ...l, assetLineId: v } : l)))
+                            }
+                            options={consumableAssetLineOptions}
+                            placeholder="Chọn tên dòng…"
+                            searchPlaceholder="Tìm tên dòng…"
+                            emptyText="Không có dòng vật tư phù hợp"
+                            triggerClassName="w-full"
+                          />
+                        </div>
+                        <div className="space-y-1">
+                          <Label className="text-xs">Số lượng</Label>
+                          <Input
+                            type="number"
+                            min={1}
+                            value={line.quantity}
+                            onChange={e =>
+                              setConsumableLines(p =>
+                                p.map(l =>
+                                  l.localId === line.localId
+                                    ? { ...l, quantity: Math.max(1, Number(e.target.value) || 1) }
+                                    : l,
+                                ),
+                              )
+                            }
+                          />
+                        </div>
+                      </div>
+                    </div>
+                  ))
+                )}
+              </div>
             </div>
-            <div className="space-y-3 border rounded-md p-3">
-              {allocLines.map((line, idx) => (
-                <div key={line.localId} className="space-y-2 pb-3 border-b last:border-0 last:pb-0">
-                  <div className="flex items-center justify-between">
-                    <span className="text-sm font-medium">Dòng {idx + 1}</span>
-                    {allocLines.length > 1 && (
-                      <Button
-                        type="button"
-                        variant="ghost"
-                        size="icon"
-                        className="h-8 w-8"
-                        onClick={() => setAllocLines(p => p.filter(l => l.localId !== line.localId))}
-                      >
-                        <Trash2 className="h-4 w-4" />
-                      </Button>
-                    )}
-                  </div>
-                  <Select
-                    value={line.lineType}
-                    onValueChange={v =>
-                      setAllocLines(p =>
-                        p.map(l =>
-                          l.localId === line.localId
-                            ? { ...l, lineType: v as 'CONSUMABLE' | 'DEVICE', assetLineId: '' }
-                            : l,
-                        ),
-                      )
-                    }
-                  >
-                    <SelectTrigger><SelectValue /></SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="CONSUMABLE">Vật tư</SelectItem>
-                      <SelectItem value="DEVICE">Thiết bị</SelectItem>
-                    </SelectContent>
-                  </Select>
-                  {line.lineType === 'CONSUMABLE' ? (
-                    <div className="space-y-1">
-                      <Label className="text-xs text-muted-foreground">Dòng vật tư (loại vật tư — QLTS đối chiếu tồn kho khi duyệt)</Label>
-                      <SearchableSelect
-                        value={line.assetLineId}
-                        onValueChange={v =>
-                          setAllocLines(p => p.map(l => (l.localId === line.localId ? { ...l, assetLineId: v } : l)))
-                        }
-                        options={consumableAssetLineOptions}
-                        placeholder="Chọn dòng vật tư…"
-                        searchPlaceholder="Tìm mã, tên dòng…"
-                        emptyText="Không có dòng vật tư phù hợp"
-                        triggerClassName="w-full"
-                      />
+
+            {/* Phần 2: Thiết bị văn phòng */}
+            <div className="space-y-2 rounded-lg border bg-card p-4">
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <span className="text-sm font-semibold">Thiết bị văn phòng</span>
+                <Button type="button" variant="outline" size="sm" onClick={() => setDeviceLines(p => [...p, newDeviceLine()])}>
+                  <PlusCircle className="h-4 w-4 mr-1" /> Thêm dòng
+                </Button>
+              </div>
+              <div className="space-y-3">
+                {deviceLines.length === 0 ? (
+                  <p className="text-sm text-muted-foreground">Chưa có dòng thiết bị. Nhấn «Thêm dòng» để thêm.</p>
+                ) : (
+                  deviceLines.map((line, idx) => (
+                    <div key={line.localId} className="space-y-2 rounded-md border border-dashed p-3 bg-muted/20">
+                      <div className="flex items-center justify-between">
+                        <span className="text-xs font-medium text-muted-foreground">Dòng {idx + 1}</span>
+                        <Button
+                          type="button"
+                          variant="ghost"
+                          size="icon"
+                          className="h-8 w-8 shrink-0 text-destructive hover:text-destructive"
+                          title="Xóa dòng"
+                          onClick={() => setDeviceLines(p => p.filter(l => l.localId !== line.localId))}
+                        >
+                          <Trash2 className="h-4 w-4" />
+                        </Button>
+                      </div>
+                      <div className="grid gap-3 sm:grid-cols-2">
+                        <div className="space-y-1">
+                          <Label className="text-xs">Tên dòng</Label>
+                          <SearchableSelect
+                            value={line.assetLineId}
+                            onValueChange={v =>
+                              setDeviceLines(p => p.map(l => (l.localId === line.localId ? { ...l, assetLineId: v } : l)))
+                            }
+                            options={deviceAssetLineOptions}
+                            placeholder="Chọn tên dòng…"
+                            searchPlaceholder="Tìm tên dòng…"
+                            emptyText="Không có dòng thiết bị phù hợp"
+                            triggerClassName="w-full"
+                          />
+                        </div>
+                        <div className="space-y-1">
+                          <Label className="text-xs">Số lượng</Label>
+                          <Input
+                            type="number"
+                            min={1}
+                            value={line.quantity}
+                            onChange={e =>
+                              setDeviceLines(p =>
+                                p.map(l =>
+                                  l.localId === line.localId
+                                    ? { ...l, quantity: Math.max(1, Number(e.target.value) || 1) }
+                                    : l,
+                                ),
+                              )
+                            }
+                          />
+                        </div>
+                      </div>
                     </div>
-                  ) : (
-                    <div className="space-y-1">
-                      <Label className="text-xs text-muted-foreground">Dòng thiết bị (loại thiết bị — QLTS chọn thiết bị cụ thể khi duyệt)</Label>
-                      <SearchableSelect
-                        value={line.assetLineId}
-                        onValueChange={v =>
-                          setAllocLines(p => p.map(l => (l.localId === line.localId ? { ...l, assetLineId: v } : l)))
-                        }
-                        options={deviceAssetLineOptions}
-                        placeholder="Chọn dòng thiết bị…"
-                        searchPlaceholder="Tìm mã, tên dòng…"
-                        emptyText="Không có dòng thiết bị phù hợp"
-                        triggerClassName="w-full"
-                      />
-                    </div>
-                  )}
-                  {(line.lineType === 'CONSUMABLE' || line.lineType === 'DEVICE') && (
-                    <div className="space-y-1">
-                      <Label className="text-xs text-muted-foreground">
-                        {line.lineType === 'CONSUMABLE'
-                          ? 'Số lượng'
-                          : 'Số lượng (mỗi chiếc tương ứng một dòng trên phiếu — chọn thiết bị khi duyệt)'}
-                      </Label>
-                      <Input
-                        type="number"
-                        min={1}
-                        value={line.quantity}
-                        onChange={e =>
-                          setAllocLines(p =>
-                            p.map(l =>
-                              l.localId === line.localId ? { ...l, quantity: Math.max(1, Number(e.target.value) || 1) } : l,
-                            ),
-                          )
-                        }
-                      />
-                    </div>
-                  )}
-                </div>
-              ))}
+                  ))
+                )}
+              </div>
             </div>
           </div>
 

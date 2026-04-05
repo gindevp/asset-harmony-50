@@ -10,6 +10,7 @@ import { Input } from '@/components/ui/input';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Eye, Printer, Search, X } from 'lucide-react';
 import type { ConsumableStock, Equipment, RepairRequest } from '@/data/mockData';
+import { repairRequestEquipmentIds } from '@/data/mockData';
 import {
   equipmentStatusLabels,
   getItemName,
@@ -161,7 +162,7 @@ const AssetTracking = () => {
       }
     }
     const reps = repairRows
-      .filter(r => r.equipmentId === selected.id)
+      .filter(r => repairRequestEquipmentIds(r).includes(selected.id))
       .sort((x, y) => x.createdAt.localeCompare(y.createdAt));
     for (const r of reps) {
       events.push({

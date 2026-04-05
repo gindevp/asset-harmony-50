@@ -20,7 +20,7 @@ import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Textarea } from '@/components/ui/textarea';
 import { Eye, Pencil, Trash2 } from 'lucide-react';
-import type { RepairRequest } from '@/data/mockData';
+import { repairRequestEquipmentIds, type RepairRequest } from '@/data/mockData';
 import {
   repairStatusLabels,
   getEmployeeName,
@@ -192,8 +192,12 @@ const RepairRequests = () => {
     .filter(r => {
       if (filters.search) {
         const s = filters.search.toLowerCase();
-        const eq = equipments.find(e => e.id === r.equipmentId);
-        const eqLabel = eq ? `${eq.equipmentCode} ${getItemName(eq.itemId, assetItems)}` : '';
+        const eqLabel = repairRequestEquipmentIds(r)
+          .map(id => {
+            const eq = equipments.find(e => e.id === id);
+            return eq ? `${eq.equipmentCode} ${getItemName(eq.itemId, assetItems)}` : '';
+          })
+          .join(' ');
         if (
           !r.code.toLowerCase().includes(s) &&
           !eqLabel.toLowerCase().includes(s) &&
@@ -218,12 +222,15 @@ const RepairRequests = () => {
     {
       key: 'equipment',
       label: 'Thiết bị',
-      render: r => {
-        const eq = equipments.find(e => e.id === r.equipmentId);
-        return eq
-          ? `${formatEquipmentCodeDisplay(eq.equipmentCode)} - ${getItemName(eq.itemId, assetItems)}`
-          : r.equipmentId;
-      },
+      render: r =>
+        repairRequestEquipmentIds(r)
+          .map(id => {
+            const eq = equipments.find(e => e.id === id);
+            return eq
+              ? `${formatEquipmentCodeDisplay(eq.equipmentCode)} - ${getItemName(eq.itemId, assetItems)}`
+              : id;
+          })
+          .join('; ') || '—',
     },
     { key: 'issue', label: 'Vấn đề' },
     { key: 'status', label: 'Trạng thái', render: r => <StatusBadge status={r.status} label={repairStatusLabels[r.status]} /> },
@@ -321,12 +328,14 @@ const RepairRequests = () => {
                 <div>
                   <span className="text-muted-foreground">Thiết bị:</span>{' '}
                   <span className="font-medium text-foreground">
-                    {(() => {
-                      const eq = equipments.find(e => e.id === selected.equipmentId);
-                      return eq
-                        ? `${formatEquipmentCodeDisplay(eq.equipmentCode)} — ${getItemName(eq.itemId, assetItems)}`
-                        : selected.equipmentId;
-                    })()}
+                    {repairRequestEquipmentIds(selected)
+                      .map(id => {
+                        const eq = equipments.find(e => e.id === id);
+                        return eq
+                          ? `${formatEquipmentCodeDisplay(eq.equipmentCode)} — ${getItemName(eq.itemId, assetItems)}`
+                          : id;
+                      })
+                      .join('; ') || '—'}
                   </span>
                 </div>
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">

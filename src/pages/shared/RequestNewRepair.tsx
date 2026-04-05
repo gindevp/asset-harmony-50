@@ -8,7 +8,6 @@ import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Textarea } from '@/components/ui/textarea';
 
 import { resolveEmployeeIdForRequests, resolveEmployeeLocationIdForRequests } from '@/api/account';
@@ -70,7 +69,8 @@ export default function RequestNewRepair() {
     [equipments, myEmpIdStr, myDeptIdStr, myLocIdStr, isDeptCoordinator, deptPeerIds],
   );
 
-  const [repairEqId, setRepairEqId] = useState('');
+  const [repairSelected, setRepairSelected] = useState<Record<string, boolean>>({});
+  const toggleRepair = (id: string) => setRepairSelected(p => ({ ...p, [id]: !p[id] }));
   const [repairIssue, setRepairIssue] = useState('');
   const [repairDesc, setRepairDesc] = useState('');
   const [repairAttachment, setRepairAttachment] = useState('');
@@ -78,7 +78,8 @@ export default function RequestNewRepair() {
   const [repairBusy, setRepairBusy] = useState(false);
 
   const submitRepair = async () => {
-    if (!repairEqId) return toast.error('Chọn thiết bị');
+    const eqIds = Object.entries(repairSelected).filter(([, v]) => v).map(([k]) => k);
+    if (eqIds.length === 0) return toast.error('Chọn ít nhất một thiết bị');
     if (!repairIssue.trim()) return toast.error('Nhập vấn đề / danh mục');
     const repEid = requireEmployeeId();
     if (repEid == null) return;
@@ -103,7 +104,7 @@ export default function RequestNewRepair() {
         attachmentNote: noteParts.length > 0 ? noteParts.join('\n') : undefined,
         status: 'NEW',
         requester: { id: repEid },
-        equipment: { id: Number(repairEqId) },
+        lines: eqIds.map((eqId, i) => ({ lineNo: i + 1, equipment: { id: Number(eqId) } })),
       });
       toast.success('Đã gửi yêu cầu sửa chữa');
       await qc.invalidateQueries({ queryKey: ['api', 'allocation-requests-view'] });
@@ -141,17 +142,20 @@ export default function RequestNewRepair() {
           ) : (
             <>
               <div className="space-y-2">
-                <Label>Thiết bị</Label>
-                <Select value={repairEqId} onValueChange={setRepairEqId}>
-                  <SelectTrigger><SelectValue placeholder="Chọn thiết bị..." /></SelectTrigger>
-                  <SelectContent>
-                    {myEquipment.map(e => (
-                      <SelectItem key={e.id} value={e.id}>
+                <Label>Thiết bị (có thể chọn nhiều trên cùng một phiếu)</Label>
+                <p className="text-xs text-muted-foreground">
+                  Mỗi thiết bị chỉ được một phiếu sửa chữa hoặc thu hồi chưa kết thúc; không chọn trùng thiết bị trên một phiếu.
+                </p>
+                <div className="max-h-72 overflow-y-auto border rounded-md p-2 space-y-1">
+                  {myEquipment.map(e => (
+                    <label key={e.id} className="flex items-center gap-2 text-sm py-1 cursor-pointer">
+                      <input type="checkbox" checked={!!repairSelected[e.id]} onChange={() => toggleRepair(e.id)} />
+                      <span className="font-mono">
                         {formatEquipmentCodeDisplay(e.equipmentCode)} — serial {e.serial || '—'}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
+                      </span>
+                    </label>
+                  ))}
+                </div>
               </div>
               <div className="space-y-2">
                 <Label>Vấn đề (tối đa 100 ký tự)</Label>
@@ -171,7 +175,7 @@ export default function RequestNewRepair() {
                 />
               </div>
               <div className="space-y-2">
-                <Label>Tải ảnh, PDF hoặc video (tùy chọn, tối đa ~50 MB)</Label>
+                <Label>Tài liệu đính kèm (tối đa 50 MB)</Label>
                 <Input
                   type="file"
                   accept="image/jpeg,image/png,image/gif,image/webp,application/pdf,video/mp4,video/webm,video/quicktime,.mp4,.webm,.mov"

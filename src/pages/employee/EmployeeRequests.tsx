@@ -10,14 +10,17 @@ import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
 import { Input } from '@/components/ui/input';
 import { Eye, Paperclip, Pencil, Plus } from 'lucide-react';
-import type { AllocationRequest, RepairRequest, ReturnRequest } from '@/data/mockData';
 import {
   allocationStatusLabels,
+  formatDate,
   getAssetLineDisplay,
   getItemName,
+  repairRequestEquipmentIds,
   repairStatusLabels,
   returnStatusLabels,
-  formatDate,
+  type AllocationRequest,
+  type RepairRequest,
+  type ReturnRequest,
 } from '@/data/mockData';
 import { toast } from 'sonner';
 import { resolveEmployeeIdForRequests } from '@/api/account';
@@ -32,7 +35,11 @@ import {
 } from '@/hooks/useEntityApi';
 import { ApiError, apiPatch, parseProblemDetailJson } from '@/api/http';
 import { formatBizCodeDisplay, formatEquipmentCodeDisplay } from '@/utils/formatCodes';
-import { buildAllocationDetailRows, countAllocationDisplayRows } from '@/utils/allocationDisplayRows';
+import {
+  allocationRequestListNoteDisplay,
+  buildAllocationDetailRows,
+  sumAllocationLineQuantities,
+} from '@/utils/allocationDisplayRows';
 import {
   canCancelAllocationAsEmployee,
   canCancelReturnAsEmployee,
@@ -127,7 +134,6 @@ const EmployeeRequests = () => {
   const [empDetail, setEmpDetail] = useState<EmpDetail>(null);
   const [eaReason, setEaReason] = useState('');
   const [eaAttach, setEaAttach] = useState('');
-  const [eaBen, setEaBen] = useState('');
   const [erIssue, setErIssue] = useState('');
   const [erDesc, setErDesc] = useState('');
   const [erAttach, setErAttach] = useState('');
@@ -139,7 +145,6 @@ const EmployeeRequests = () => {
     if (empDetail.section === 'allocation') {
       setEaReason(empDetail.row.reason ?? '');
       setEaAttach(empDetail.row.attachmentNote ?? '');
-      setEaBen(empDetail.row.beneficiaryNote ?? '');
     } else if (empDetail.section === 'repair') {
       setErIssue(empDetail.row.issue ?? '');
       setErDesc(empDetail.row.description ?? '');
@@ -157,7 +162,6 @@ const EmployeeRequests = () => {
         id: Number(empDetail.row.id),
         reason: eaReason.trim() || undefined,
         attachmentNote: eaAttach.trim() || undefined,
-        beneficiaryNote: eaBen.trim() || undefined,
       });
       toast.success('Đã lưu thay đổi');
       setEmpDetail(null);
@@ -328,9 +332,13 @@ const EmployeeRequests = () => {
             {
               key: 'benNote',
               label: 'Ghi chú',
-              render: (r: any) => <span className="max-w-[8rem] truncate block">{r.beneficiaryNote || '—'}</span>,
+              render: (r: AllocationRequest) => (
+                <span className="max-w-[14rem] truncate block" title={allocationRequestListNoteDisplay(r) || undefined}>
+                  {allocationRequestListNoteDisplay(r) || '—'}
+                </span>
+              ),
             },
-            { key: 'lines', label: 'Số lượng', render: (r: AllocationRequest) => countAllocationDisplayRows(r.lines) },
+            { key: 'lines', label: 'Số lượng', render: (r: AllocationRequest) => sumAllocationLineQuantities(r.lines) },
             {
               key: 'status',
               label: 'Trạng thái',
@@ -402,10 +410,14 @@ const EmployeeRequests = () => {
             {
               key: 'equipment',
               label: 'Thiết bị',
-              render: (r: any) => {
-                const eq = equipments.find(e => e.id === r.equipmentId);
-                return eq ? formatEquipmentCodeDisplay(eq.equipmentCode) : '';
-              },
+              render: (r: any) =>
+                repairRequestEquipmentIds(r)
+                  .map(id => {
+                    const eq = equipments.find(e => e.id === id);
+                    return eq ? formatEquipmentCodeDisplay(eq.equipmentCode) : '';
+                  })
+                  .filter(Boolean)
+                  .join(', ') || '—',
             },
             {
               key: 'status',
@@ -544,12 +556,8 @@ const EmployeeRequests = () => {
                     <Textarea value={eaReason} onChange={e => setEaReason(e.target.value)} rows={3} disabled={empBusy} />
                   </div>
                   <div className="space-y-2">
-                    <Label>Ghi chú / đính kèm</Label>
+                    <Label>Ghi chú</Label>
                     <Textarea value={eaAttach} onChange={e => setEaAttach(e.target.value)} rows={2} disabled={empBusy} />
-                  </div>
-                  <div className="space-y-2">
-                    <Label>Ghi chú thêm</Label>
-                    <Textarea value={eaBen} onChange={e => setEaBen(e.target.value)} rows={2} disabled={empBusy} />
                   </div>
                   <div className="flex gap-2">
                     <Button type="button" size="sm" disabled={empBusy} onClick={() => void saveEmpAllocation()}>
@@ -563,9 +571,11 @@ const EmployeeRequests = () => {
               ) : (
                 <>
                   <div><span className="text-muted-foreground">Lý do:</span> {empDetail.row.reason}</div>
-                  {empDetail.row.attachmentNote ? <AttachmentNoteView text={empDetail.row.attachmentNote} /> : null}
-                  {empDetail.row.beneficiaryNote ? (
-                    <div><span className="text-muted-foreground">Ghi chú thêm:</span> {empDetail.row.beneficiaryNote}</div>
+                  {empDetail.row.attachmentNote ? (
+                    <div className="space-y-1">
+                      <div className="text-muted-foreground">Ghi chú</div>
+                      <AttachmentNoteView text={empDetail.row.attachmentNote} showCaption={false} />
+                    </div>
                   ) : null}
                 </>
               )}
@@ -611,12 +621,14 @@ const EmployeeRequests = () => {
               <div>
                 <span className="text-muted-foreground">Thiết bị:</span>{' '}
                 <span className="font-medium text-foreground">
-                  {(() => {
-                    const eq = equipments.find(e => e.id === empDetail.row.equipmentId);
-                    return eq
-                      ? `${formatEquipmentCodeDisplay(eq.equipmentCode)} — ${getItemName(eq.itemId, assetItems)}`
-                      : empDetail.row.equipmentId;
-                  })()}
+                  {repairRequestEquipmentIds(empDetail.row)
+                    .map(id => {
+                      const eq = equipments.find(e => e.id === id);
+                      return eq
+                        ? `${formatEquipmentCodeDisplay(eq.equipmentCode)} — ${getItemName(eq.itemId, assetItems)}`
+                        : id;
+                    })
+                    .join('; ') || '—'}
                 </span>
               </div>
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
