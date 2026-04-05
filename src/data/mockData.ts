@@ -256,7 +256,10 @@ export interface RepairRequest {
   code: string;
   requesterId: string;
   departmentId: string;
+  /** Thiết bị đầu tiên (tương thích lọc cũ) */
   equipmentId: string;
+  /** Tất cả thiết bị trên phiếu khi có nhiều dòng */
+  equipmentLineIds?: string[];
   issue: string;
   description: string;
   /** Link/ghi chú file đính kèm */
@@ -269,6 +272,11 @@ export interface RepairRequest {
   createdAt: string;
   receivedAt?: string;
   completedAt?: string;
+}
+
+export function repairRequestEquipmentIds(r: RepairRequest): string[] {
+  if (r.equipmentLineIds && r.equipmentLineIds.length > 0) return r.equipmentLineIds;
+  return r.equipmentId ? [r.equipmentId] : [];
 }
 
 export type ReturnRequestStatus = 'PENDING' | 'APPROVED' | 'REJECTED' | 'COMPLETED' | 'CANCELLED';

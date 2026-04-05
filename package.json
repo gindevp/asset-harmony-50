@@ -8,7 +8,7 @@
   },
   "scripts": {
     "dev": "vite",
-    "build": "node -e \"console.log('[build] vite start', new Date().toISOString())\" && vite build && node -e \"console.log('[build] vite done', new Date().toISOString())\"",
+    "build": "node -e \"console.log('[build] vite start', new Date().toISOString())\" && node --max-old-space-size=7168 ./node_modules/vite/bin/vite.js build && node -e \"console.log('[build] vite done', new Date().toISOString())\"",
     "build:dev": "vite build --mode development",
     "lint": "eslint .",
     "preview": "vite preview",
