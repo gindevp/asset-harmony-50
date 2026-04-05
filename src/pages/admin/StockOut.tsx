@@ -24,6 +24,7 @@ import {
 } from '@/data/mockData';
 import { toast } from 'sonner';
 import { ApprovalActionBar } from '@/components/shared/ApprovalActionBar';
+import { AttachmentNoteView } from '@/components/shared/AttachmentNoteView';
 import {
   mapAssetItemDto,
   useAssetItems,
@@ -378,7 +379,16 @@ const StockOutPage = () => {
                 <div><span className="text-muted-foreground">Trạng thái:</span> <StatusBadge status={selected.status} label={stockOutStatusLabels[selected.status]} /></div>
                 <div><span className="text-muted-foreground">Người tạo:</span> {createdLogin || '—'}</div>
                 <div><span className="text-muted-foreground">Ngày tạo:</span> {formatDate(selected.createdAt)}</div>
-                <div className="col-span-2"><span className="text-muted-foreground">Ghi chú:</span> {selected.notes}</div>
+                <div className="col-span-2">
+                  <span className="text-muted-foreground">Ghi chú:</span>
+                  <div className="mt-1 text-foreground break-words">
+                    {selected.notes?.trim() ? (
+                      <AttachmentNoteView text={selected.notes} showCaption={false} />
+                    ) : (
+                      '—'
+                    )}
+                  </div>
+                </div>
               </div>
               <DataTable
                 columns={[

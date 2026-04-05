@@ -148,6 +148,8 @@ export type AllocationRequestDto = {
   requestDate?: string;
   reason?: string;
   attachmentNote?: string;
+  /** Lý do từ chối (khi status = REJECTED) */
+  rejectionReason?: string;
   status?: string;
   beneficiaryNote?: string;
   /** EMPLOYEE | DEPARTMENT | LOCATION | COMPANY */
@@ -181,6 +183,8 @@ export type RepairRequestDto = {
   description?: string;
   attachmentNote?: string;
   status?: string;
+  /** Lý do từ chối (khi status = REJECTED) */
+  rejectionReason?: string;
   resolutionNote?: string;
   repairOutcome?: string;
   requester?: EmployeeDto;
@@ -227,6 +231,19 @@ export type EquipmentAssignmentDto = {
   location?: LocationDto;
 };
 
+/** GET /api/consumable-assignments — gán vật tư theo SL (cấp phát / xuất kho). */
+export type ConsumableAssignmentDto = {
+  id?: number;
+  quantity?: number;
+  assignedDate?: string;
+  returnedQuantity?: number;
+  note?: string;
+  assetItem?: AssetItemDto;
+  employee?: EmployeeDto;
+  department?: DepartmentDto;
+  location?: LocationDto;
+};
+
 export type AdminUserDto = {
   id?: number;
   login?: string;
@@ -265,5 +282,19 @@ export type StockDocumentEventDto = {
   actor?: string;
   eventType?: string;
   message?: string;
+};
+
+/** Yêu cầu báo mất — POST/GET /api/loss-report-requests */
+export type LossReportRequestDto = {
+  id?: number;
+  code?: string;
+  requestDate?: string;
+  status?: string;
+  lossKind?: string;
+  quantity?: number;
+  reason?: string;
+  requester?: EmployeeDto;
+  equipment?: EquipmentDto;
+  consumableAssignment?: { id?: number; assetItem?: AssetItemDto };
 };
 

@@ -32,6 +32,7 @@ import {
 } from '@/hooks/useEntityApi';
 import { ApiError, apiPatch, parseProblemDetailJson } from '@/api/http';
 import { formatBizCodeDisplay, formatEquipmentCodeDisplay } from '@/utils/formatCodes';
+import { buildAllocationDetailRows, countAllocationDisplayRows } from '@/utils/allocationDisplayRows';
 import {
   canCancelAllocationAsEmployee,
   canCancelReturnAsEmployee,
@@ -329,7 +330,7 @@ const EmployeeRequests = () => {
               label: 'Ghi chú',
               render: (r: any) => <span className="max-w-[8rem] truncate block">{r.beneficiaryNote || '—'}</span>,
             },
-            { key: 'lines', label: 'Số dòng', render: (r: any) => r.lines.length },
+            { key: 'lines', label: 'Số lượng', render: (r: AllocationRequest) => countAllocationDisplayRows(r.lines) },
             {
               key: 'status',
               label: 'Trạng thái',
@@ -529,6 +530,12 @@ const EmployeeRequests = () => {
                 <span className="text-muted-foreground">Trạng thái:</span>{' '}
                 <StatusBadge status={empDetail.row.status} label={allocationStatusLabels[empDetail.row.status] ?? empDetail.row.status} />
               </div>
+              {empDetail.row.status === 'REJECTED' && empDetail.row.rejectionReason?.trim() ? (
+                <div className="rounded-md border border-destructive/25 bg-destructive/5 p-3">
+                  <span className="text-muted-foreground">Lý do từ chối:</span>
+                  <p className="mt-1 whitespace-pre-wrap text-sm">{empDetail.row.rejectionReason}</p>
+                </div>
+              ) : null}
               <div><span className="text-muted-foreground">Đối tượng nhận:</span> {empDetail.row.assigneeSummary}</div>
               {empDetail.mode === 'edit' && canEditAllocationRequestFields(empDetail.row.status) ? (
                 <div className="space-y-2 border rounded-md p-3 bg-muted/20">
@@ -565,14 +572,36 @@ const EmployeeRequests = () => {
               <div className="text-muted-foreground border-t pt-2">
                 <p className="font-medium text-foreground mb-1">Các dòng</p>
                 <ul className="list-disc pl-4 space-y-1">
-                  {empDetail.row.lines.map(line => (
-                    <li key={line.id}>
-                      {line.assetLineId
-                        ? getAssetLineDisplay(line.assetLineId, assetLinesApi)
-                        : getItemName(line.itemId, assetItems)}{' '}
-                      × {line.quantity}
-                    </li>
-                  ))}
+                  {buildAllocationDetailRows(empDetail.row.lines).map(row => {
+                    if (row.kind === 'device_group') {
+                      const label =
+                        assetLinesApi.find(l => String(l.id) === row.assetLineId)?.name?.trim() ||
+                        getAssetLineDisplay(row.assetLineId, assetLinesApi);
+                      const qty = row.lines.reduce((s, l) => s + (l.quantity ?? 1), 0);
+                      return (
+                        <li key={row.id}>
+                          {label} × {qty}
+                        </li>
+                      );
+                    }
+                    const line = row.line;
+                    const lt = (line.lineType ?? '').toUpperCase();
+                    const label =
+                      lt === 'CONSUMABLE'
+                        ? line.assetLineId
+                          ? assetLinesApi.find(l => String(l.id) === line.assetLineId)?.name?.trim() ||
+                            getAssetLineDisplay(line.assetLineId, assetLinesApi)
+                          : getItemName(line.itemId, assetItems)
+                        : line.assetLineId
+                          ? assetLinesApi.find(l => String(l.id) === line.assetLineId)?.name?.trim() ||
+                            getAssetLineDisplay(line.assetLineId, assetLinesApi)
+                          : getItemName(line.itemId, assetItems);
+                    return (
+                      <li key={line.id}>
+                        {label} × {line.quantity}
+                      </li>
+                    );
+                  })}
                 </ul>
               </div>
             </div>
@@ -580,25 +609,43 @@ const EmployeeRequests = () => {
           {empDetail?.section === 'repair' && (
             <div className="space-y-3 text-sm">
               <div>
-                <span className="text-muted-foreground">Trạng thái:</span>{' '}
-                <StatusBadge status={empDetail.row.status} label={repairStatusLabels[empDetail.row.status] ?? empDetail.row.status} />
-              </div>
-              <div>
                 <span className="text-muted-foreground">Thiết bị:</span>{' '}
-                {formatEquipmentCodeDisplay(equipments.find(e => e.id === empDetail.row.equipmentId)?.equipmentCode ?? '')}
+                <span className="font-medium text-foreground">
+                  {(() => {
+                    const eq = equipments.find(e => e.id === empDetail.row.equipmentId);
+                    return eq
+                      ? `${formatEquipmentCodeDisplay(eq.equipmentCode)} — ${getItemName(eq.itemId, assetItems)}`
+                      : empDetail.row.equipmentId;
+                  })()}
+                </span>
               </div>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div>
+                  <span className="text-muted-foreground">Ngày tạo:</span> {formatDate(empDetail.row.createdAt)}
+                </div>
+                <div className="flex flex-wrap items-center gap-2">
+                  <span className="text-muted-foreground">Trạng thái:</span>{' '}
+                  <StatusBadge status={empDetail.row.status} label={repairStatusLabels[empDetail.row.status] ?? empDetail.row.status} />
+                </div>
+              </div>
+              {empDetail.row.status === 'REJECTED' && empDetail.row.rejectionReason?.trim() ? (
+                <div className="rounded-md border border-destructive/25 bg-destructive/5 p-3">
+                  <span className="text-muted-foreground">Lý do từ chối:</span>
+                  <p className="mt-1 whitespace-pre-wrap text-sm">{empDetail.row.rejectionReason}</p>
+                </div>
+              ) : null}
               {empDetail.mode === 'edit' && canEditRepairRequestFields(empDetail.row.status) ? (
                 <div className="space-y-2 border rounded-md p-3 bg-muted/20">
                   <div className="space-y-2">
-                    <Label>Vấn đề</Label>
+                    <Label className="font-medium">Vấn đề</Label>
                     <Input value={erIssue} onChange={e => setErIssue(e.target.value)} maxLength={100} disabled={empBusy} />
                   </div>
                   <div className="space-y-2">
-                    <Label>Mô tả</Label>
+                    <Label className="font-medium">Mô tả</Label>
                     <Textarea value={erDesc} onChange={e => setErDesc(e.target.value)} rows={3} disabled={empBusy} />
                   </div>
                   <div className="space-y-2">
-                    <Label>Đính kèm / ghi chú</Label>
+                    <Label className="font-medium">Đính kèm / ghi chú</Label>
                     <Textarea value={erAttach} onChange={e => setErAttach(e.target.value)} rows={2} disabled={empBusy} />
                   </div>
                   <div className="flex gap-2">
@@ -611,11 +658,13 @@ const EmployeeRequests = () => {
                   </div>
                 </div>
               ) : (
-                <>
-                  <div><span className="text-muted-foreground">Vấn đề:</span> {empDetail.row.issue}</div>
-                  <div><span className="text-muted-foreground">Mô tả:</span> {empDetail.row.description}</div>
+                <div className="p-3 rounded-md bg-muted space-y-2">
+                  <p className="text-sm font-medium">Vấn đề: {empDetail.row.issue}</p>
+                  {empDetail.row.description ? (
+                    <p className="text-sm font-medium whitespace-pre-wrap">Mô tả: {empDetail.row.description}</p>
+                  ) : null}
                   {empDetail.row.attachmentNote ? <AttachmentNoteView text={empDetail.row.attachmentNote} /> : null}
-                </>
+                </div>
               )}
             </div>
           )}

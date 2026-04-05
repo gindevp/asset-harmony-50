@@ -7,12 +7,14 @@ import type {
   AssetGroupDto,
   AssetItemDto,
   AssetLineDto,
+  ConsumableAssignmentDto,
   ConsumableStockDto,
   DepartmentDto,
   EmployeeDto,
   EquipmentAssignmentDto,
   EquipmentDto,
   LocationDto,
+  LossReportRequestDto,
   RepairRequestDto,
   ReturnRequestDto,
   ReturnRequestLineDto,
@@ -144,6 +146,16 @@ export function useEquipmentAssignments() {
   });
 }
 
+export function useConsumableAssignments() {
+  return useQuery({
+    queryKey: ['api', 'consumable-assignments'],
+    queryFn: async () => {
+      const raw = await apiGet<unknown>('/api/consumable-assignments');
+      return normalizeListResponse<ConsumableAssignmentDto>(raw);
+    },
+  });
+}
+
 /** Thiết bị + gán hiện tại (equipment-assignments chưa trả — ưu tiên bản ghi id lớn nhất).
  *  Ghép theo equipmentId (FK phẳng từ BE) hoặc equipmentCode — tránh lỗi khi object equipment lồng nhau thiếu id.
  *  Nếu assignments lỗi/chưa có, vẫn hiển thị thiết bị (chưa gán). */
@@ -236,6 +248,16 @@ export function useReturnRequestsView() {
         apiGet<ReturnRequestLineDto[]>(`/api/return-request-lines?${PAGE_ALL}`),
       ]);
       return buildReturnRequests(reqs, lines);
+    },
+  });
+}
+
+export function useLossReportRequests() {
+  return useQuery({
+    queryKey: ['api', 'loss-report-requests'],
+    queryFn: async () => {
+      const raw = await apiGet<unknown>(`/api/loss-report-requests?${PAGE_ALL}`);
+      return normalizeListResponse<LossReportRequestDto>(raw);
     },
   });
 }

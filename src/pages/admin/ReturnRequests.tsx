@@ -18,12 +18,10 @@ import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
 import { Checkbox } from '@/components/ui/checkbox';
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog';
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Eye, Pencil, Trash2 } from 'lucide-react';
 import type { ReturnRequest } from '@/data/mockData';
 import {
   returnStatusLabels,
-  returnDispositionLabels,
   getEmployeeName,
   getDepartmentName,
   getItemName,
@@ -40,11 +38,19 @@ import {
   useEmployees,
   useReturnRequestsView,
 } from '@/hooks/useEntityApi';
-import { ApiError, apiDelete, apiGet, apiPatch, parseProblemDetailJson, PAGE_ALL } from '@/api/http';
+import { ApiError, apiDelete, apiGet, apiPatch, getStoredToken, parseProblemDetailJson, PAGE_ALL } from '@/api/http';
+import { hasAnyAuthority } from '@/auth/jwt';
 import type { ReturnRequestLineDto } from '@/api/types';
 import { canDeleteReturnRequest, canEditReturnRequestFields } from '@/utils/requestRecordActions';
 
+/** QLTS không có quyền sửa/xóa phiếu (Admin / GĐ vẫn có). */
+function hideReturnEditDeleteForQlts(): boolean {
+  const t = getStoredToken();
+  return hasAnyAuthority(t, ['ROLE_ASSET_MANAGER']) && !hasAnyAuthority(t, ['ROLE_ADMIN', 'ROLE_GD']);
+}
+
 const ReturnRequests = () => {
+  const hideRowEditDelete = hideReturnEditDeleteForQlts();
   const qc = useQueryClient();
   const retQ = useReturnRequestsView();
   const empQ = useEmployees();
@@ -168,19 +174,6 @@ const ReturnRequests = () => {
     }
   };
 
-  const patchLineDisposition = async (lineId: number, disposition: string) => {
-    setBusy(true);
-    try {
-      await apiPatch(`/api/return-request-lines/${lineId}`, { id: lineId, disposition });
-      await rawLinesQ.refetch();
-      invalidate();
-    } catch (e) {
-      toast.error(e instanceof Error ? e.message : 'Lỗi API');
-    } finally {
-      setBusy(false);
-    }
-  };
-
   const completeReturn = async () => {
     if (!selected) return;
     const lines = rawLinesQ.data ?? [];
@@ -239,7 +232,7 @@ const ReturnRequests = () => {
           >
             <Eye className="h-4 w-4" />
           </Button>
-          {canEditReturnRequestFields(r.status) ? (
+          {!hideRowEditDelete && canEditReturnRequestFields(r.status) ? (
             <Button
               type="button"
               variant="ghost"
@@ -254,7 +247,7 @@ const ReturnRequests = () => {
               <Pencil className="h-4 w-4" />
             </Button>
           ) : null}
-          {canDeleteReturnRequest(r.status) ? (
+          {!hideRowEditDelete && canDeleteReturnRequest(r.status) ? (
             <Button
               type="button"
               variant="ghost"
@@ -279,11 +272,6 @@ const ReturnRequests = () => {
       key: 'sel',
       label: 'Thu hồi',
       render: r => (r.selected ? 'Có' : 'Không'),
-    },
-    {
-      key: 'disposition',
-      label: 'Hướng xử lý',
-      render: r => (r.disposition ? returnDispositionLabels[r.disposition] ?? r.disposition : '—'),
     },
     { key: 'notes', label: 'Ghi chú' },
   ];
@@ -318,10 +306,10 @@ const ReturnRequests = () => {
         <DialogContent className="max-w-3xl max-h-[90vh] overflow-y-auto">
           <DialogHeader>
             <DialogTitle>
-              {dialogMode === 'edit' ? 'Sửa yêu cầu' : 'Chi tiết yêu cầu'} thu hồi {selected?.code}
+              {dialogMode === 'edit' && !hideRowEditDelete ? 'Sửa yêu cầu' : 'Chi tiết yêu cầu'} thu hồi {selected?.code}
             </DialogTitle>
             <DialogDescription className="sr-only">
-              Xem hoặc chỉnh sửa yêu cầu thu hồi, chọn hướng xử lý từng dòng khi phiếu đã duyệt.
+              Xem hoặc chỉnh sửa yêu cầu thu hồi; khi đã duyệt, chọn dòng thu hồi thực tế — hệ thống xử lý mặc định trả về kho.
             </DialogDescription>
           </DialogHeader>
           {selected && (
@@ -331,7 +319,7 @@ const ReturnRequests = () => {
                 <div><span className="text-muted-foreground">Phòng ban (trên phiếu):</span> {getDepartmentName(selected.departmentId, departments)}</div>
                 <div><span className="text-muted-foreground">Ngày tạo:</span> {formatDate(selected.createdAt)}</div>
                 <div><span className="text-muted-foreground">Trạng thái:</span> <StatusBadge status={selected.status} label={returnStatusLabels[selected.status]} /></div>
-                {dialogMode === 'edit' && canEditReturnRequestFields(selected.status) ? (
+                {dialogMode === 'edit' && !hideRowEditDelete && canEditReturnRequestFields(selected.status) ? (
                   <div className="col-span-2 space-y-2 border rounded-md p-3 bg-muted/20">
                     <Label>Lý do / ghi chú</Label>
                     <Textarea value={editReturnReason} onChange={e => setEditReturnReason(e.target.value)} rows={3} disabled={busy} />
@@ -352,7 +340,8 @@ const ReturnRequests = () => {
               {selected.status === 'APPROVED' ? (
                 <div className="space-y-2">
                   <p className="text-sm text-muted-foreground">
-                    Đánh dấu dòng sẽ thu hồi thực tế (chỉ các dòng được chọn mới cập nhật kho khi hoàn tất).
+                    Đánh dấu dòng sẽ thu hồi thực tế (chỉ các dòng được chọn mới cập nhật kho khi hoàn tất). Hướng xử lý mặc định:{' '}
+                    <span className="font-medium text-foreground">trả về kho</span>.
                   </p>
                   {rawLinesQ.isLoading && <p className="text-sm text-muted-foreground">Đang tải dòng…</p>}
                   <DataTable
@@ -383,31 +372,6 @@ const ReturnRequests = () => {
                             : (l.equipment?.id ?? '—'),
                       },
                       { key: 'quantity', label: 'SL', className: 'text-right', render: (l: ReturnRequestLineDto) => l.quantity ?? 0 },
-                      {
-                        key: 'disposition',
-                        label: 'Hướng xử lý',
-                        render: (l: ReturnRequestLineDto) => {
-                          const v = (l.disposition ?? 'TO_STOCK') as string;
-                          return (
-                            <Select
-                              value={v}
-                              disabled={busy || l.selected !== true}
-                              onValueChange={val => void patchLineDisposition(l.id!, val)}
-                            >
-                              <SelectTrigger className="w-[11rem] h-9">
-                                <SelectValue />
-                              </SelectTrigger>
-                              <SelectContent>
-                                {Object.entries(returnDispositionLabels).map(([key, label]) => (
-                                  <SelectItem key={key} value={key}>
-                                    {label}
-                                  </SelectItem>
-                                ))}
-                              </SelectContent>
-                            </Select>
-                          );
-                        },
-                      },
                       { key: 'notes', label: 'Ghi chú', render: (l: ReturnRequestLineDto) => l.note ?? '' },
                     ]}
                     data={rawLinesQ.data ?? []}

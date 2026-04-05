@@ -15,11 +15,13 @@ import { cn } from '@/lib/utils';
 import { useState } from 'react';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 
+type NavChild = { label: string; path: string; createPath?: string; createTitle?: string };
+
 interface NavItem {
   label: string;
   path?: string;
   icon: any;
-  children?: { label: string; path: string }[];
+  children?: NavChild[];
 }
 
 const navItems: NavItem[] = [
@@ -45,6 +47,7 @@ const navItems: NavItem[] = [
       { label: 'Yêu cầu cấp phát', path: '/admin/allocation-requests' },
       { label: 'Yêu cầu sửa chữa', path: '/admin/repair-requests' },
       { label: 'Yêu cầu thu hồi', path: '/admin/return-requests' },
+      { label: 'Yêu cầu báo mất', path: '/admin/loss-report-requests' },
     ]
   },
   { label: 'Báo cáo', path: '/admin/reports', icon: BarChart3 },

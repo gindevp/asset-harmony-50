@@ -45,7 +45,14 @@ export class ApiError extends Error {
   }
 }
 
-/** Parse JSON lỗi RFC 7807 / JHipster (fieldErrors) để hiển thị toast. */
+function isGenericProblemTitle(t: string | undefined): boolean {
+  if (!t || t === 'null') return true;
+  return ['Bad Request', 'Forbidden', 'Unauthorized', 'Not Found', 'Internal Server Error', 'Conflict', 'Method Not Allowed'].includes(
+    t,
+  );
+}
+
+/** Parse JSON lỗi RFC 7807 / JHipster (fieldErrors) để hiển thị toast — ưu tiên title/detail từ server. */
 export function parseProblemDetailJson(body: string | undefined): string {
   if (!body) return '';
   try {
@@ -63,6 +70,10 @@ export function parseProblemDetailJson(body: string | undefined): string {
         .filter(Boolean)
         .join(' · ');
     }
+    /** Title từ BadRequestAlertException (tiếng Việt, có thể kèm số liệu cần/hiện). */
+    if (j.title && !isGenericProblemTitle(j.title)) {
+      return j.title;
+    }
     const problemKeys: Record<string, string> = {
       'error.nostock':
         'Chưa có bản ghi tồn kho cho vật tư trong yêu cầu. Cần nhập kho mã vật tư đó trước (Tồn kho).',
@@ -75,13 +86,21 @@ export function parseProblemDetailJson(body: string | undefined): string {
       'error.consumablerequiresitem': 'Dòng vật tư phải chọn mã tài sản (item).',
       'error.notinstock': 'Thiết bị chọn không còn ở trạng thái tồn kho (IN_STOCK).',
     };
+    if (j.detail && j.detail.startsWith('{')) {
+      try {
+        const inner = JSON.parse(j.detail) as { title?: string; message?: string };
+        if (inner.title && !isGenericProblemTitle(inner.title)) return inner.title;
+      } catch {
+        /* ignore */
+      }
+    }
+    if (j.detail && !/^error\.http\.\d+$/.test(j.detail) && j.detail !== 'null') return j.detail;
     if (j.message && problemKeys[j.message]) return problemKeys[j.message];
-    if (j.detail && !/^error\.http\.\d+$/.test(j.detail)) return j.detail;
     if (j.message && !/^error\.http\.\d+$/.test(j.message)) return j.message;
   } catch {
     // ignore
   }
-  return body.slice(0, 400);
+  return body.slice(0, 2000);
 }
 
 export function getApiErrorMessage(err: unknown): string {
@@ -130,7 +149,7 @@ export async function apiJson<T>(path: string, init: RequestInit = {}): Promise<
   if (res.status === 204) return undefined as T;
   const text = await res.text();
   if (!res.ok) {
-    throw new ApiError(`${res.status} ${res.statusText}`, res.status, text.slice(0, 500));
+    throw new ApiError(`${res.status} ${res.statusText}`, res.status, text.slice(0, 12000));
   }
   if (!text) return undefined as T;
   return JSON.parse(text) as T;
@@ -157,7 +176,7 @@ export async function apiDownloadBlob(path: string): Promise<Blob> {
   const res = await apiFetch(path, { method: 'GET' });
   if (!res.ok) {
     const text = await res.text().catch(() => '');
-    throw new ApiError(`${res.status} ${res.statusText}`, res.status, text.slice(0, 500));
+    throw new ApiError(`${res.status} ${res.statusText}`, res.status, text.slice(0, 12000));
   }
   return res.blob();
 }
@@ -174,7 +193,7 @@ export async function apiDelete(path: string): Promise<void> {
   const res = await apiFetch(path, { method: 'DELETE' });
   if (!res.ok) {
     const text = await res.text().catch(() => '');
-    throw new ApiError(`${res.status}`, res.status, text.slice(0, 500));
+    throw new ApiError(`${res.status}`, res.status, text.slice(0, 12000));
   }
 }
 
@@ -183,7 +202,7 @@ export async function apiPostMultipart<T>(path: string, formData: FormData): Pro
   const res = await apiFetch(path, { method: 'POST', body: formData });
   const text = await res.text();
   if (!res.ok) {
-    throw new ApiError(`${res.status} ${res.statusText}`, res.status, text.slice(0, 500));
+    throw new ApiError(`${res.status} ${res.statusText}`, res.status, text.slice(0, 12000));
   }
   if (!text) return undefined as T;
   return JSON.parse(text) as T;

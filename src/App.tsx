@@ -25,6 +25,7 @@ import AssetTracking from "./pages/admin/AssetTracking";
 import AllocationRequests from "./pages/admin/AllocationRequests";
 import RepairRequests from "./pages/admin/RepairRequests";
 import ReturnRequests from "./pages/admin/ReturnRequests";
+import LossReportRequests from "./pages/admin/LossReportRequests";
 import Users from "./pages/admin/Users";
 import Roles from "./pages/admin/Roles";
 import SystemLogs from "./pages/admin/SystemLogs";
@@ -32,6 +33,7 @@ import Reports from "./pages/admin/Reports";
 import Inventory from "./pages/admin/Inventory";
 import EmployeeRequests from "./pages/employee/EmployeeRequests";
 import MyAssets from "./pages/employee/MyAssets";
+import EmployeeLossReports from "./pages/employee/EmployeeLossReports";
 import RequestNew from "./pages/shared/RequestNew";
 import RequestNewRepair from "./pages/shared/RequestNewRepair";
 import RequestNewReturn from "./pages/shared/RequestNewReturn";
@@ -96,6 +98,7 @@ const App = () => {
             <Route path="allocation-requests" element={<AllocationRequests />} />
             <Route path="repair-requests" element={<RepairRequests />} />
             <Route path="return-requests" element={<ReturnRequests />} />
+            <Route path="loss-report-requests" element={<LossReportRequests />} />
             <Route path="request-create" element={<EmployeeRequests />} />
             <Route path="my-assets" element={<MyAssets />} />
             <Route path="request-new" element={<RequestNew />} />
@@ -119,6 +122,7 @@ const App = () => {
             <Route path="allocation-requests" element={<EmployeeRequests />} />
             <Route path="repair-requests" element={<EmployeeRequests />} />
             <Route path="return-requests" element={<EmployeeRequests />} />
+            <Route path="loss-report-requests" element={<EmployeeLossReports />} />
             <Route path="my-assets" element={<MyAssets />} />
             <Route path="request-new" element={<RequestNew />} />
             <Route path="request-new/repair" element={<RequestNewRepair />} />

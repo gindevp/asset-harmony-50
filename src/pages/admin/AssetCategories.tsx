@@ -243,7 +243,8 @@ const AssetCategories = () => {
         const name = editFields.find(f => f.key === 'name')?.value ?? '';
         const description = editFields.find(f => f.key === 'description')?.value ?? '';
         const groupId = editFields.find(f => f.key === 'groupId')?.value ?? '';
-        const at = (editFields.find(f => f.key === 'assetType')?.value || DEFAULT_GROUP_ASSET_TYPE).toUpperCase();
+        const line = assetLines.find(l => l.id === String(editId));
+        const at = (line?.typeId || DEFAULT_GROUP_ASSET_TYPE).toUpperCase();
         await apiPut(`/api/asset-lines/${editId}`, {
           id: editId,
           code: editCode,
@@ -444,7 +445,6 @@ const AssetCategories = () => {
           setEditFields([
             { key: 'name', label: 'Tên', value: r.name },
             { key: 'groupId', label: 'groupId', value: r.groupId },
-            { key: 'assetType', label: 'assetType', value: r.typeId },
             { key: 'description', label: 'Mô tả', value: (r as any).description ?? '' },
           ]);
           setEditTitle('Sửa dòng tài sản');
@@ -703,20 +703,12 @@ const AssetCategories = () => {
             <>
               <div>
                 <Label>Loại tài sản (dòng)</Label>
-                <Select
-                  value={editFields.find(f => f.key === 'assetType')?.value || DEFAULT_GROUP_ASSET_TYPE}
-                  onValueChange={v =>
-                    setEditFields(prev => prev.map(x => (x.key === 'assetType' ? { ...x, value: v } : x)))
-                  }
-                >
-                  <SelectTrigger>
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="DEVICE">Thiết bị</SelectItem>
-                    <SelectItem value="CONSUMABLE">Vật tư</SelectItem>
-                  </SelectContent>
-                </Select>
+                <p className="text-sm font-medium rounded-md border border-dashed bg-muted/40 px-3 py-2">
+                  {groupAssetTypeLabel(assetLines.find(l => l.id === String(editId))?.typeId)}
+                </p>
+                <p className="text-xs text-muted-foreground mt-1">
+                  Loại tài sản không đổi sau khi tạo dòng (tránh lệch item / tồn kho).
+                </p>
               </div>
               <div>
                 <Label>Nhóm</Label>

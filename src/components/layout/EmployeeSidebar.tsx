@@ -1,6 +1,6 @@
 import { NavLink, useLocation, useNavigate } from 'react-router-dom';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { ClipboardList, Menu, Package, RotateCcw, Wrench, X } from 'lucide-react';
+import { AlertTriangle, ClipboardList, Menu, Package, RotateCcw, Wrench, X } from 'lucide-react';
 import { AccountInfoDialog } from '@/components/layout/AccountInfoDialog';
 import { SidebarUserPanel } from '@/components/layout/SidebarUserPanel';
 import { apiGet, getStoredToken, setStoredToken } from '@/api/http';
@@ -36,6 +36,11 @@ const navItems: NavItem[] = [
     path: '/employee/return-requests',
     icon: RotateCcw,
     requestNewKind: 'return',
+  },
+  {
+    label: 'Yêu cầu báo mất',
+    path: '/employee/loss-report-requests',
+    icon: AlertTriangle,
   },
   { label: 'Tài sản của tôi', path: '/employee/my-assets', icon: Package },
 ];

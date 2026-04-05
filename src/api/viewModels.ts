@@ -282,7 +282,11 @@ export function buildAllocationRequests(
     const rlines = lines.filter(l => l.request?.id === req.id);
     const mapped: AllocationRequestLine[] = rlines.map(l => ({
       id: String(l.id),
+      lineType: (String(l.lineType ?? 'DEVICE').toUpperCase() === 'CONSUMABLE' ? 'CONSUMABLE' : 'DEVICE') as
+        | 'DEVICE'
+        | 'CONSUMABLE',
       itemId: String(l.assetItem?.id ?? ''),
+      itemCode: (l.assetItem?.code ?? '').trim() || undefined,
       assetLineId: l.assetLine?.id != null ? String(l.assetLine.id) : undefined,
       quantity: l.quantity ?? 0,
       notes: l.note ?? '',
@@ -312,7 +316,7 @@ export function buildAllocationRequests(
       createdAt: req.requestDate ? req.requestDate.slice(0, 10) : '',
       approvedAt: undefined,
       approvedBy: undefined,
-      rejectionReason: undefined,
+      rejectionReason: req.rejectionReason?.trim() ? req.rejectionReason : undefined,
     };
   });
 }
@@ -329,6 +333,7 @@ export function mapRepairDto(r: RepairRequestDto): RepairRequest {
     attachmentNote: r.attachmentNote ?? undefined,
     result: (r.repairOutcome as RepairRequest['result']) ?? undefined,
     status: (r.status ?? 'NEW') as RepairRequest['status'],
+    rejectionReason: r.rejectionReason?.trim() ? r.rejectionReason : undefined,
     createdAt: r.requestDate ? r.requestDate.slice(0, 10) : '',
     receivedAt: undefined,
     completedAt: undefined,

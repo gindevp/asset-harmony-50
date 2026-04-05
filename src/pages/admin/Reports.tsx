@@ -3,7 +3,19 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Button } from '@/components/ui/button';
 import { FileDown } from 'lucide-react';
-import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, PieChart, Pie, Cell } from 'recharts';
+import {
+  BarChart,
+  Bar,
+  XAxis,
+  YAxis,
+  CartesianGrid,
+  Tooltip,
+  ResponsiveContainer,
+  PieChart,
+  Pie,
+  Cell,
+  Legend,
+} from 'recharts';
 import { formatCurrency, calculateDepreciation } from '@/data/mockData';
 import { toast } from 'sonner';
 import {
@@ -52,29 +64,50 @@ const Reports = () => {
   const stockIns = siQ.data ?? [];
 
   /** Giá trị mua sắm (phiếu nhập nguồn mua) theo tháng */
-  const procurementByMonth = useMemo(() => {
-    const m = new Map<string, number>();
+  /** Mua sắm theo tháng — tách thiết bị / vật tư (giá trị dòng phiếu nhập) */
+  const procurementByMonthSplit = useMemo(() => {
+    const m = new Map<string, { device: number; consumable: number }>();
     for (const doc of stockIns) {
       if (doc.source !== 'PURCHASE') continue;
       const ym = doc.createdAt.slice(0, 7);
       for (const line of doc.lines) {
-        m.set(ym, (m.get(ym) ?? 0) + line.totalPrice);
+        const item = assetItems.find(i => i.id === line.itemId);
+        const isConsumable = item?.managementType === 'CONSUMABLE';
+        const cur = m.get(ym) ?? { device: 0, consumable: 0 };
+        if (isConsumable) cur.consumable += line.totalPrice;
+        else cur.device += line.totalPrice;
+        m.set(ym, cur);
       }
     }
     return [...m.entries()]
       .sort((a, b) => a[0].localeCompare(b[0]))
-      .map(([month, amount]) => ({ month, amount }));
-  }, [stockIns]);
+      .map(([month, v]) => ({ month, device: v.device, consumable: v.consumable }));
+  }, [stockIns, assetItems]);
 
-  const byGroup = useMemo(
+  const totalConsumableInStockQty = useMemo(
+    () => consumableStocks.reduce((s, c) => s + c.inStockQuantity, 0),
+    [consumableStocks],
+  );
+  const totalConsumableIssuedQty = useMemo(
+    () => consumableStocks.reduce((s, c) => s + c.issuedQuantity, 0),
+    [consumableStocks],
+  );
+
+  /** Cùng trục nhóm: số thiết bị (cái) + tồn kho vật tư (SL) */
+  const byGroupCombined = useMemo(
     () =>
       assetGroups
-        .map(g => ({
-          name: g.name,
-          count: equipments.filter(eq => assetItems.find(i => i.id === eq.itemId)?.groupId === g.id).length,
-        }))
-        .filter(d => d.count > 0),
-    [assetGroups, equipments, assetItems],
+        .map(g => {
+          const equipment = equipments.filter(
+            eq => assetItems.find(i => i.id === eq.itemId)?.groupId === g.id,
+          ).length;
+          const consumableQty = consumableStocks
+            .filter(cs => assetItems.find(i => i.id === cs.itemId)?.groupId === g.id)
+            .reduce((s, cs) => s + cs.inStockQuantity, 0);
+          return { name: g.name, equipment, consumableQty };
+        })
+        .filter(d => d.equipment > 0 || d.consumableQty > 0),
+    [assetGroups, equipments, assetItems, consumableStocks],
   );
 
   const byStatus = useMemo(
@@ -110,8 +143,8 @@ const Reports = () => {
   const handleExportCsv = useCallback(() => {
     try {
       if (tab === 'asset') {
-        const header = ['Nhóm', 'Số lượng'];
-        const rows = byGroup.map(r => [r.name, r.count]);
+        const header = ['Nhóm', 'Thiết bị (cái)', 'Vật tư tồn kho (SL)'];
+        const rows = byGroupCombined.map(r => [r.name, r.equipment, r.consumableQty]);
         downloadCsv(reportFilename('bao-cao-tai-san'), rowsToCsv(header, rows));
       } else if (tab === 'inventory') {
         const header = ['Mã tài sản', 'Tên', 'Tồn kho', 'Tổng SL', 'Đã cấp', 'Hỏng'];
@@ -150,15 +183,20 @@ const Reports = () => {
         ]);
         downloadCsv(reportFilename('bao-cao-khau-hao'), rowsToCsv(header, rows));
       } else if (tab === 'procurement') {
-        const header = ['Tháng', 'Giá trị mua (VND)'];
-        const rows = procurementByMonth.map(r => [r.month, r.amount]);
+        const header = ['Tháng', 'Thiết bị (VND)', 'Vật tư (VND)', 'Tổng (VND)'];
+        const rows = procurementByMonthSplit.map(r => [
+          r.month,
+          r.device,
+          r.consumable,
+          r.device + r.consumable,
+        ]);
         downloadCsv(reportFilename('bao-cao-mua-sam'), rowsToCsv(header, rows));
       }
       toast.success('Đã tải CSV');
     } catch (e) {
       toast.error(e instanceof Error ? e.message : 'Lỗi xuất CSV');
     }
-  }, [tab, byGroup, consumableStocks, assetItems, depData, procurementByMonth]);
+  }, [tab, byGroupCombined, consumableStocks, assetItems, depData, procurementByMonthSplit]);
 
   return (
     <div className="page-container">
@@ -186,21 +224,29 @@ const Reports = () => {
         <TabsContent value="asset" className="space-y-4 mt-4">
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
             <Card>
-              <CardHeader><CardTitle className="text-base">Số lượng theo nhóm</CardTitle></CardHeader>
+              <CardHeader>
+                <CardTitle className="text-base">Theo nhóm — thiết bị (cái) &amp; vật tư tồn kho (SL)</CardTitle>
+              </CardHeader>
               <CardContent>
-                <ResponsiveContainer width="100%" height={300}>
-                  <BarChart data={byGroup}>
-                    <CartesianGrid strokeDasharray="3 3" />
-                    <XAxis dataKey="name" />
-                    <YAxis />
-                    <Tooltip />
-                    <Bar dataKey="count" fill="hsl(347, 100%, 47%)" radius={[4, 4, 0, 0]} />
-                  </BarChart>
-                </ResponsiveContainer>
+                {byGroupCombined.length === 0 ? (
+                  <p className="py-8 text-center text-sm text-muted-foreground">Chưa có dữ liệu</p>
+                ) : (
+                  <ResponsiveContainer width="100%" height={300}>
+                    <BarChart data={byGroupCombined}>
+                      <CartesianGrid strokeDasharray="3 3" />
+                      <XAxis dataKey="name" tick={{ fontSize: 11 }} />
+                      <YAxis />
+                      <Tooltip />
+                      <Legend />
+                      <Bar dataKey="equipment" name="Thiết bị (cái)" fill="hsl(347, 100%, 47%)" radius={[4, 4, 0, 0]} />
+                      <Bar dataKey="consumableQty" name="VT tồn kho (SL)" fill="#10b981" radius={[4, 4, 0, 0]} />
+                    </BarChart>
+                  </ResponsiveContainer>
+                )}
               </CardContent>
             </Card>
             <Card>
-              <CardHeader><CardTitle className="text-base">Phân bổ trạng thái</CardTitle></CardHeader>
+              <CardHeader><CardTitle className="text-base">Thiết bị — phân bổ trạng thái</CardTitle></CardHeader>
               <CardContent>
                 {byStatus.length === 0 ? (
                   <p className="py-8 text-center text-sm text-muted-foreground">Chưa có dữ liệu thiết bị</p>
@@ -251,7 +297,7 @@ const Reports = () => {
         </TabsContent>
 
         <TabsContent value="inventory" className="space-y-4 mt-4">
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
             <Card>
               <CardHeader><CardTitle className="text-base">Thiết bị tồn kho</CardTitle></CardHeader>
               <CardContent>
@@ -259,6 +305,22 @@ const Reports = () => {
                 <p className="text-sm text-muted-foreground mt-1">thiết bị sẵn sàng cấp phát</p>
               </CardContent>
             </Card>
+            <Card>
+              <CardHeader><CardTitle className="text-base">Vật tư — tồn kho (SL)</CardTitle></CardHeader>
+              <CardContent>
+                <div className="text-3xl font-bold text-emerald-600">{totalConsumableInStockQty}</div>
+                <p className="text-sm text-muted-foreground mt-1">{consumableStocks.length} mặt hàng</p>
+              </CardContent>
+            </Card>
+            <Card>
+              <CardHeader><CardTitle className="text-base">Vật tư — đã cấp phát (SL)</CardTitle></CardHeader>
+              <CardContent>
+                <div className="text-3xl font-bold text-blue-600">{totalConsumableIssuedQty}</div>
+                <p className="text-sm text-muted-foreground mt-1">tổng đã xuất cấp</p>
+              </CardContent>
+            </Card>
+          </div>
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
             {consumableStocks.map(cs => {
               const item = assetItems.find(i => i.id === cs.itemId);
               return (
@@ -335,19 +397,19 @@ const Reports = () => {
           <Card>
             <CardHeader>
               <CardTitle className="text-base">Quy mô mua sắm theo tháng (phiếu nhập — nguồn mua)</CardTitle>
+              <p className="text-sm text-muted-foreground mt-1">
+                Giá trị dòng phiếu: cột thiết bị và vật tư (theo master tài sản).
+              </p>
             </CardHeader>
             <CardContent>
-              {procurementByMonth.length === 0 ? (
+              {procurementByMonthSplit.length === 0 ? (
                 <p className="text-sm text-muted-foreground">Chưa có dữ liệu phiếu nhập mua.</p>
               ) : (
                 <div className="min-w-0 -mx-1 px-1">
                   <ResponsiveContainer width="100%" height={320}>
-                    <BarChart
-                      data={procurementByMonth.map(r => ({ name: r.month, value: r.amount }))}
-                      margin={{ top: 8, right: 8, left: 4, bottom: 8 }}
-                    >
+                    <BarChart data={procurementByMonthSplit} margin={{ top: 8, right: 8, left: 4, bottom: 8 }}>
                       <CartesianGrid strokeDasharray="3 3" vertical={false} />
-                      <XAxis dataKey="name" tick={{ fontSize: 11 }} tickMargin={8} />
+                      <XAxis dataKey="month" tick={{ fontSize: 11 }} tickMargin={8} />
                       <YAxis
                         tick={{ fontSize: 11 }}
                         tickFormatter={formatVndAxisValue}
@@ -355,8 +417,13 @@ const Reports = () => {
                         width={56}
                         domain={[0, 'auto']}
                       />
-                      <Tooltip formatter={(v: number) => formatCurrency(v)} />
-                      <Bar dataKey="value" fill="hsl(347, 100%, 47%)" radius={[4, 4, 0, 0]} />
+                      <Tooltip
+                        formatter={(v: number) => formatCurrency(v)}
+                        labelFormatter={label => `Tháng ${label}`}
+                      />
+                      <Legend />
+                      <Bar dataKey="device" name="Thiết bị" fill="hsl(347, 100%, 47%)" radius={[4, 4, 0, 0]} />
+                      <Bar dataKey="consumable" name="Vật tư" fill="#10b981" radius={[4, 4, 0, 0]} />
                     </BarChart>
                   </ResponsiveContainer>
                 </div>

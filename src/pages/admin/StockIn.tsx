@@ -32,6 +32,7 @@ import {
   useSuppliers,
 } from '@/hooks/useEntityApi';
 import { ApprovalActionBar } from '@/components/shared/ApprovalActionBar';
+import { AttachmentNoteView } from '@/components/shared/AttachmentNoteView';
 import { apiDelete, apiDownloadBlob, apiGet, apiPatch, apiPost, apiPut, openPdfInBrowserTab, PAGE_ALL } from '@/api/http';
 import type { ConsumableStockDto, StockReceiptLineDto } from '@/api/types';
 import { formatEquipmentCodeDisplay } from '@/utils/formatCodes';
@@ -369,11 +370,15 @@ const StockInPage = () => {
                 <div><span className="text-muted-foreground">NCC:</span> {selected.supplierId ? getSupplierName(selected.supplierId, suppliers) : '—'}</div>
                 <div><span className="text-muted-foreground">Người tạo:</span> {createdLogin || '—'}</div>
                 <div><span className="text-muted-foreground">Trạng thái:</span> <StatusBadge status={selected.status} label={stockInStatusLabels[selected.status]} /></div>
-                <div className="col-span-2 text-muted-foreground">
-                  Ghi chú:{' '}
-                  <span className="text-foreground break-words whitespace-pre-wrap">
-                    {selected.notes || '—'}
-                  </span>
+                <div className="col-span-2">
+                  <span className="text-muted-foreground">Ghi chú:</span>
+                  <div className="mt-1 text-foreground break-words">
+                    {selected.notes?.trim() ? (
+                      <AttachmentNoteView text={selected.notes} showCaption={false} />
+                    ) : (
+                      '—'
+                    )}
+                  </div>
                 </div>
                 <div><span className="text-muted-foreground">Ngày tạo:</span> {formatDate(selected.createdAt)}</div>
                 {selected.confirmedAt && <div><span className="text-muted-foreground">Ngày XN:</span> {formatDate(selected.confirmedAt)}</div>}

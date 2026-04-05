@@ -18,10 +18,11 @@ import {
   useEnrichedEquipmentList,
   useLocations,
 } from '@/hooks/useEntityApi';
-import { apiPost } from '@/api/http';
+import { apiPost, apiPostMultipart } from '@/api/http';
 import type { StockIssueDto } from '@/api/types';
 import { makeBizCode } from '@/api/businessCode';
 import { formatEquipmentCodeDisplay } from '@/utils/formatCodes';
+import { appendFileUrlsToNote } from '@/utils/stockReceiptNote';
 
 const recipientTypeLabels: Record<string, string> = {
   EMPLOYEE: 'Nhân viên',
@@ -73,6 +74,7 @@ const StockOutNewPage = () => {
   const [recipientType, setRecipientType] = useState<string>('EMPLOYEE');
   const [recipientId, setRecipientId] = useState('');
   const [notes, setNotes] = useState('');
+  const [attachmentFile, setAttachmentFile] = useState<File | null>(null);
   const [deviceLines, setDeviceLines] = useState<DeviceOutLine[]>([]);
   const [consumableLines, setConsumableLines] = useState<ConsumableOutLine[]>([]);
   const [createBusy, setCreateBusy] = useState(false);
@@ -82,6 +84,7 @@ const StockOutNewPage = () => {
     setRecipientType('EMPLOYEE');
     setRecipientId('');
     setNotes('');
+    setAttachmentFile(null);
     setDeviceLines([]);
     setConsumableLines([]);
   };
@@ -170,19 +173,29 @@ const StockOutNewPage = () => {
 
     const code = makeBizCode('PX');
     const issueDate = new Date().toISOString().slice(0, 10);
-    const body: Record<string, unknown> = {
-      code,
-      issueDate,
-      status: 'DRAFT',
-      assigneeType: recipientType,
-      note: notes.trim() || undefined,
-    };
-    if (recipientType === 'EMPLOYEE') body.employee = { id: Number(recipientId) };
-    else if (recipientType === 'DEPARTMENT') body.department = { id: Number(recipientId) };
-    else if (recipientType === 'LOCATION') body.location = { id: Number(recipientId) };
 
     setCreateBusy(true);
     try {
+      let fileUrls: string[] = [];
+      if (attachmentFile) {
+        const fd = new FormData();
+        fd.append('file', attachmentFile);
+        const up = await apiPostMultipart<{ url?: string }>('/api/allocation-request-attachments', fd);
+        if (!up?.url) throw new Error('Upload không trả URL');
+        fileUrls = [up.url];
+      }
+      const mergedNote = appendFileUrlsToNote(notes.trim(), fileUrls);
+      const body: Record<string, unknown> = {
+        code,
+        issueDate,
+        status: 'DRAFT',
+        assigneeType: recipientType,
+        ...(mergedNote ? { note: mergedNote } : {}),
+      };
+      if (recipientType === 'EMPLOYEE') body.employee = { id: Number(recipientId) };
+      else if (recipientType === 'DEPARTMENT') body.department = { id: Number(recipientId) };
+      else if (recipientType === 'LOCATION') body.location = { id: Number(recipientId) };
+
       const created = await apiPost<StockIssueDto>('/api/stock-issues', body);
       const issueId = created.id;
       if (issueId == null) throw new Error('API không trả id phiếu');
@@ -279,6 +292,21 @@ const StockOutNewPage = () => {
                 rows={4}
                 className="min-h-[100px] resize-y"
               />
+            </div>
+            <div className="space-y-2">
+              <Label>Tệp đính kèm (tuỳ chọn)</Label>
+              <Input
+                type="file"
+                accept=".jpg,.jpeg,.png,.gif,.webp,.pdf,.mp4,.webm,.mov"
+                className="cursor-pointer"
+                onChange={e => setAttachmentFile(e.target.files?.[0] ?? null)}
+              />
+              <p className="text-xs text-muted-foreground">Ảnh, PDF hoặc video ngắn.</p>
+              {attachmentFile ? (
+                <p className="text-xs text-foreground truncate" title={attachmentFile.name}>
+                  Đã chọn: {attachmentFile.name}
+                </p>
+              ) : null}
             </div>
           </CardContent>
         </Card>

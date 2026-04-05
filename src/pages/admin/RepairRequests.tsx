@@ -15,7 +15,7 @@ import { StatusBadge } from '@/components/shared/StatusBadge';
 import { FilterBar } from '@/components/shared/FilterBar';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
-import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
+import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Textarea } from '@/components/ui/textarea';
@@ -29,6 +29,8 @@ import {
   getItemName,
 } from '@/data/mockData';
 import { toast } from 'sonner';
+import { getStoredToken } from '@/api/http';
+import { hasAnyAuthority } from '@/auth/jwt';
 import { formatBizCodeDisplay, formatEquipmentCodeDisplay } from '@/utils/formatCodes';
 import { ApprovalActionBar } from '@/components/shared/ApprovalActionBar';
 import { RequesterEmployeeInfo } from '@/components/shared/RequesterEmployeeInfo';
@@ -50,8 +52,15 @@ const outcomeLabels: Record<string, string> = {
   MARK_BROKEN: 'Đánh dấu hỏng',
 };
 
+/** QLTS không có quyền sửa/xóa phiếu (Admin / GĐ vẫn có). */
+function hideRepairEditDeleteForQlts(): boolean {
+  const t = getStoredToken();
+  return hasAnyAuthority(t, ['ROLE_ASSET_MANAGER']) && !hasAnyAuthority(t, ['ROLE_ADMIN', 'ROLE_GD']);
+}
+
 const RepairRequests = () => {
   const qc = useQueryClient();
+  const hideRowEditDelete = hideRepairEditDeleteForQlts();
   const rrQ = useRepairRequestsView();
   const eqQ = useEnrichedEquipmentList();
   const iQ = useAssetItems();
@@ -73,6 +82,8 @@ const RepairRequests = () => {
   const [editAttachment, setEditAttachment] = useState('');
   const [deleteTarget, setDeleteTarget] = useState<RepairRequest | null>(null);
   const [outcome, setOutcome] = useState<string>('RETURN_USER');
+  const [rejectOpen, setRejectOpen] = useState(false);
+  const [rejectReason, setRejectReason] = useState('');
   const [busy, setBusy] = useState(false);
 
   useEffect(() => {
@@ -96,6 +107,34 @@ const RepairRequests = () => {
     try {
       await apiPatch(`/api/repair-requests/${selected.id}`, { id: Number(selected.id), ...body });
       toast.success('Đã cập nhật yêu cầu sửa chữa');
+      setSelected(null);
+      setDialogMode('view');
+      invalidate();
+    } catch (e) {
+      const bodyErr = e instanceof ApiError ? e.body : undefined;
+      toast.error(parseProblemDetailJson(bodyErr ?? '') || (e instanceof Error ? e.message : 'Lỗi API'));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const submitRejectRepair = async () => {
+    if (!selected) return;
+    const t = rejectReason.trim();
+    if (!t) {
+      toast.error('Vui lòng nhập lý do từ chối');
+      return;
+    }
+    setBusy(true);
+    try {
+      await apiPatch(`/api/repair-requests/${selected.id}`, {
+        id: Number(selected.id),
+        status: 'REJECTED',
+        rejectionReason: t,
+      });
+      toast.success('Đã từ chối yêu cầu sửa chữa');
+      setRejectOpen(false);
+      setRejectReason('');
       setSelected(null);
       setDialogMode('view');
       invalidate();
@@ -209,7 +248,7 @@ const RepairRequests = () => {
           >
             <Eye className="h-4 w-4" />
           </Button>
-          {canEditRepairRequestFields(r.status) ? (
+          {!hideRowEditDelete && canEditRepairRequestFields(r.status) ? (
             <Button
               type="button"
               variant="ghost"
@@ -224,7 +263,7 @@ const RepairRequests = () => {
               <Pencil className="h-4 w-4" />
             </Button>
           ) : null}
-          {canDeleteRepairRequest(r.status) ? (
+          {!hideRowEditDelete && canDeleteRepairRequest(r.status) ? (
             <Button
               type="button"
               variant="ghost"
@@ -278,35 +317,52 @@ const RepairRequests = () => {
           {selected && (
             <div className="space-y-4">
               <RequesterEmployeeInfo requesterId={selected.requesterId} employees={employees} />
-              <div className="grid grid-cols-2 gap-3 text-sm">
-                <div><span className="text-muted-foreground">Phòng ban (trên phiếu):</span> {getDepartmentName(selected.departmentId, departments)}</div>
+              <div className="space-y-3 text-sm">
                 <div>
                   <span className="text-muted-foreground">Thiết bị:</span>{' '}
-                  {(() => {
-                    const eq = equipments.find(e => e.id === selected.equipmentId);
-                    return eq
-                      ? `${formatEquipmentCodeDisplay(eq.equipmentCode)} - ${getItemName(eq.itemId, assetItems)}`
-                      : '';
-                  })()}
+                  <span className="font-medium text-foreground">
+                    {(() => {
+                      const eq = equipments.find(e => e.id === selected.equipmentId);
+                      return eq
+                        ? `${formatEquipmentCodeDisplay(eq.equipmentCode)} — ${getItemName(eq.itemId, assetItems)}`
+                        : selected.equipmentId;
+                    })()}
+                  </span>
                 </div>
-                <div><span className="text-muted-foreground">Trạng thái:</span> <StatusBadge status={selected.status} label={repairStatusLabels[selected.status]} /></div>
-                <div><span className="text-muted-foreground">Ngày tạo:</span> {formatDate(selected.createdAt)}</div>
-                {selected.result && (
-                  <div><span className="text-muted-foreground">Kết quả xử lý:</span> {outcomeLabels[selected.result] ?? selected.result}</div>
-                )}
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  <div>
+                    <span className="text-muted-foreground">Ngày tạo:</span> {formatDate(selected.createdAt)}
+                  </div>
+                  <div className="flex flex-wrap items-center gap-2">
+                    <span className="text-muted-foreground">Trạng thái:</span>{' '}
+                    <StatusBadge status={selected.status} label={repairStatusLabels[selected.status]} />
+                  </div>
+                </div>
+                {selected.result ? (
+                  <div>
+                    <span className="text-muted-foreground">Kết quả xử lý:</span>{' '}
+                    <span className="font-medium">{outcomeLabels[selected.result] ?? selected.result}</span>
+                  </div>
+                ) : null}
+                {selected.status === 'REJECTED' && selected.rejectionReason?.trim() ? (
+                  <div className="rounded-md border border-destructive/25 bg-destructive/5 p-3">
+                    <span className="text-muted-foreground">Lý do từ chối:</span>
+                    <p className="mt-1 whitespace-pre-wrap text-sm">{selected.rejectionReason}</p>
+                  </div>
+                ) : null}
               </div>
-              {dialogMode === 'edit' && canEditRepairRequestFields(selected.status) ? (
+              {dialogMode === 'edit' && !hideRowEditDelete && canEditRepairRequestFields(selected.status) ? (
                 <div className="space-y-3 border rounded-md p-3 bg-muted/20">
                   <div className="space-y-2">
-                    <Label>Vấn đề (tối đa 100 ký tự)</Label>
+                    <Label className="font-medium">Vấn đề (tối đa 100 ký tự)</Label>
                     <Input value={editIssue} onChange={e => setEditIssue(e.target.value)} maxLength={100} disabled={busy} />
                   </div>
                   <div className="space-y-2">
-                    <Label>Mô tả chi tiết</Label>
+                    <Label className="font-medium">Mô tả chi tiết</Label>
                     <Textarea value={editDesc} onChange={e => setEditDesc(e.target.value)} rows={3} disabled={busy} />
                   </div>
                   <div className="space-y-2">
-                    <Label>Ghi chú / link đính kèm (FILE:url…)</Label>
+                    <Label className="font-medium">Ghi chú / link đính kèm (FILE:url…)</Label>
                     <Textarea value={editAttachment} onChange={e => setEditAttachment(e.target.value)} rows={2} disabled={busy} />
                   </div>
                   <div className="flex flex-wrap gap-2">
@@ -319,14 +375,10 @@ const RepairRequests = () => {
                   </div>
                 </div>
               ) : (
-                <div className="p-3 rounded-md bg-muted">
-                  <p className="text-sm font-medium mb-1">Vấn đề: {selected.issue}</p>
-                  <p className="text-sm text-muted-foreground">{selected.description}</p>
-                  {selected.attachmentNote ? (
-                    <div className="mt-2">
-                      <AttachmentNoteView text={selected.attachmentNote} />
-                    </div>
-                  ) : null}
+                <div className="p-3 rounded-md bg-muted space-y-2">
+                  <p className="text-sm font-medium">Vấn đề: {selected.issue}</p>
+                  {selected.description ? <p className="text-sm font-medium whitespace-pre-wrap">Mô tả: {selected.description}</p> : null}
+                  {selected.attachmentNote ? <AttachmentNoteView text={selected.attachmentNote} /> : null}
                 </div>
               )}
               {selected.status === 'NEW' && (
@@ -334,18 +386,26 @@ const RepairRequests = () => {
                   approveLabel="Tiếp nhận"
                   rejectLabel="Từ chối"
                   onApprove={() => void patch({ status: 'ACCEPTED' })}
-                  onReject={() => void patch({ status: 'REJECTED' })}
+                  onReject={() => {
+                    setRejectReason('');
+                    setRejectOpen(true);
+                  }}
                   onPrint={() => window.print()}
                   onExport={() => toast.info('Xuất (demo)')}
                 />
               )}
-              {(selected.status === 'ACCEPTED' || selected.status === 'IN_PROGRESS') && (
-                <div className="space-y-3">
-                  {selected.status === 'ACCEPTED' && (
-                    <Button variant="secondary" disabled={busy} onClick={() => void patch({ status: 'IN_PROGRESS' })}>
-                      Chuyển trạng thái: đang sửa
-                    </Button>
-                  )}
+              {selected.status === 'ACCEPTED' && (
+                <div className="space-y-2 rounded-md border border-dashed p-3 bg-muted/30">
+                  <p className="text-sm text-muted-foreground">
+                    Bước tiếp theo: bấm <strong>Đang sửa</strong> khi bắt đầu xử lý. Sau đó mới chọn kết quả và hoàn tất.
+                  </p>
+                  <Button className="bg-amber-600 hover:bg-amber-700 text-white" disabled={busy} onClick={() => void patch({ status: 'IN_PROGRESS' })}>
+                    Đang sửa
+                  </Button>
+                </div>
+              )}
+              {selected.status === 'IN_PROGRESS' && (
+                <div className="space-y-3 rounded-md border p-3 bg-muted/20">
                   <div className="space-y-2">
                     <Label>Kết quả sau sửa chữa</Label>
                     <Select value={outcome} onValueChange={setOutcome} disabled={busy}>
@@ -368,6 +428,34 @@ const RepairRequests = () => {
               )}
             </div>
           )}
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={rejectOpen} onOpenChange={open => { setRejectOpen(open); if (!open) setRejectReason(''); }}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle>Từ chối yêu cầu sửa chữa</DialogTitle>
+            <DialogDescription>Nhập lý do từ chối — nhân viên sẽ xem được trong chi tiết yêu cầu.</DialogDescription>
+          </DialogHeader>
+          <div className="space-y-2">
+            <Label htmlFor="repair-reject-reason">Lý do từ chối</Label>
+            <Textarea
+              id="repair-reject-reason"
+              value={rejectReason}
+              onChange={e => setRejectReason(e.target.value)}
+              rows={4}
+              placeholder="Bắt buộc"
+              disabled={busy}
+            />
+          </div>
+          <DialogFooter className="gap-2 sm:gap-0">
+            <Button type="button" variant="outline" disabled={busy} onClick={() => setRejectOpen(false)}>
+              Hủy
+            </Button>
+            <Button type="button" variant="destructive" disabled={busy} onClick={() => void submitRejectRepair()}>
+              Xác nhận từ chối
+            </Button>
+          </DialogFooter>
         </DialogContent>
       </Dialog>
 

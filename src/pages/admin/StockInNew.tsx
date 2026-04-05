@@ -12,11 +12,11 @@ import { ArrowLeft, PlusCircle, Trash2 } from 'lucide-react';
 import { formatCurrency } from '@/data/mockData';
 import { toast } from 'sonner';
 import { mapAssetItemDto, useAssetItems, useSuppliers } from '@/hooks/useEntityApi';
-import { apiPost } from '@/api/http';
+import { apiPost, apiPostMultipart } from '@/api/http';
 import type { StockReceiptDto } from '@/api/types';
 import { makeBizCode } from '@/api/businessCode';
 import { formatEquipmentCodeDisplay } from '@/utils/formatCodes';
-import { buildReceiptNote } from '@/utils/stockReceiptNote';
+import { appendFileUrlsToNote, buildReceiptNote } from '@/utils/stockReceiptNote';
 
 const FE_SOURCE_TO_API: Record<string, string> = {
   PURCHASE: 'NEW_PURCHASE',
@@ -95,6 +95,7 @@ const StockInNewPage = () => {
   const [source, setSource] = useState<string>('PURCHASE');
   const [supplierId, setSupplierId] = useState('');
   const [notes, setNotes] = useState('');
+  const [attachmentFile, setAttachmentFile] = useState<File | null>(null);
   const [deviceLines, setDeviceLines] = useState<DeviceLine[]>([]);
   const [consumableLines, setConsumableLines] = useState<ConsumableLine[]>([]);
   const [createBusy, setCreateBusy] = useState(false);
@@ -104,6 +105,7 @@ const StockInNewPage = () => {
     setSource('PURCHASE');
     setSupplierId('');
     setNotes('');
+    setAttachmentFile(null);
     setDeviceLines([]);
     setConsumableLines([]);
   };
@@ -282,10 +284,19 @@ const StockInNewPage = () => {
 
     const receiptDate = new Date().toISOString().slice(0, 10);
     const code = makeBizCode('PN');
-    const note = buildReceiptNote(notes, supplierId);
 
     setCreateBusy(true);
     try {
+      let fileUrls: string[] = [];
+      if (attachmentFile) {
+        const fd = new FormData();
+        fd.append('file', attachmentFile);
+        const up = await apiPostMultipart<{ url?: string }>('/api/allocation-request-attachments', fd);
+        if (!up?.url) throw new Error('Upload không trả URL');
+        fileUrls = [up.url];
+      }
+      const note = appendFileUrlsToNote(buildReceiptNote(notes, supplierId), fileUrls);
+
       const created = await apiPost<StockReceiptDto>('/api/stock-receipts', {
         code,
         receiptDate,
@@ -404,6 +415,23 @@ const StockInNewPage = () => {
                 rows={4}
                 className="min-h-[100px] resize-y"
               />
+            </div>
+            <div className="space-y-2">
+              <Label>Tệp đính kèm (tuỳ chọn)</Label>
+              <Input
+                type="file"
+                accept=".jpg,.jpeg,.png,.gif,.webp,.pdf,.mp4,.webm,.mov"
+                className="cursor-pointer"
+                onChange={e => setAttachmentFile(e.target.files?.[0] ?? null)}
+              />
+              <p className="text-xs text-muted-foreground">
+                Ảnh, PDF hoặc video ngắn — cùng quy tắc upload với yêu cầu cấp phát.
+              </p>
+              {attachmentFile ? (
+                <p className="text-xs text-foreground truncate" title={attachmentFile.name}>
+                  Đã chọn: {attachmentFile.name}
+                </p>
+              ) : null}
             </div>
           </CardContent>
         </Card>

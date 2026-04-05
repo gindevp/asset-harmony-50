@@ -206,8 +206,12 @@ export type AllocationRequestStatus =
 
 export interface AllocationRequestLine {
   id: string;
+  /** DEVICE | CONSUMABLE — khớp BE allocation-request-line.lineType */
+  lineType?: 'DEVICE' | 'CONSUMABLE';
   /** Vật tư: mã item; thiết bị theo dòng tài sản có thể để trống */
   itemId: string;
+  /** Mã mã hàng từ API (assetItem.code) — hiển thị Mã tài sản khi danh mục chưa load */
+  itemCode?: string;
   /** Thiết bị: dòng tài sản (master) trên phiếu yêu cầu */
   assetLineId?: string;
   quantity: number;
@@ -258,6 +262,8 @@ export interface RepairRequest {
   /** Link/ghi chú file đính kèm */
   attachmentNote?: string;
   status: RepairRequestStatus;
+  /** Lý do từ chối (QLTS) khi trạng thái REJECTED */
+  rejectionReason?: string;
   result?: RepairResult;
   resultNotes?: string;
   createdAt: string;
@@ -349,6 +355,13 @@ export function itemCode(
   return i?.code ?? id;
 }
 
+/** ĐVT theo id master tài sản (khi API chỉ trả id + name). */
+export function itemUnit(id: string, items: { id: string; unit?: string }[]): string {
+  const i = items.find(x => x.id === id);
+  const u = (i?.unit ?? '').trim();
+  return u || '—';
+}
+
 /** Hiển thị dòng tài sản (danh mục) theo id */
 export function assetLineDisplay(
   id: string,
@@ -376,6 +389,7 @@ export const getDepartmentName = departmentName;
 export const getLocationName = locationName;
 export const getItemName = itemName;
 export const getItemCode = itemCode;
+export const getItemUnit = itemUnit;
 export const getSupplierName = supplierName;
 export const getAssetLineDisplay = assetLineDisplay;
 
@@ -430,6 +444,18 @@ export const returnStatusLabels: Record<string, string> = {
   REJECTED: 'Từ chối',
   COMPLETED: 'Hoàn thành',
   CANCELLED: 'Hủy',
+};
+
+export const lossReportStatusLabels: Record<string, string> = {
+  PENDING: 'Chờ QLTS xác nhận',
+  APPROVED: 'Đã xác nhận mất',
+  REJECTED: 'Từ chối',
+  CANCELLED: 'Đã hủy',
+};
+
+export const lossReportKindLabels: Record<string, string> = {
+  EQUIPMENT: 'Thiết bị',
+  CONSUMABLE: 'Vật tư',
 };
 
 /** Khớp enum backend ReturnDisposition */
