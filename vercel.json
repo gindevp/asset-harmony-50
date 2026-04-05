@@ -1,0 +1,5 @@
+{
+  "installCommand": "npm ci",
+  "buildCommand": "NODE_OPTIONS=--max-old-space-size=6144 npm run build",
+  "outputDirectory": "dist"
+}
