@@ -1,8 +1,9 @@
 import { useEffect, useMemo, useState } from 'react';
+import { useQuery } from '@tanstack/react-query';
 import { Link, useLocation, useNavigate, useSearchParams } from 'react-router-dom';
 import { useQueryClient } from '@tanstack/react-query';
 import { AttachmentNoteView } from '@/components/shared/AttachmentNoteView';
-import { DataTable } from '@/components/shared/DataTable';
+import { DataTable, type Column } from '@/components/shared/DataTable';
 import { StatusBadge } from '@/components/shared/StatusBadge';
 import { Button } from '@/components/ui/button';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
@@ -15,9 +16,9 @@ import {
   formatDate,
   getAssetLineDisplay,
   getItemName,
-  repairRequestEquipmentIds,
   repairStatusLabels,
   returnStatusLabels,
+  returnLineKindLabel,
   type AllocationRequest,
   type RepairRequest,
   type ReturnRequest,
@@ -33,7 +34,8 @@ import {
   useRepairRequestsView,
   useReturnRequestsView,
 } from '@/hooks/useEntityApi';
-import { ApiError, apiPatch, parseProblemDetailJson } from '@/api/http';
+import { ApiError, apiGet, apiPatch, parseProblemDetailJson } from '@/api/http';
+import type { RepairRequestDto, RepairRequestLineDto } from '@/api/types';
 import { formatBizCodeDisplay, formatEquipmentCodeDisplay } from '@/utils/formatCodes';
 import {
   allocationRequestListNoteDisplay,
@@ -109,6 +111,7 @@ const EmployeeRequests = () => {
   const invalidate = async () => {
     await qc.invalidateQueries({ queryKey: ['api', 'allocation-requests-view'] });
     await qc.invalidateQueries({ queryKey: ['api', 'repair-requests-view'] });
+    await qc.invalidateQueries({ queryKey: ['api', 'repair-requests'] });
     await qc.invalidateQueries({ queryKey: ['api', 'return-requests-view'] });
   };
 
@@ -139,6 +142,54 @@ const EmployeeRequests = () => {
   const [erAttach, setErAttach] = useState('');
   const [etReason, setEtReason] = useState('');
   const [empBusy, setEmpBusy] = useState(false);
+
+  const repairEmpDetailQ = useQuery({
+    queryKey: ['api', 'repair-requests', empDetail?.section === 'repair' ? empDetail.row.id : undefined],
+    queryFn: () => apiGet<RepairRequestDto>(`/api/repair-requests/${empDetail!.row.id}`),
+    enabled: empDetail?.section === 'repair' && !!empDetail.row.id,
+  });
+
+  const repairEmpDetailLines = useMemo(() => {
+    const raw = repairEmpDetailQ.data?.lines ?? [];
+    return [...raw].sort((a, b) => (a.lineNo ?? 0) - (b.lineNo ?? 0));
+  }, [repairEmpDetailQ.data?.lines]);
+
+  const repairEmpLineColumns: Column<RepairRequestLineDto>[] = useMemo(
+    () => [
+      {
+        key: 'lineType',
+        label: 'Loại',
+        render: l =>
+          String(l.lineType ?? 'DEVICE').toUpperCase() === 'CONSUMABLE' ? 'Vật tư' : 'Thiết bị',
+      },
+      {
+        key: 'item',
+        label: 'Tài sản',
+        render: l => getItemName(String(l.assetItem?.id ?? ''), assetItems),
+      },
+      {
+        key: 'equipmentCode',
+        label: 'Mã TB',
+        render: l =>
+          l.equipment?.equipmentCode ? formatEquipmentCodeDisplay(l.equipment.equipmentCode) : '—',
+      },
+      {
+        key: 'serial',
+        label: 'Serial',
+        render: l =>
+          String(l.lineType ?? 'DEVICE').toUpperCase() === 'CONSUMABLE'
+            ? '—'
+            : (l.equipment?.serial ?? '—'),
+      },
+      {
+        key: 'quantity',
+        label: 'SL',
+        className: 'text-right',
+        render: l => l.quantity ?? 0,
+      },
+    ],
+    [assetItems],
+  );
 
   useEffect(() => {
     if (!empDetail || empDetail.mode !== 'edit') return;
@@ -408,18 +459,6 @@ const EmployeeRequests = () => {
             },
             { key: 'issue', label: 'Vấn đề' },
             {
-              key: 'equipment',
-              label: 'Thiết bị',
-              render: (r: any) =>
-                repairRequestEquipmentIds(r)
-                  .map(id => {
-                    const eq = equipments.find(e => e.id === id);
-                    return eq ? formatEquipmentCodeDisplay(eq.equipmentCode) : '';
-                  })
-                  .filter(Boolean)
-                  .join(', ') || '—',
-            },
-            {
               key: 'status',
               label: 'Trạng thái',
               render: (r: any) => <StatusBadge status={r.status} label={repairStatusLabels[r.status] ?? r.status} />,
@@ -618,18 +657,19 @@ const EmployeeRequests = () => {
           )}
           {empDetail?.section === 'repair' && (
             <div className="space-y-3 text-sm">
-              <div>
-                <span className="text-muted-foreground">Thiết bị:</span>{' '}
-                <span className="font-medium text-foreground">
-                  {repairRequestEquipmentIds(empDetail.row)
-                    .map(id => {
-                      const eq = equipments.find(e => e.id === id);
-                      return eq
-                        ? `${formatEquipmentCodeDisplay(eq.equipmentCode)} — ${getItemName(eq.itemId, assetItems)}`
-                        : id;
-                    })
-                    .join('; ') || '—'}
-                </span>
+              <div className="space-y-2">
+                <p className="text-sm font-medium text-foreground">Thiết bị / vật tư</p>
+                {repairEmpDetailQ.isLoading && <p className="text-sm text-muted-foreground">Đang tải dòng…</p>}
+                {repairEmpDetailQ.isError && (
+                  <p className="text-sm text-muted-foreground">Không tải được chi tiết dòng — thử đóng và mở lại.</p>
+                )}
+                {!repairEmpDetailQ.isLoading && !repairEmpDetailQ.isError && (
+                  <DataTable
+                    columns={repairEmpLineColumns}
+                    data={repairEmpDetailLines}
+                    emptyMessage="Không có dòng"
+                  />
+                )}
               </div>
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                 <div>
@@ -703,16 +743,26 @@ const EmployeeRequests = () => {
                 <div><span className="text-muted-foreground">Lý do:</span> {empDetail.row.reason}</div>
               )}
               <div className="text-muted-foreground border-t pt-2">
-                <p className="font-medium text-foreground mb-1">Thiết bị thu hồi</p>
+                <p className="font-medium text-foreground mb-1">Thiết bị / vật tư thu hồi</p>
                 <ul className="list-disc pl-4 space-y-1">
-                  {empDetail.row.lines.map(line => (
-                    <li key={line.id}>
-                      {getItemName(line.itemId, assetItems)}
-                      {line.equipmentId
-                        ? ` — ${formatEquipmentCodeDisplay(equipments.find(e => e.id === line.equipmentId)?.equipmentCode ?? '')}`
-                        : ''}
-                    </li>
-                  ))}
+                  {empDetail.row.lines.map(line => {
+                    const kind = returnLineKindLabel(line.lineType);
+                    const name = getItemName(line.itemId, assetItems);
+                    const eqCode =
+                      line.equipmentId && equipments.find(e => e.id === line.equipmentId)?.equipmentCode;
+                    const tail =
+                      line.lineType === 'CONSUMABLE'
+                        ? ` × ${line.quantity}`
+                        : eqCode
+                          ? ` — ${formatEquipmentCodeDisplay(eqCode)}`
+                          : '';
+                    return (
+                      <li key={line.id}>
+                        <span className="text-foreground font-medium">{kind}:</span> {name}
+                        {tail}
+                      </li>
+                    );
+                  })}
                 </ul>
               </div>
             </div>

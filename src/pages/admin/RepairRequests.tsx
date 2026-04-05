@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
+import { useQuery } from '@tanstack/react-query';
 import {
   AlertDialog,
   AlertDialogAction,
@@ -10,7 +11,7 @@ import {
   AlertDialogTitle,
 } from '@/components/ui/alert-dialog';
 import { useQueryClient } from '@tanstack/react-query';
-import { DataTable, Column } from '@/components/shared/DataTable';
+import { DataTable, type Column } from '@/components/shared/DataTable';
 import { StatusBadge } from '@/components/shared/StatusBadge';
 import { FilterBar } from '@/components/shared/FilterBar';
 import { Button } from '@/components/ui/button';
@@ -20,13 +21,13 @@ import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Textarea } from '@/components/ui/textarea';
 import { Eye, Pencil, Trash2 } from 'lucide-react';
-import { repairRequestEquipmentIds, type RepairRequest } from '@/data/mockData';
+import { repairRequestTargetsSummary, type RepairRequest } from '@/data/mockData';
 import {
   repairStatusLabels,
   getEmployeeName,
   getDepartmentName,
-  formatDate,
   getItemName,
+  formatDate,
 } from '@/data/mockData';
 import { toast } from 'sonner';
 import { getStoredToken } from '@/api/http';
@@ -42,7 +43,8 @@ import {
   useEnrichedEquipmentList,
   useRepairRequestsView,
 } from '@/hooks/useEntityApi';
-import { ApiError, apiDelete, apiPatch, parseProblemDetailJson } from '@/api/http';
+import { ApiError, apiDelete, apiGet, apiPatch, parseProblemDetailJson } from '@/api/http';
+import type { RepairRequestDto, RepairRequestLineDto } from '@/api/types';
 import { AttachmentNoteView } from '@/components/shared/AttachmentNoteView';
 import { canDeleteRepairRequest, canEditRepairRequestFields } from '@/utils/requestRecordActions';
 
@@ -86,6 +88,54 @@ const RepairRequests = () => {
   const [rejectReason, setRejectReason] = useState('');
   const [busy, setBusy] = useState(false);
 
+  const repairDetailQ = useQuery({
+    queryKey: ['api', 'repair-requests', selected?.id],
+    queryFn: () => apiGet<RepairRequestDto>(`/api/repair-requests/${selected!.id}`),
+    enabled: !!selected?.id,
+  });
+
+  const repairDetailLines = useMemo(() => {
+    const raw = repairDetailQ.data?.lines ?? [];
+    return [...raw].sort((a, b) => (a.lineNo ?? 0) - (b.lineNo ?? 0));
+  }, [repairDetailQ.data?.lines]);
+
+  const repairLineColumns: Column<RepairRequestLineDto>[] = useMemo(
+    () => [
+      {
+        key: 'lineType',
+        label: 'Loại',
+        render: l =>
+          String(l.lineType ?? 'DEVICE').toUpperCase() === 'CONSUMABLE' ? 'Vật tư' : 'Thiết bị',
+      },
+      {
+        key: 'item',
+        label: 'Tài sản',
+        render: l => getItemName(String(l.assetItem?.id ?? ''), assetItems),
+      },
+      {
+        key: 'equipmentCode',
+        label: 'Mã TB',
+        render: l =>
+          l.equipment?.equipmentCode ? formatEquipmentCodeDisplay(l.equipment.equipmentCode) : '—',
+      },
+      {
+        key: 'serial',
+        label: 'Serial',
+        render: l =>
+          String(l.lineType ?? 'DEVICE').toUpperCase() === 'CONSUMABLE'
+            ? '—'
+            : (l.equipment?.serial ?? '—'),
+      },
+      {
+        key: 'quantity',
+        label: 'SL',
+        className: 'text-right',
+        render: l => l.quantity ?? 0,
+      },
+    ],
+    [assetItems],
+  );
+
   useEffect(() => {
     if (!selected || dialogMode !== 'edit') return;
     setEditIssue(selected.issue ?? '');
@@ -99,7 +149,10 @@ const RepairRequests = () => {
     else setOutcome('RETURN_USER');
   }, [selected?.id, selected?.result]);
 
-  const invalidate = () => void qc.invalidateQueries({ queryKey: ['api', 'repair-requests-view'] });
+  const invalidate = () => {
+    void qc.invalidateQueries({ queryKey: ['api', 'repair-requests-view'] });
+    void qc.invalidateQueries({ queryKey: ['api', 'repair-requests'] });
+  };
 
   const patch = async (body: Record<string, unknown>) => {
     if (!selected) return;
@@ -192,12 +245,7 @@ const RepairRequests = () => {
     .filter(r => {
       if (filters.search) {
         const s = filters.search.toLowerCase();
-        const eqLabel = repairRequestEquipmentIds(r)
-          .map(id => {
-            const eq = equipments.find(e => e.id === id);
-            return eq ? `${eq.equipmentCode} ${getItemName(eq.itemId, assetItems)}` : '';
-          })
-          .join(' ');
+        const eqLabel = repairRequestTargetsSummary(r, equipments, assetItems);
         if (
           !r.code.toLowerCase().includes(s) &&
           !eqLabel.toLowerCase().includes(s) &&
@@ -219,19 +267,6 @@ const RepairRequests = () => {
     },
     { key: 'requester', label: 'Người yêu cầu', render: r => getEmployeeName(r.requesterId, employees) },
     { key: 'department', label: 'Phòng ban', render: r => getDepartmentName(r.departmentId, departments) },
-    {
-      key: 'equipment',
-      label: 'Thiết bị',
-      render: r =>
-        repairRequestEquipmentIds(r)
-          .map(id => {
-            const eq = equipments.find(e => e.id === id);
-            return eq
-              ? `${formatEquipmentCodeDisplay(eq.equipmentCode)} - ${getItemName(eq.itemId, assetItems)}`
-              : id;
-          })
-          .join('; ') || '—',
-    },
     { key: 'issue', label: 'Vấn đề' },
     { key: 'status', label: 'Trạng thái', render: r => <StatusBadge status={r.status} label={repairStatusLabels[r.status]} /> },
     { key: 'result', label: 'Kết quả', render: r => (r.result ? outcomeLabels[r.result] ?? r.result : '—') },
@@ -314,7 +349,7 @@ const RepairRequests = () => {
           }
         }}
       >
-        <DialogContent className="max-w-2xl">
+        <DialogContent className="max-w-3xl max-h-[90vh] overflow-y-auto">
           <DialogHeader>
             <DialogTitle>
               {dialogMode === 'edit' ? 'Sửa yêu cầu' : 'Chi tiết yêu cầu'} sửa chữa{' '}
@@ -325,18 +360,19 @@ const RepairRequests = () => {
             <div className="space-y-4">
               <RequesterEmployeeInfo requesterId={selected.requesterId} employees={employees} />
               <div className="space-y-3 text-sm">
-                <div>
-                  <span className="text-muted-foreground">Thiết bị:</span>{' '}
-                  <span className="font-medium text-foreground">
-                    {repairRequestEquipmentIds(selected)
-                      .map(id => {
-                        const eq = equipments.find(e => e.id === id);
-                        return eq
-                          ? `${formatEquipmentCodeDisplay(eq.equipmentCode)} — ${getItemName(eq.itemId, assetItems)}`
-                          : id;
-                      })
-                      .join('; ') || '—'}
-                  </span>
+                <div className="space-y-2">
+                  <p className="text-sm font-medium text-foreground">Thiết bị / vật tư</p>
+                  {repairDetailQ.isLoading && <p className="text-sm text-muted-foreground">Đang tải dòng…</p>}
+                  {repairDetailQ.isError && (
+                    <p className="text-sm text-muted-foreground">Không tải được chi tiết dòng — thử đóng và mở lại.</p>
+                  )}
+                  {!repairDetailQ.isLoading && !repairDetailQ.isError && (
+                    <DataTable
+                      columns={repairLineColumns}
+                      data={repairDetailLines}
+                      emptyMessage="Không có dòng"
+                    />
+                  )}
                 </div>
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                   <div>

@@ -1,5 +1,7 @@
 // Types + formatters + status labels (khớp enum backend). Dữ liệu lấy từ API qua hooks.
 
+import { formatEquipmentCodeDisplay } from '@/utils/formatCodes';
+
 // ==================== DEPARTMENTS & EMPLOYEES ====================
 export interface Department {
   id: string;
@@ -260,6 +262,8 @@ export interface RepairRequest {
   equipmentId: string;
   /** Tất cả thiết bị trên phiếu khi có nhiều dòng */
   equipmentLineIds?: string[];
+  /** Dòng vật tư (sửa chữa) — hiển thị / lọc */
+  consumableRepairLines?: { assetItemId: string; quantity: number }[];
   issue: string;
   description: string;
   /** Link/ghi chú file đính kèm */
@@ -279,12 +283,24 @@ export function repairRequestEquipmentIds(r: RepairRequest): string[] {
   return r.equipmentId ? [r.equipmentId] : [];
 }
 
+/** Hiển thị danh sách thiết bị + vật tư trên phiếu sửa chữa. */
+export function repairRequestTargetsSummary(r: RepairRequest, equipments: Equipment[], assetItems: AssetItem[]): string {
+  const dev = repairRequestEquipmentIds(r).map(id => {
+    const eq = equipments.find(e => e.id === id);
+    return eq ? `${formatEquipmentCodeDisplay(eq.equipmentCode)} — ${getItemName(eq.itemId, assetItems)}` : id;
+  });
+  const con = (r.consumableRepairLines ?? []).map(c => `${getItemName(c.assetItemId, assetItems)} × ${c.quantity}`);
+  return [...dev, ...con].join('; ') || '—';
+}
+
 export type ReturnRequestStatus = 'PENDING' | 'APPROVED' | 'REJECTED' | 'COMPLETED' | 'CANCELLED';
 export type ReturnDisposition = 'TO_STOCK' | 'TO_REPAIR' | 'BROKEN' | 'LOST';
 
 export interface ReturnRequestLine {
   id: string;
   itemId: string;
+  /** DEVICE | CONSUMABLE — từ API dòng phiếu */
+  lineType?: 'DEVICE' | 'CONSUMABLE';
   equipmentId?: string;
   quantity: number;
   /** Dòng được chọn thực hiện thu hồi khi QM hoàn tất */
@@ -304,6 +320,11 @@ export interface ReturnRequest {
   createdAt: string;
   approvedAt?: string;
   approvedBy?: string;
+}
+
+/** Nhãn loại dòng thu hồi (thiết bị / vật tư). */
+export function returnLineKindLabel(lineType: string | undefined): string {
+  return String(lineType ?? 'DEVICE').toUpperCase() === 'CONSUMABLE' ? 'Vật tư' : 'Thiết bị';
 }
 
 // ==================== SYSTEM LOGS (chưa có API) ====================

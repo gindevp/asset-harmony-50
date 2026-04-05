@@ -15,14 +15,22 @@ import {
   useConsumableAssignments,
   useEmployees,
   useEnrichedEquipmentList,
+  useRepairRequestsView,
 } from '@/hooks/useEntityApi';
 import { getItemCode, getItemName } from '@/data/mockData';
 import {
   consumableQuantityHeld,
   filterConsumableAssignmentsWithDepartmentPeers,
   filterEquipmentWithDepartmentPeers,
+  getConsumableAssignmentDisplayStatus,
 } from '@/utils/myEquipment';
 import { formatEquipmentCodeDisplay } from '@/utils/formatCodes';
+import {
+  lossLocationLabelFromConsumableAssignment,
+  lossLocationLabelFromEquipment,
+  lossOccurredAtFromDatetimeLocal,
+  nowDatetimeLocalValue,
+} from '@/utils/lossReportForm';
 import { SearchableSelect } from '@/components/shared/SearchableSelect';
 import { toast } from 'sonner';
 
@@ -42,8 +50,10 @@ export function LossReportCreateModal({ open, onOpenChange, onSuccess }: LossRep
   const qc = useQueryClient();
   const eqQ = useEnrichedEquipmentList();
   const caQ = useConsumableAssignments();
+  const repairQ = useRepairRequestsView();
   const iQ = useAssetItems();
   const empQ = useEmployees();
+  const repairRequests = repairQ.data ?? [];
   const equipments = eqQ.data ?? [];
   const consumableAssignments = caQ.data ?? [];
   const assetItems = useMemo(() => (iQ.data ?? []).map(mapAssetItemDto), [iQ.data]);
@@ -88,21 +98,24 @@ export function LossReportCreateModal({ open, onOpenChange, onSuccess }: LossRep
     [consumableAssignments, empId, myDeptId, myLocId, isDeptCoordinator, deptPeerIds],
   );
 
-  const equipmentChoices = useMemo(
-    () => myEquipments.filter(e => e.status === 'IN_USE' || e.status === 'PENDING_ISSUE'),
-    [myEquipments],
-  );
+  const equipmentChoices = useMemo(() => myEquipments.filter(e => e.status === 'IN_USE'), [myEquipments]);
 
   const consumableChoices = useMemo(
-    () => myConsumables.filter(a => consumableQuantityHeld(a) > 0),
-    [myConsumables],
+    () =>
+      myConsumables.filter(
+        a => consumableQuantityHeld(a) > 0 && getConsumableAssignmentDisplayStatus(a, repairRequests).status === 'IN_USE',
+      ),
+    [myConsumables, repairRequests],
   );
 
   const [kind, setKind] = useState<LossKind>('EQUIPMENT');
   const [equipmentId, setEquipmentId] = useState('');
   const [consumableAssignmentId, setConsumableAssignmentId] = useState('');
   const [lossQty, setLossQty] = useState(1);
+  const [lossOccurredAt, setLossOccurredAt] = useState('');
+  const [lossLocation, setLossLocation] = useState('');
   const [lossReason, setLossReason] = useState('');
+  const [lossDescription, setLossDescription] = useState('');
   const [busy, setBusy] = useState(false);
 
   useEffect(() => {
@@ -111,9 +124,22 @@ export function LossReportCreateModal({ open, onOpenChange, onSuccess }: LossRep
       setEquipmentId('');
       setConsumableAssignmentId('');
       setLossQty(1);
+      setLossOccurredAt('');
+      setLossLocation('');
       setLossReason('');
+      setLossDescription('');
     }
   }, [open]);
+
+  useEffect(() => {
+    if (!open) return;
+    setLossOccurredAt(nowDatetimeLocalValue());
+  }, [open]);
+
+  const selectedEquipment = useMemo(
+    () => equipmentChoices.find(e => String(e.id) === equipmentId),
+    [equipmentChoices, equipmentId],
+  );
 
   const selectedConsumable = useMemo(
     () => consumableChoices.find(a => String(a.id) === consumableAssignmentId),
@@ -126,6 +152,17 @@ export function LossReportCreateModal({ open, onOpenChange, onSuccess }: LossRep
     if (kind !== 'CONSUMABLE' || !selectedConsumable) return;
     setLossQty(q => Math.min(Math.max(1, q), Math.max(1, held)));
   }, [kind, selectedConsumable, held]);
+
+  useEffect(() => {
+    if (!open) return;
+    if (kind === 'EQUIPMENT' && selectedEquipment) {
+      setLossLocation(lossLocationLabelFromEquipment(selectedEquipment));
+    } else if (kind === 'CONSUMABLE' && selectedConsumable) {
+      setLossLocation(lossLocationLabelFromConsumableAssignment(selectedConsumable));
+    } else {
+      setLossLocation('');
+    }
+  }, [open, kind, selectedEquipment, selectedConsumable]);
 
   const equipmentOptions = useMemo(() => {
     return equipmentChoices.map(e => ({
@@ -164,9 +201,24 @@ export function LossReportCreateModal({ open, onOpenChange, onSuccess }: LossRep
       toast.error('Chưa liên kết nhân viên.');
       return;
     }
-    const reason = lossReason.trim();
-    if (!reason) {
-      toast.error('Nhập lý do / mô tả báo mất.');
+    const ltIso = lossOccurredAtFromDatetimeLocal(lossOccurredAt);
+    const ll = lossLocation.trim();
+    const lr = lossReason.trim();
+    const ld = lossDescription.trim();
+    if (!ltIso) {
+      toast.error('Chọn thời gian xảy ra / phát hiện mất.');
+      return;
+    }
+    if (!ll) {
+      toast.error('Nhập địa điểm.');
+      return;
+    }
+    if (!lr) {
+      toast.error('Nhập lý do.');
+      return;
+    }
+    if (!ld) {
+      toast.error('Nhập mô tả mất.');
       return;
     }
     setBusy(true);
@@ -182,7 +234,10 @@ export function LossReportCreateModal({ open, onOpenChange, onSuccess }: LossRep
           requestDate: new Date().toISOString(),
           status: 'PENDING',
           lossKind: 'EQUIPMENT',
-          reason,
+          lossOccurredAt: ltIso,
+          lossLocation: ll,
+          reason: lr,
+          lossDescription: ld,
           requester: { id: eid },
           equipment: { id: Number(equipmentId) },
         });
@@ -211,7 +266,10 @@ export function LossReportCreateModal({ open, onOpenChange, onSuccess }: LossRep
           status: 'PENDING',
           lossKind: 'CONSUMABLE',
           quantity: q,
-          reason,
+          lossOccurredAt: ltIso,
+          lossLocation: ll,
+          reason: lr,
+          lossDescription: ld,
           requester: { id: eid },
           consumableAssignment: { id: Number(consumableAssignmentId) },
         });
@@ -316,12 +374,53 @@ export function LossReportCreateModal({ open, onOpenChange, onSuccess }: LossRep
             )}
 
             <div className="space-y-2">
-              <Label htmlFor="loss-reason-modal">Lý do / mô tả</Label>
+              <Label htmlFor="loss-time-modal">
+                Thời gian <span className="text-destructive">*</span>
+              </Label>
+              <Input
+                id="loss-time-modal"
+                type="datetime-local"
+                value={lossOccurredAt}
+                onChange={e => setLossOccurredAt(e.target.value)}
+                disabled={busy}
+              />
+              <p className="text-xs text-muted-foreground">Chọn ngày giờ (giờ địa phương).</p>
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="loss-place-modal">
+                Địa điểm <span className="text-destructive">*</span>
+              </Label>
+              <Textarea
+                id="loss-place-modal"
+                placeholder="Điền từ vị trí / phòng ban bàn giao — có thể sửa…"
+                value={lossLocation}
+                onChange={e => setLossLocation(e.target.value)}
+                rows={2}
+                disabled={busy}
+              />
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="loss-reason-modal">
+                Lý do <span className="text-destructive">*</span>
+              </Label>
               <Textarea
                 id="loss-reason-modal"
-                placeholder="Mô tả ngắn gọn…"
+                placeholder="Nêu lý do báo mất…"
                 value={lossReason}
                 onChange={e => setLossReason(e.target.value)}
+                rows={2}
+                disabled={busy}
+              />
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="loss-desc-modal">
+                Mô tả mất <span className="text-destructive">*</span>
+              </Label>
+              <Textarea
+                id="loss-desc-modal"
+                placeholder="Mô tả chi tiết…"
+                value={lossDescription}
+                onChange={e => setLossDescription(e.target.value)}
                 rows={3}
                 disabled={busy}
               />

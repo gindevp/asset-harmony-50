@@ -1,5 +1,6 @@
 import type { ConsumableAssignmentDto } from '@/api/types';
-import type { Equipment } from '@/data/mockData';
+import type { Equipment, RepairRequest } from '@/data/mockData';
+import { equipmentStatusLabels } from '@/data/mockData';
 
 /** Cách thiết bị «thuộc» tài khoản NV theo bàn giao (cá nhân / PB / vị trí / đồng phòng ban). */
 export type MyAssetScope = 'personal' | 'department' | 'location' | 'peer';
@@ -159,4 +160,37 @@ export function resolveMyConsumableScopeWithPeers(
   const aid = String(a.employee.id);
   if (peerSet.has(aid) && aid !== employeeId) return 'peer';
   return null;
+}
+
+/**
+ * Trạng thái hiển thị cho vật tư (Tài sản của tôi): cùng họ badge với thiết bị —
+ * Đang sử dụng khi còn giữ; Đang sửa chữa khi có yêu cầu sửa chữa chưa kết thúc
+ * (NEW / ACCEPTED / IN_PROGRESS) do đúng người giữ bàn giao gửi, kèm dòng vật tư trùng mặt hàng.
+ */
+export function getConsumableAssignmentDisplayStatus(
+  a: ConsumableAssignmentDto,
+  repairRequests: RepairRequest[],
+): { status: string; label: string } {
+  const held = consumableQuantityHeld(a);
+  if (held <= 0) {
+    return { status: 'IN_STOCK', label: equipmentStatusLabels.IN_STOCK };
+  }
+
+  const assetItemId = a.assetItem?.id != null ? String(a.assetItem.id) : '';
+  const holderId = a.employee?.id != null ? String(a.employee.id) : '';
+
+  if (assetItemId && holderId) {
+    for (const r of repairRequests) {
+      if (r.status === 'COMPLETED' || r.status === 'REJECTED') continue;
+      if (r.requesterId !== holderId) continue;
+      const hit = (r.consumableRepairLines ?? []).some(
+        c => c.assetItemId === assetItemId && (c.quantity ?? 0) > 0,
+      );
+      if (hit) {
+        return { status: 'UNDER_REPAIR', label: equipmentStatusLabels.UNDER_REPAIR };
+      }
+    }
+  }
+
+  return { status: 'IN_USE', label: equipmentStatusLabels.IN_USE };
 }

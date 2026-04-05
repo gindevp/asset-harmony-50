@@ -22,6 +22,7 @@ import { Eye, Pencil, Trash2 } from 'lucide-react';
 import type { ReturnRequest } from '@/data/mockData';
 import {
   returnStatusLabels,
+  returnLineKindLabel,
   getEmployeeName,
   getDepartmentName,
   getItemName,
@@ -80,7 +81,7 @@ const ReturnRequests = () => {
       const all = await apiGet<ReturnRequestLineDto[]>(`/api/return-request-lines?${PAGE_ALL}`);
       return all.filter(l => String(l.request?.id) === selected!.id);
     },
-    enabled: !!selected?.id && selected.status === 'APPROVED',
+    enabled: !!selected?.id,
   });
 
   const invalidate = () => {
@@ -174,9 +175,62 @@ const ReturnRequests = () => {
     }
   };
 
+  const sortedReturnLines = useMemo(() => {
+    const raw = rawLinesQ.data ?? [];
+    return [...raw].sort((a, b) => (a.lineNo ?? 0) - (b.lineNo ?? 0));
+  }, [rawLinesQ.data]);
+
+  const returnDetailLineColumns = useMemo((): Column<ReturnRequestLineDto>[] => {
+    const base: Column<ReturnRequestLineDto>[] = [
+      {
+        key: 'lineType',
+        label: 'Loại',
+        render: l => returnLineKindLabel(l.lineType),
+      },
+      {
+        key: 'item',
+        label: 'Tài sản',
+        render: l => getItemName(String(l.assetItem?.id ?? ''), assetItems),
+      },
+      {
+        key: 'equipment',
+        label: 'Mã TB',
+        render: l =>
+          l.equipment?.equipmentCode
+            ? formatEquipmentCodeDisplay(l.equipment.equipmentCode)
+            : '—',
+      },
+      {
+        key: 'serial',
+        label: 'Serial',
+        render: l =>
+          String(l.lineType ?? 'DEVICE').toUpperCase() === 'CONSUMABLE'
+            ? '—'
+            : (l.equipment?.serial ?? '—'),
+      },
+      { key: 'quantity', label: 'SL', className: 'text-right', render: l => l.quantity ?? 0 },
+      { key: 'notes', label: 'Ghi chú', render: l => l.note ?? '' },
+    ];
+    if (selected?.status !== 'APPROVED') return base;
+    return [
+      {
+        key: 'pick',
+        label: 'Chọn',
+        render: (l: ReturnRequestLineDto) => (
+          <Checkbox
+            checked={l.selected === true}
+            disabled={busy}
+            onCheckedChange={v => void patchLineSelected(l.id!, v === true)}
+          />
+        ),
+      },
+      ...base,
+    ];
+  }, [selected?.status, assetItems, busy]);
+
   const completeReturn = async () => {
     if (!selected) return;
-    const lines = rawLinesQ.data ?? [];
+    const lines = sortedReturnLines;
     const anySel = lines.some(l => l.selected === true);
     if (!anySel) {
       toast.error('Chọn ít nhất một dòng thu hồi thực tế');
@@ -264,18 +318,6 @@ const ReturnRequests = () => {
     },
   ];
 
-  const lineColumnsPending: Column<ReturnRequest['lines'][0]>[] = [
-    { key: 'item', label: 'Tài sản', render: r => getItemName(r.itemId, assetItems) },
-    { key: 'equipment', label: 'Mã TB', render: r => r.equipmentId || '—' },
-    { key: 'quantity', label: 'SL thu hồi', className: 'text-right' },
-    {
-      key: 'sel',
-      label: 'Thu hồi',
-      render: r => (r.selected ? 'Có' : 'Không'),
-    },
-    { key: 'notes', label: 'Ghi chú' },
-  ];
-
   return (
     <div className="page-container">
       <div className="page-header">
@@ -337,55 +379,31 @@ const ReturnRequests = () => {
                 )}
               </div>
 
-              {selected.status === 'APPROVED' ? (
-                <div className="space-y-2">
+              <div className="space-y-2">
+                <p className="text-sm font-medium text-foreground">Thiết bị / vật tư thu hồi</p>
+                {selected.status === 'APPROVED' ? (
                   <p className="text-sm text-muted-foreground">
                     Đánh dấu dòng sẽ thu hồi thực tế (chỉ các dòng được chọn mới cập nhật kho khi hoàn tất). Hướng xử lý mặc định:{' '}
                     <span className="font-medium text-foreground">trả về kho</span>.
                   </p>
-                  {rawLinesQ.isLoading && <p className="text-sm text-muted-foreground">Đang tải dòng…</p>}
-                  <DataTable
-                    columns={[
-                      {
-                        key: 'pick',
-                        label: 'Chọn',
-                        render: (l: ReturnRequestLineDto) => (
-                          <Checkbox
-                            checked={l.selected === true}
-                            disabled={busy}
-                            onCheckedChange={v => void patchLineSelected(l.id!, v === true)}
-                          />
-                        ),
-                      },
-                      {
-                        key: 'item',
-                        label: 'Tài sản',
-                        render: (l: ReturnRequestLineDto) =>
-                          getItemName(String(l.assetItem?.id ?? ''), assetItems),
-                      },
-                      {
-                        key: 'equipment',
-                        label: 'Mã TB',
-                        render: (l: ReturnRequestLineDto) =>
-                          l.equipment?.equipmentCode
-                            ? formatEquipmentCodeDisplay(l.equipment.equipmentCode)
-                            : (l.equipment?.id ?? '—'),
-                      },
-                      { key: 'quantity', label: 'SL', className: 'text-right', render: (l: ReturnRequestLineDto) => l.quantity ?? 0 },
-                      { key: 'notes', label: 'Ghi chú', render: (l: ReturnRequestLineDto) => l.note ?? '' },
-                    ]}
-                    data={rawLinesQ.data ?? []}
-                    emptyMessage="Không có dòng"
-                  />
+                ) : null}
+                {rawLinesQ.isLoading && <p className="text-sm text-muted-foreground">Đang tải dòng…</p>}
+                {rawLinesQ.isError && (
+                  <p className="text-sm text-destructive">Không tải được chi tiết dòng từ máy chủ.</p>
+                )}
+                <DataTable
+                  columns={returnDetailLineColumns}
+                  data={sortedReturnLines}
+                  emptyMessage="Không có dòng"
+                />
+                {selected.status === 'APPROVED' ? (
                   <div className="flex flex-wrap gap-2 pt-2">
                     <Button type="button" disabled={busy} onClick={() => void completeReturn()}>
                       Hoàn tất thu hồi
                     </Button>
                   </div>
-                </div>
-              ) : (
-                <DataTable columns={lineColumnsPending} data={selected.lines} />
-              )}
+                ) : null}
+              </div>
 
               {selected.status === 'PENDING' && (
                 <ApprovalActionBar

@@ -178,6 +178,10 @@ export type AllocationRequestLineDto = {
 export type RepairRequestLineDto = {
   id?: number;
   lineNo?: number;
+  /** DEVICE | CONSUMABLE */
+  lineType?: string;
+  quantity?: number;
+  assetItem?: AssetItemDto;
   equipment?: EquipmentDto;
 };
 
@@ -299,7 +303,14 @@ export type LossReportRequestDto = {
   status?: string;
   lossKind?: string;
   quantity?: number;
+  /** Thời điểm / mô tả thời gian do người báo nhập */
+  lossOccurredAt?: string;
+  /** Địa điểm do người báo nhập */
+  lossLocation?: string;
+  /** Lý do báo mất */
   reason?: string;
+  /** Mô tả chi tiết */
+  lossDescription?: string;
   requester?: EmployeeDto;
   equipment?: EquipmentDto;
   consumableAssignment?: { id?: number; assetItem?: AssetItemDto };

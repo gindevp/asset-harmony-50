@@ -15,6 +15,7 @@ import { resolveEmployeeIdForRequests } from '@/api/account';
 import { apiPost, apiPostMultipart, getStoredToken } from '@/api/http';
 import { hasAnyAuthority } from '@/auth/jwt';
 import { makeBizCode } from '@/api/businessCode';
+import { RequiredMark } from '@/components/shared/RequiredMark';
 import { SearchableSelect } from '@/components/shared/SearchableSelect';
 import {
   mapAssetItemDto,
@@ -254,7 +255,7 @@ export default function RequestNew() {
         </div>
       </header>
 
-      <Card className="mt-6 w-full max-w-5xl shadow-sm">
+      <Card className="mt-6 w-full max-w-none shadow-sm">
         <CardHeader className="pb-3">
           <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between sm:gap-4">
             <CardTitle className="text-base text-primary">Phiếu yêu cầu cấp phát</CardTitle>
@@ -283,7 +284,10 @@ export default function RequestNew() {
         </CardHeader>
         <CardContent className="space-y-4">
           <div className="space-y-2">
-            <Label>Lý do</Label>
+            <Label>
+              Lý do
+              <RequiredMark />
+            </Label>
             <Textarea value={allocReason} onChange={e => setAllocReason(e.target.value)} rows={2} />
           </div>
           <div className="space-y-2">
@@ -308,7 +312,10 @@ export default function RequestNew() {
           {canSetExtendedAssignee ? (
             <div className="space-y-3 rounded-md border p-3 bg-muted/30">
               <div className="space-y-2">
-                <Label>Đối tượng được cấp</Label>
+                <Label>
+                  Đối tượng được cấp
+                  <RequiredMark />
+                </Label>
                 <Select
                   value={assigneeType}
                   onValueChange={v => {
@@ -329,7 +336,10 @@ export default function RequestNew() {
 
               {assigneeType === 'EMPLOYEE' && (
                 <div className="space-y-2">
-                  <Label>Nhân viên nhận</Label>
+                  <Label>
+                    Nhân viên nhận
+                    <RequiredMark />
+                  </Label>
                   <Select value={beneficiaryEmployeeId || undefined} onValueChange={setBeneficiaryEmployeeId}>
                     <SelectTrigger><SelectValue placeholder="Chọn nhân viên" /></SelectTrigger>
                     <SelectContent>
@@ -348,7 +358,10 @@ export default function RequestNew() {
               )}
               {assigneeType === 'DEPARTMENT' && (
                 <div className="space-y-2">
-                  <Label>Phòng ban nhận</Label>
+                  <Label>
+                    Phòng ban nhận
+                    <RequiredMark />
+                  </Label>
                   <Select value={beneficiaryDepartmentId || undefined} onValueChange={setBeneficiaryDepartmentId}>
                     <SelectTrigger><SelectValue placeholder="Chọn phòng ban" /></SelectTrigger>
                     <SelectContent>
@@ -363,7 +376,10 @@ export default function RequestNew() {
               )}
               {assigneeType === 'LOCATION' && (
                 <div className="space-y-2">
-                  <Label>Vị trí / khu vực nhận</Label>
+                  <Label>
+                    Vị trí / khu vực nhận
+                    <RequiredMark />
+                  </Label>
                   <Select value={beneficiaryLocationId || undefined} onValueChange={setBeneficiaryLocationId}>
                     <SelectTrigger><SelectValue placeholder="Chọn vị trí" /></SelectTrigger>
                     <SelectContent>
@@ -383,7 +399,13 @@ export default function RequestNew() {
           ) : null}
 
           <div className="space-y-6">
-            <Label className="text-base font-semibold">Các tài sản yêu cầu</Label>
+            <div className="space-y-1">
+              <Label className="text-base font-semibold">
+                Các tài sản yêu cầu
+                <RequiredMark />
+              </Label>
+              <p className="text-xs text-muted-foreground">Cần ít nhất một dòng vật tư hoặc thiết bị hợp lệ (tên dòng và số lượng).</p>
+            </div>
 
             {/* Phần 1: Vật tư */}
             <div className="space-y-2 rounded-lg border bg-card p-4">
@@ -419,7 +441,10 @@ export default function RequestNew() {
                       </div>
                       <div className="grid gap-3 sm:grid-cols-2">
                         <div className="space-y-1">
-                          <Label className="text-xs">Tên dòng</Label>
+                          <Label className="text-xs">
+                            Tên dòng
+                            <RequiredMark />
+                          </Label>
                           <SearchableSelect
                             value={line.assetLineId}
                             onValueChange={v =>
@@ -433,7 +458,10 @@ export default function RequestNew() {
                           />
                         </div>
                         <div className="space-y-1">
-                          <Label className="text-xs">Số lượng</Label>
+                          <Label className="text-xs">
+                            Số lượng
+                            <RequiredMark />
+                          </Label>
                           <Input
                             type="number"
                             min={1}
@@ -485,7 +513,10 @@ export default function RequestNew() {
                       </div>
                       <div className="grid gap-3 sm:grid-cols-2">
                         <div className="space-y-1">
-                          <Label className="text-xs">Tên dòng</Label>
+                          <Label className="text-xs">
+                            Tên dòng
+                            <RequiredMark />
+                          </Label>
                           <SearchableSelect
                             value={line.assetLineId}
                             onValueChange={v =>
@@ -499,7 +530,10 @@ export default function RequestNew() {
                           />
                         </div>
                         <div className="space-y-1">
-                          <Label className="text-xs">Số lượng</Label>
+                          <Label className="text-xs">
+                            Số lượng
+                            <RequiredMark />
+                          </Label>
                           <Input
                             type="number"
                             min={1}

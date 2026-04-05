@@ -60,6 +60,7 @@ export function parseProblemDetailJson(body: string | undefined): string {
       detail?: string;
       title?: string;
       message?: string;
+      properties?: { message?: string; params?: string };
       fieldErrors?: Array<{ objectName?: string; field?: string; message?: string }>;
     };
     if (Array.isArray(j.fieldErrors) && j.fieldErrors.length > 0) {
@@ -70,7 +71,7 @@ export function parseProblemDetailJson(body: string | undefined): string {
         .filter(Boolean)
         .join(' · ');
     }
-    /** Title từ BadRequestAlertException (tiếng Việt, có thể kèm số liệu cần/hiện). */
+    /** Title từ BadRequestAlertException — thường có mã thiết bị / vật tư; ưu tiên trước map tĩnh. */
     if (j.title && !isGenericProblemTitle(j.title)) {
       return j.title;
     }
@@ -86,6 +87,10 @@ export function parseProblemDetailJson(body: string | undefined): string {
       'error.consumablerequiresitem': 'Dòng vật tư phải chọn mã tài sản (item).',
       'error.notinstock': 'Thiết bị chọn không còn ở trạng thái tồn kho (IN_STOCK).',
     };
+    const msgKey = j.properties?.message ?? j.message;
+    if (msgKey && problemKeys[msgKey]) {
+      return problemKeys[msgKey];
+    }
     if (j.detail && j.detail.startsWith('{')) {
       try {
         const inner = JSON.parse(j.detail) as { title?: string; message?: string };

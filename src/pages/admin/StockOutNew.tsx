@@ -364,19 +364,23 @@ const StockOutNewPage = () => {
                             <p className="text-sm text-muted-foreground italic">Không có thiết bị tồn kho</p>
                           ) : (
                             <div className="border rounded-md overflow-x-auto">
-                              <table className="w-full min-w-[560px] text-sm">
+                              <table className="w-full min-w-[520px] text-sm">
                                 <thead>
                                   <tr className="bg-muted/50 border-b">
                                     <th className="text-left px-3 py-1.5 font-medium text-xs w-10">Chọn</th>
                                     <th className="text-left px-3 py-1.5 font-medium text-xs">Mã TB</th>
                                     <th className="text-left px-3 py-1.5 font-medium text-xs">Serial</th>
-                                    <th className="text-left px-3 py-1.5 font-medium text-xs">Ghi chú</th>
+                                    <th className="text-left px-3 py-1.5 font-medium text-xs">Model</th>
                                   </tr>
                                 </thead>
                                 <tbody>
                                   {available.map(eq => (
-                                    <tr key={eq.id} className="border-b last:border-0 hover:bg-muted/20 cursor-pointer" onClick={() => toggleEquipment(line.id, eq.id)}>
-                                      <td className="px-3 py-1.5">
+                                    <tr
+                                      key={eq.id}
+                                      className="border-b last:border-0 hover:bg-muted/20 cursor-pointer"
+                                      onClick={() => toggleEquipment(line.id, eq.id)}
+                                    >
+                                      <td className="px-3 py-1.5" onClick={e => e.stopPropagation()}>
                                         <input
                                           type="checkbox"
                                           checked={line.selectedEquipmentIds.includes(eq.id)}
@@ -388,7 +392,9 @@ const StockOutNewPage = () => {
                                         {formatEquipmentCodeDisplay(eq.equipmentCode)}
                                       </td>
                                       <td className="px-3 py-1.5 text-xs">{eq.serial}</td>
-                                      <td className="px-3 py-1.5 text-xs text-muted-foreground">{eq.notes || '—'}</td>
+                                      <td className="px-3 py-1.5 text-xs">
+                                        {(eq.modelName ?? '').trim() || '—'}
+                                      </td>
                                     </tr>
                                   ))}
                                 </tbody>

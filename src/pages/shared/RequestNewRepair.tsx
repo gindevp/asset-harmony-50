@@ -4,6 +4,7 @@ import { useQueryClient } from '@tanstack/react-query';
 import { ArrowLeft } from 'lucide-react';
 import { toast } from 'sonner';
 
+import { RequiredMark } from '@/components/shared/RequiredMark';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
@@ -11,14 +12,25 @@ import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
 
 import { resolveEmployeeIdForRequests, resolveEmployeeLocationIdForRequests } from '@/api/account';
-import { apiPost, apiPostMultipart, getStoredToken } from '@/api/http';
+import { apiPost, apiPostMultipart, getApiErrorMessage, getStoredToken } from '@/api/http';
 import { hasAnyAuthority } from '@/auth/jwt';
 import { makeBizCode } from '@/api/businessCode';
 import type { Equipment } from '@/data/mockData';
-import { filterEquipmentWithDepartmentPeers } from '@/utils/myEquipment';
-import { formatEquipmentCodeDisplay } from '@/utils/formatCodes';
-import { useEmployees, useEnrichedEquipmentList } from '@/hooks/useEntityApi';
+import { getItemName } from '@/data/mockData';
+import {
+  consumableQuantityHeld,
+  filterConsumableAssignmentsWithDepartmentPeers,
+  filterEquipmentWithDepartmentPeers,
+} from '@/utils/myEquipment';
+import {
+  mapAssetItemDto,
+  useAssetItems,
+  useConsumableAssignments,
+  useEmployees,
+  useEnrichedEquipmentList,
+} from '@/hooks/useEntityApi';
 import { requestsListPath } from './requestNewPaths';
+import type { ConsumableAssignmentDto } from '@/api/types';
 
 function requireEmployeeId(): number | null {
   const id = resolveEmployeeIdForRequests();
@@ -38,8 +50,11 @@ export default function RequestNewRepair() {
   const backTo = requestsListPath('repair', isAdminArea);
 
   const eqQ = useEnrichedEquipmentList();
+  const caQ = useConsumableAssignments();
+  const aiQ = useAssetItems();
   const allEmpQ = useEmployees();
   const equipments = eqQ.data ?? [];
+  const assetItems = useMemo(() => (aiQ.data ?? []).map(mapAssetItemDto), [aiQ.data]);
   const myEmpIdStr = resolveEmployeeIdForRequests();
   const myDeptIdStr = useMemo(() => {
     if (!myEmpIdStr || !allEmpQ.data) return null;
@@ -69,8 +84,32 @@ export default function RequestNewRepair() {
     [equipments, myEmpIdStr, myDeptIdStr, myLocIdStr, isDeptCoordinator, deptPeerIds],
   );
 
+  const myConsumables: ConsumableAssignmentDto[] = useMemo(() => {
+    const raw = filterConsumableAssignmentsWithDepartmentPeers(
+      caQ.data ?? [],
+      myEmpIdStr,
+      myDeptIdStr,
+      myLocIdStr,
+      isDeptCoordinator ? deptPeerIds : [],
+    );
+    return raw.filter(a => consumableQuantityHeld(a) > 0);
+  }, [caQ.data, myEmpIdStr, myDeptIdStr, myLocIdStr, isDeptCoordinator, deptPeerIds]);
+
   const [repairSelected, setRepairSelected] = useState<Record<string, boolean>>({});
   const toggleRepair = (id: string) => setRepairSelected(p => ({ ...p, [id]: !p[id] }));
+
+  const [repairConsumableSelected, setRepairConsumableSelected] = useState<Record<string, boolean>>({});
+  const [repairConsumableQty, setRepairConsumableQty] = useState<Record<string, string>>({});
+  const toggleRepairConsumable = (assignmentId: string) => {
+    setRepairConsumableSelected(p => {
+      const next = { ...p, [assignmentId]: !p[assignmentId] };
+      if (next[assignmentId]) {
+        setRepairConsumableQty(q => ({ ...q, [assignmentId]: q[assignmentId] ?? '1' }));
+      }
+      return next;
+    });
+  };
+
   const [repairIssue, setRepairIssue] = useState('');
   const [repairDesc, setRepairDesc] = useState('');
   const [repairAttachment, setRepairAttachment] = useState('');
@@ -79,7 +118,26 @@ export default function RequestNewRepair() {
 
   const submitRepair = async () => {
     const eqIds = Object.entries(repairSelected).filter(([, v]) => v).map(([k]) => k);
-    if (eqIds.length === 0) return toast.error('Chọn ít nhất một thiết bị');
+    const consumableLines: { assignmentId: string; assetItemId: number; qty: number; max: number }[] = [];
+    for (const a of myConsumables) {
+      const aid = String(a.id ?? '');
+      if (!repairConsumableSelected[aid]) continue;
+      const itemId = a.assetItem?.id;
+      if (itemId == null) continue;
+      const max = consumableQuantityHeld(a);
+      const raw = (repairConsumableQty[aid] ?? '1').trim();
+      const qty = Number.parseInt(raw, 10);
+      if (!Number.isFinite(qty) || qty < 1) {
+        toast.error('Số lượng vật tư phải là số nguyên ≥ 1');
+        return;
+      }
+      if (qty > max) {
+        toast.error(`Số lượng vật tư không vượt quá SL đang giữ (${max})`);
+        return;
+      }
+      consumableLines.push({ assignmentId: aid, assetItemId: itemId, qty, max });
+    }
+    if (eqIds.length === 0 && consumableLines.length === 0) return toast.error('Chọn ít nhất một thiết bị hoặc một vật tư');
     if (!repairIssue.trim()) return toast.error('Nhập vấn đề / danh mục');
     const repEid = requireEmployeeId();
     if (repEid == null) return;
@@ -96,6 +154,32 @@ export default function RequestNewRepair() {
       const noteParts: string[] = [];
       if (repairAttachment.trim()) noteParts.push(repairAttachment.trim());
       if (fileUrl) noteParts.push(`FILE:${fileUrl}`);
+
+      let lineNo = 1;
+      const lines: {
+        lineNo: number;
+        lineType: string;
+        equipment?: { id: number };
+        assetItem?: { id: number };
+        quantity?: number;
+      }[] = [];
+      for (const eqId of eqIds) {
+        lines.push({ lineNo: lineNo++, lineType: 'DEVICE', equipment: { id: Number(eqId) } });
+      }
+      /** Cùng mặt hàng có thể có nhiều dòng bàn giao — BE chỉ cho 1 dòng CONSUMABLE / assetItemId / phiếu */
+      const mergedByItem = new Map<number, number>();
+      for (const c of consumableLines) {
+        mergedByItem.set(c.assetItemId, (mergedByItem.get(c.assetItemId) ?? 0) + c.qty);
+      }
+      for (const [assetItemId, qty] of mergedByItem) {
+        lines.push({
+          lineNo: lineNo++,
+          lineType: 'CONSUMABLE',
+          assetItem: { id: assetItemId },
+          quantity: qty,
+        });
+      }
+
       await apiPost('/api/repair-requests', {
         code: makeBizCode('RP'),
         requestDate: new Date().toISOString(),
@@ -104,7 +188,7 @@ export default function RequestNewRepair() {
         attachmentNote: noteParts.length > 0 ? noteParts.join('\n') : undefined,
         status: 'NEW',
         requester: { id: repEid },
-        lines: eqIds.map((eqId, i) => ({ lineNo: i + 1, equipment: { id: Number(eqId) } })),
+        lines,
       });
       toast.success('Đã gửi yêu cầu sửa chữa');
       await qc.invalidateQueries({ queryKey: ['api', 'allocation-requests-view'] });
@@ -112,11 +196,14 @@ export default function RequestNewRepair() {
       await qc.invalidateQueries({ queryKey: ['api', 'return-requests-view'] });
       navigate(backTo);
     } catch (e) {
-      toast.error(e instanceof Error ? e.message : 'Lỗi API');
+      toast.error(getApiErrorMessage(e));
     } finally {
       setRepairBusy(false);
     }
   };
+
+  const hasAnyAsset = myEquipment.length > 0 || myConsumables.length > 0;
+  const loadingAssets = eqQ.isLoading || caQ.isLoading;
 
   return (
     <div className="page-container max-w-none w-full pb-8">
@@ -132,33 +219,94 @@ export default function RequestNewRepair() {
         </div>
       </header>
 
-      <Card className="mt-6 w-full max-w-5xl shadow-sm">
+      <Card className="mt-6 w-full max-w-none shadow-sm">
         <CardHeader className="pb-3">
           <CardTitle className="text-base text-primary">Phiếu yêu cầu sửa chữa</CardTitle>
         </CardHeader>
         <CardContent className="space-y-4">
-          {myEquipment.length === 0 ? (
-            <p className="text-sm text-muted-foreground">Bạn không có thiết bị đang gán — không thể tạo yêu cầu sửa chữa.</p>
+          {loadingAssets ? (
+            <p className="text-sm text-muted-foreground">Đang tải tài sản…</p>
+          ) : !hasAnyAsset ? (
+            <p className="text-sm text-muted-foreground">Bạn không có thiết bị hoặc vật tư đang giữ — không thể tạo yêu cầu sửa chữa.</p>
           ) : (
             <>
-              <div className="space-y-2">
-                <Label>Thiết bị (có thể chọn nhiều trên cùng một phiếu)</Label>
+              <div className="space-y-1">
+                <Label className="text-base font-semibold">
+                  Tài sản cần sửa (thiết bị và/hoặc vật tư)
+                  <RequiredMark />
+                </Label>
                 <p className="text-xs text-muted-foreground">
-                  Mỗi thiết bị chỉ được một phiếu sửa chữa hoặc thu hồi chưa kết thúc; không chọn trùng thiết bị trên một phiếu.
+                  Bắt buộc chọn ít nhất một thiết bị hoặc một vật tư. Mỗi thiết bị / mặt hàng vật tư chỉ được một phiếu sửa chữa hoặc thu hồi chưa kết thúc; không chọn trùng trên một phiếu.
                 </p>
-                <div className="max-h-72 overflow-y-auto border rounded-md p-2 space-y-1">
-                  {myEquipment.map(e => (
-                    <label key={e.id} className="flex items-center gap-2 text-sm py-1 cursor-pointer">
-                      <input type="checkbox" checked={!!repairSelected[e.id]} onChange={() => toggleRepair(e.id)} />
-                      <span className="font-mono">
-                        {formatEquipmentCodeDisplay(e.equipmentCode)} — serial {e.serial || '—'}
-                      </span>
-                    </label>
-                  ))}
-                </div>
               </div>
               <div className="space-y-2">
-                <Label>Vấn đề (tối đa 100 ký tự)</Label>
+                <Label>Thiết bị (có thể chọn nhiều trên cùng một phiếu)</Label>
+                {myEquipment.length > 0 ? (
+                  <div className="max-h-56 overflow-y-auto border rounded-md p-2 space-y-1">
+                    {myEquipment.map(e => {
+                      const deviceName = getItemName(e.itemId, assetItems);
+                      const serial = (e.serial ?? '').trim() || '—';
+                      return (
+                        <label key={e.id} className="flex items-center gap-2 text-sm py-1 cursor-pointer">
+                          <input type="checkbox" checked={!!repairSelected[e.id]} onChange={() => toggleRepair(e.id)} />
+                          <span className="min-w-0">
+                            <span className="font-medium">{deviceName}</span>
+                            <span className="text-muted-foreground"> - </span>
+                            <span className="font-mono tabular-nums">{serial}</span>
+                          </span>
+                        </label>
+                      );
+                    })}
+                  </div>
+                ) : (
+                  <p className="text-xs text-muted-foreground">Không có thiết bị đang gán.</p>
+                )}
+              </div>
+
+              <div className="space-y-2">
+                <Label>Vật tư (theo bàn giao đang giữ)</Label>
+                {myConsumables.length > 0 ? (
+                  <div className="max-h-56 overflow-y-auto border rounded-md p-2 space-y-2">
+                    {myConsumables.map(a => {
+                      const aid = String(a.id ?? '');
+                      const held = consumableQuantityHeld(a);
+                      const itemId = a.assetItem?.id != null ? String(a.assetItem.id) : '';
+                      const label = itemId ? getItemName(itemId, assetItems) : '—';
+                      return (
+                        <div key={aid} className="flex flex-wrap items-center gap-2 text-sm py-1">
+                          <label className="flex items-center gap-2 cursor-pointer min-w-0">
+                            <input
+                              type="checkbox"
+                              checked={!!repairConsumableSelected[aid]}
+                              onChange={() => toggleRepairConsumable(aid)}
+                            />
+                            <span className="truncate">{label}</span>
+                            <span className="text-muted-foreground shrink-0">(còn {held})</span>
+                          </label>
+                          {repairConsumableSelected[aid] ? (
+                            <Input
+                              className="w-20 h-8"
+                              type="number"
+                              min={1}
+                              max={held}
+                              value={repairConsumableQty[aid] ?? '1'}
+                              onChange={e => setRepairConsumableQty(q => ({ ...q, [aid]: e.target.value }))}
+                            />
+                          ) : null}
+                        </div>
+                      );
+                    })}
+                  </div>
+                ) : (
+                  <p className="text-xs text-muted-foreground">Không có vật tư đang giữ.</p>
+                )}
+              </div>
+
+              <div className="space-y-2">
+                <Label>
+                  Vấn đề (tối đa 100 ký tự)
+                  <RequiredMark />
+                </Label>
                 <Input value={repairIssue} onChange={e => setRepairIssue(e.target.value)} maxLength={100} />
               </div>
               <div className="space-y-2">
@@ -187,7 +335,7 @@ export default function RequestNewRepair() {
                 <Button variant="outline" asChild disabled={repairBusy}>
                   <Link to={backTo}>Hủy</Link>
                 </Button>
-                <Button onClick={() => void submitRepair()} disabled={repairBusy || myEquipment.length === 0}>
+                <Button onClick={() => void submitRepair()} disabled={repairBusy || !hasAnyAsset}>
                   {repairBusy ? 'Đang gửi…' : 'Gửi'}
                 </Button>
               </div>

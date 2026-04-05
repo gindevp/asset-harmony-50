@@ -14,8 +14,6 @@ import {
   getItemName,
   getItemUnit,
   formatDate,
-  formatCurrency,
-  calculateDepreciation,
 } from '@/data/mockData';
 import { resolveEmployeeIdForRequests, resolveEmployeeLocationIdForRequests } from '@/api/account';
 import { makeBizCode } from '@/api/businessCode';
@@ -28,6 +26,7 @@ import {
   useConsumableAssignments,
   useEmployees,
   useEnrichedEquipmentList,
+  useRepairRequestsView,
 } from '@/hooks/useEntityApi';
 import type { Equipment } from '@/data/mockData';
 import {
@@ -37,8 +36,15 @@ import {
   myAssetScopeLabel,
   resolveMyAssetScopeWithPeers,
   resolveMyConsumableScopeWithPeers,
+  getConsumableAssignmentDisplayStatus,
 } from '@/utils/myEquipment';
 import { formatEquipmentCodeDisplay } from '@/utils/formatCodes';
+import {
+  lossLocationLabelFromConsumableAssignment,
+  lossLocationLabelFromEquipment,
+  lossOccurredAtFromDatetimeLocal,
+  nowDatetimeLocalValue,
+} from '@/utils/lossReportForm';
 import { toast } from 'sonner';
 
 type LossDialogState =
@@ -50,12 +56,14 @@ const MyAssets = () => {
   const qc = useQueryClient();
   const eqQ = useEnrichedEquipmentList();
   const caQ = useConsumableAssignments();
+  const repairQ = useRepairRequestsView();
   const iQ = useAssetItems();
   const empQ = useEmployees();
   const equipments = eqQ.data ?? [];
+  const repairRequests = repairQ.data ?? [];
   const consumableAssignments = caQ.data ?? [];
   const assetItems = useMemo(() => (iQ.data ?? []).map(mapAssetItemDto), [iQ.data]);
-  const listLoading = eqQ.isLoading || caQ.isLoading;
+  const listLoading = eqQ.isLoading || caQ.isLoading || repairQ.isLoading;
 
   const empId = resolveEmployeeIdForRequests();
   const myDeptId = useMemo(() => {
@@ -105,9 +113,28 @@ const MyAssets = () => {
   );
 
   const [lossDialog, setLossDialog] = useState<LossDialogState>(null);
+  const [lossContextAt, setLossContextAt] = useState('');
+  const [lossContextLocation, setLossContextLocation] = useState('');
   const [lossReason, setLossReason] = useState('');
+  const [lossDescription, setLossDescription] = useState('');
   const [lossQty, setLossQty] = useState(1);
   const [lossBusy, setLossBusy] = useState(false);
+
+  useEffect(() => {
+    if (!lossDialog) {
+      setLossContextAt('');
+      setLossContextLocation('');
+      return;
+    }
+    setLossContextAt(nowDatetimeLocalValue());
+    if (lossDialog.kind === 'equipment') {
+      setLossContextLocation(lossLocationLabelFromEquipment(lossDialog.equipment));
+    } else {
+      setLossContextLocation(lossLocationLabelFromConsumableAssignment(lossDialog.assignment));
+    }
+    setLossReason('');
+    setLossDescription('');
+  }, [lossDialog]);
 
   useEffect(() => {
     if (!lossDialog || lossDialog.kind !== 'consumable') return;
@@ -131,9 +158,24 @@ const MyAssets = () => {
       return;
     }
     if (!lossDialog) return;
-    const reason = lossReason.trim();
-    if (!reason) {
-      toast.error('Nhập lý do / mô tả báo mất.');
+    const ltIso = lossOccurredAtFromDatetimeLocal(lossContextAt);
+    const ll = lossContextLocation.trim();
+    const lr = lossReason.trim();
+    const ld = lossDescription.trim();
+    if (!ltIso) {
+      toast.error('Chọn thời gian xảy ra / phát hiện mất.');
+      return;
+    }
+    if (!ll) {
+      toast.error('Nhập địa điểm.');
+      return;
+    }
+    if (!lr) {
+      toast.error('Nhập lý do.');
+      return;
+    }
+    if (!ld) {
+      toast.error('Nhập mô tả mất.');
       return;
     }
     setLossBusy(true);
@@ -144,7 +186,10 @@ const MyAssets = () => {
           requestDate: new Date().toISOString(),
           status: 'PENDING',
           lossKind: 'EQUIPMENT',
-          reason,
+          lossOccurredAt: ltIso,
+          lossLocation: ll,
+          reason: lr,
+          lossDescription: ld,
           requester: { id: eid },
           equipment: { id: Number(lossDialog.equipment.id) },
         });
@@ -162,14 +207,20 @@ const MyAssets = () => {
           status: 'PENDING',
           lossKind: 'CONSUMABLE',
           quantity: q,
-          reason,
+          lossOccurredAt: ltIso,
+          lossLocation: ll,
+          reason: lr,
+          lossDescription: ld,
           requester: { id: eid },
           consumableAssignment: { id: Number(lossDialog.assignment.id) },
         });
       }
       toast.success('Đã gửi yêu cầu báo mất — chờ QLTS xác nhận');
       setLossDialog(null);
+      setLossContextAt('');
+      setLossContextLocation('');
       setLossReason('');
+      setLossDescription('');
       setLossQty(1);
       invalidateAfterLoss();
     } catch (e) {
@@ -183,6 +234,27 @@ const MyAssets = () => {
   const equipmentInUseCount = useMemo(
     () => myEquipments.filter(e => e.status === 'IN_USE').length,
     [myEquipments],
+  );
+
+  const equipmentUnderRepairCount = useMemo(
+    () => myEquipments.filter(e => e.status === 'UNDER_REPAIR').length,
+    [myEquipments],
+  );
+
+  const consumableInUseRowCount = useMemo(
+    () =>
+      myConsumables.filter(
+        a => getConsumableAssignmentDisplayStatus(a, repairRequests).status === 'IN_USE',
+      ).length,
+    [myConsumables, repairRequests],
+  );
+
+  const consumableUnderRepairRowCount = useMemo(
+    () =>
+      myConsumables.filter(
+        a => getConsumableAssignmentDisplayStatus(a, repairRequests).status === 'UNDER_REPAIR',
+      ).length,
+    [myConsumables, repairRequests],
   );
 
   const columns: Column<Equipment>[] = useMemo(
@@ -226,24 +298,12 @@ const MyAssets = () => {
       },
       { key: 'status', label: 'Trạng thái', render: r => <StatusBadge status={r.status} label={equipmentStatusLabels[r.status]} /> },
       { key: 'capitalizedDate', label: 'Ngày bàn giao', render: r => formatDate(r.capitalizedDate) },
-      { key: 'originalCost', label: 'Nguyên giá', render: r => formatCurrency(r.originalCost), className: 'text-right' },
-      {
-        key: 'currentValue',
-        label: 'GT còn lại',
-        render: r => {
-          const dep = calculateDepreciation(r.originalCost, r.salvageValue, r.depreciationMonths, r.capitalizedDate);
-          return formatCurrency(dep.currentValue);
-        },
-        className: 'text-right',
-      },
       {
         key: 'loss',
         label: 'Báo mất',
         className: 'w-[7rem]',
         render: r => {
-          const can =
-            empId &&
-            (r.status === 'IN_USE' || r.status === 'PENDING_ISSUE');
+          const can = empId && r.status === 'IN_USE';
           return (
             <Button
               type="button"
@@ -251,10 +311,7 @@ const MyAssets = () => {
               size="sm"
               className="h-8 text-xs"
               disabled={!can || lossBusy}
-              onClick={() => {
-                setLossReason('');
-                setLossDialog({ kind: 'equipment', equipment: r });
-              }}
+              onClick={() => setLossDialog({ kind: 'equipment', equipment: r })}
             >
               Báo mất
             </Button>
@@ -295,6 +352,14 @@ const MyAssets = () => {
       },
     },
     {
+      key: 'status',
+      label: 'Trạng thái',
+      render: r => {
+        const { status, label } = getConsumableAssignmentDisplayStatus(r, repairRequests);
+        return <StatusBadge status={status} label={label} />;
+      },
+    },
+    {
       key: 'scope',
       label: 'Phạm vi',
       render: r => (
@@ -324,7 +389,8 @@ const MyAssets = () => {
         className: 'w-[7rem]',
         render: r => {
           const held = consumableQuantityHeld(r);
-          const can = empId && held > 0;
+          const st = getConsumableAssignmentDisplayStatus(r, repairRequests).status;
+          const can = empId && held > 0 && st === 'IN_USE';
           return (
             <Button
               type="button"
@@ -333,7 +399,6 @@ const MyAssets = () => {
               className="h-8 text-xs"
               disabled={!can || lossBusy}
               onClick={() => {
-                setLossReason('');
                 setLossQty(Math.min(held, 1));
                 setLossDialog({ kind: 'consumable', assignment: r });
               }}
@@ -344,19 +409,19 @@ const MyAssets = () => {
         },
       },
     ],
-    [assetItems, empId, myDeptId, myLocId, isDeptCoordinator, deptPeerIds, lossBusy],
+    [assetItems, empId, myDeptId, myLocId, isDeptCoordinator, deptPeerIds, lossBusy, repairRequests],
   );
-
-  const emptyHint = !empId
-    ? 'Chưa xác định nhân viên — đăng nhập lại sau khi Admin gán liên kết tài khoản với hồ sơ nhân viên.'
-    : 'Dữ liệu lấy từ bàn giao sau khi kho ghi nhận xuất cấp phát (thiết bị theo mã TB; vật tư theo số lượng đã cấp trừ đã thu hồi).';
 
   return (
     <div className="page-container">
       <div className="page-header">
         <div className="space-y-2">
           <h1 className="page-title">Tài sản của tôi</h1>
-          <p className="text-sm text-muted-foreground max-w-3xl">{emptyHint}</p>
+          {!empId ? (
+            <p className="text-sm text-muted-foreground max-w-3xl">
+              Chưa xác định nhân viên — đăng nhập lại sau khi Admin gán liên kết tài khoản với hồ sơ nhân viên.
+            </p>
+          ) : null}
           {empId && (
             <div className="flex flex-wrap gap-x-4 gap-y-1 text-sm">
               <span>
@@ -395,22 +460,53 @@ const MyAssets = () => {
             <div className="text-sm text-muted-foreground">Số lượng thiết bị</div>
             <div className="text-2xl font-bold tabular-nums">{listLoading ? '—' : myEquipments.length}</div>
             <div className="text-xs text-muted-foreground mt-1">đơn vị: chiếc</div>
+            <div className="text-xs text-muted-foreground mt-2 pt-2 border-t border-border/60">
+              Vật tư:{' '}
+              <span className="font-medium text-foreground tabular-nums">
+                {listLoading ? '—' : myConsumables.length}
+              </span>{' '}
+              dòng
+              {!listLoading && myConsumables.length > 0 && (
+                <>
+                  {' '}
+                  · tổng SL còn giữ{' '}
+                  <span className="font-medium text-emerald-800 tabular-nums">
+                    {totalConsumableQtyHeld.toLocaleString('vi-VN')}
+                  </span>
+                </>
+              )}
+            </div>
           </CardContent>
         </Card>
         <Card>
           <CardContent className="pt-6">
-            <div className="text-sm text-muted-foreground">Thiết bị đang sử dụng</div>
+            <div className="text-sm text-muted-foreground">Đang sử dụng</div>
             <div className="text-2xl font-bold text-blue-600 tabular-nums">
               {listLoading ? '—' : equipmentInUseCount}
             </div>
-            <div className="text-xs text-muted-foreground mt-1">trên tổng {listLoading ? '—' : myEquipments.length} chiếc</div>
+            <div className="text-xs text-muted-foreground mt-1">thiết bị · trên tổng {listLoading ? '—' : myEquipments.length} chiếc</div>
+            <div className="text-xs text-muted-foreground mt-2 pt-2 border-t border-border/60">
+              Vật tư:{' '}
+              <span className="font-medium text-emerald-800 tabular-nums">
+                {listLoading ? '—' : consumableInUseRowCount}
+              </span>{' '}
+              dòng đang giữ (chưa trong phiếu sửa chữa)
+            </div>
           </CardContent>
         </Card>
         <Card>
           <CardContent className="pt-6">
-            <div className="text-sm text-muted-foreground">Tổng giá trị TB</div>
-            <div className="text-2xl font-bold text-primary">
-              {listLoading ? '—' : formatCurrency(myEquipments.reduce((s, e) => s + e.originalCost, 0))}
+            <div className="text-sm text-muted-foreground">Đang sửa chữa</div>
+            <div className="text-2xl font-bold text-amber-600 tabular-nums">
+              {listLoading ? '—' : equipmentUnderRepairCount}
+            </div>
+            <div className="text-xs text-muted-foreground mt-1">thiết bị</div>
+            <div className="text-xs text-muted-foreground mt-2 pt-2 border-t border-border/60">
+              Vật tư:{' '}
+              <span className="font-medium text-amber-700 tabular-nums">
+                {listLoading ? '—' : consumableUnderRepairRowCount}
+              </span>{' '}
+              dòng trong phiếu sửa chữa
             </div>
           </CardContent>
         </Card>
@@ -422,6 +518,13 @@ const MyAssets = () => {
             </div>
             <div className="text-xs text-muted-foreground mt-1">
               {listLoading ? '—' : `${totalConsumableQtyHeld.toLocaleString('vi-VN')} SL còn giữ (tổng)`}
+            </div>
+            <div className="text-xs text-muted-foreground mt-2 pt-2 border-t border-border/60">
+              Thiết bị:{' '}
+              <span className="font-medium text-foreground tabular-nums">
+                {listLoading ? '—' : myEquipments.length}
+              </span>{' '}
+              chiếc (danh sách phía trên)
             </div>
           </CardContent>
         </Card>
@@ -438,9 +541,6 @@ const MyAssets = () => {
               </span>
             )}
           </h2>
-          <p className="text-sm text-muted-foreground mt-1">
-            Mỗi dòng 1 chiếc (mã thiết bị + danh mục); ngày bàn giao là ngày ghi nhận xuất cấp phát.
-          </p>
         </div>
         <DataTable
           columns={columns}
@@ -477,9 +577,6 @@ const MyAssets = () => {
               </span>
             )}
           </h2>
-          <p className="text-sm text-muted-foreground mt-1">
-            Số lượng theo từng dòng (đã cấp trừ đã thu hồi); cùng nguồn bàn giao với thiết bị.
-          </p>
         </div>
         <DataTable
           columns={consumableColumns}
@@ -505,7 +602,7 @@ const MyAssets = () => {
           if (!open) setLossDialog(null);
         }}
       >
-        <DialogContent className="max-w-md">
+        <DialogContent className="max-w-lg">
           <DialogHeader>
             <DialogTitle>Báo mất tài sản</DialogTitle>
           </DialogHeader>
@@ -542,12 +639,45 @@ const MyAssets = () => {
             </div>
           )}
           <div className="space-y-2">
-            <Label htmlFor="loss-reason">Lý do / mô tả</Label>
+            <Label htmlFor="loss-time">Thời gian <span className="text-destructive">*</span></Label>
+            <Input
+              id="loss-time"
+              type="datetime-local"
+              value={lossContextAt}
+              onChange={e => setLossContextAt(e.target.value)}
+              disabled={lossBusy}
+            />
+            <p className="text-xs text-muted-foreground">Chọn ngày giờ (giờ địa phương). Có thể chỉnh sau khi điền mặc định.</p>
+          </div>
+          <div className="space-y-2">
+            <Label htmlFor="loss-place">Địa điểm <span className="text-destructive">*</span></Label>
+            <Textarea
+              id="loss-place"
+              placeholder="Điền từ vị trí / phòng ban bàn giao — có thể sửa…"
+              value={lossContextLocation}
+              onChange={e => setLossContextLocation(e.target.value)}
+              rows={2}
+              disabled={lossBusy}
+            />
+          </div>
+          <div className="space-y-2">
+            <Label htmlFor="loss-reason">Lý do <span className="text-destructive">*</span></Label>
             <Textarea
               id="loss-reason"
-              placeholder="Mô tả ngắn gọn…"
+              placeholder="Nêu lý do báo mất…"
               value={lossReason}
               onChange={e => setLossReason(e.target.value)}
+              rows={2}
+              disabled={lossBusy}
+            />
+          </div>
+          <div className="space-y-2">
+            <Label htmlFor="loss-desc">Mô tả mất <span className="text-destructive">*</span></Label>
+            <Textarea
+              id="loss-desc"
+              placeholder="Mô tả chi tiết tình huống mất…"
+              value={lossDescription}
+              onChange={e => setLossDescription(e.target.value)}
               rows={3}
               disabled={lossBusy}
             />

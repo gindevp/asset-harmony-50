@@ -323,11 +323,19 @@ export function buildAllocationRequests(
 
 export function mapRepairDto(r: RepairRequestDto): RepairRequest {
   const sortedLines = [...(r.lines ?? [])].sort((a, b) => (a.lineNo ?? 0) - (b.lineNo ?? 0));
-  const lineIds = sortedLines
+  const deviceLineIds = sortedLines
+    .filter(l => String(l.lineType ?? 'DEVICE').toUpperCase() !== 'CONSUMABLE')
     .map(l => l.equipment?.id)
     .filter((x): x is number => x != null)
     .map(String);
-  const equipmentLineIds = lineIds.length > 0 ? lineIds : r.equipment?.id != null ? [String(r.equipment.id)] : [];
+  const equipmentLineIds =
+    deviceLineIds.length > 0 ? deviceLineIds : r.equipment?.id != null ? [String(r.equipment.id)] : [];
+  const consumableRepairLines = sortedLines
+    .filter(l => String(l.lineType ?? '').toUpperCase() === 'CONSUMABLE' && l.assetItem?.id != null)
+    .map(l => ({
+      assetItemId: String(l.assetItem!.id),
+      quantity: l.quantity ?? 1,
+    }));
   const equipmentId = equipmentLineIds[0] ?? String(r.equipment?.id ?? '');
   return {
     id: String(r.id),
@@ -336,6 +344,7 @@ export function mapRepairDto(r: RepairRequestDto): RepairRequest {
     departmentId: String(r.requester?.department?.id ?? ''),
     equipmentId,
     equipmentLineIds: equipmentLineIds.length > 0 ? equipmentLineIds : undefined,
+    consumableRepairLines: consumableRepairLines.length > 0 ? consumableRepairLines : undefined,
     issue: r.problemCategory ?? '',
     description: r.description ?? '',
     attachmentNote: r.attachmentNote ?? undefined,
@@ -357,6 +366,7 @@ export function buildReturnRequests(
     const mapped: ReturnRequestLine[] = rlines.map(l => ({
       id: String(l.id),
       itemId: String(l.assetItem?.id ?? ''),
+      lineType: String(l.lineType ?? 'DEVICE').toUpperCase() === 'CONSUMABLE' ? 'CONSUMABLE' : 'DEVICE',
       equipmentId: l.equipment?.id != null ? String(l.equipment.id) : undefined,
       quantity: l.quantity ?? 0,
       selected: l.selected === true,
