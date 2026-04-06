@@ -37,11 +37,16 @@ import EmployeeLossReports from "./pages/employee/EmployeeLossReports";
 import RequestNew from "./pages/shared/RequestNew";
 import RequestNewRepair from "./pages/shared/RequestNewRepair";
 import RequestNewReturn from "./pages/shared/RequestNewReturn";
+import RequestNewLoss from "./pages/shared/RequestNewLoss";
 import { Navigate } from "react-router-dom";
+
+/** Dữ liệu danh mục / list ít đổi — cache ngắn để chuyển màn lần sau không refetch lại cả loạt API (cảm giác nhanh hơn rõ). */
+const DEFAULT_QUERY_STALE_MS = 60_000;
 
 const queryClient = new QueryClient({
   defaultOptions: {
     queries: {
+      staleTime: DEFAULT_QUERY_STALE_MS,
       retry: (failureCount, error) => {
         if (error instanceof ApiError && (error.status === 401 || error.status === 403)) return false;
         return failureCount < 2;
@@ -127,6 +132,7 @@ const App = () => {
             <Route path="request-new" element={<RequestNew />} />
             <Route path="request-new/repair" element={<RequestNewRepair />} />
             <Route path="request-new/return" element={<RequestNewReturn />} />
+            <Route path="request-new/loss" element={<RequestNewLoss />} />
           </Route>
 
           <Route path="*" element={<NotFound />} />

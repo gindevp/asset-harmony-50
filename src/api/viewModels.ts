@@ -256,7 +256,13 @@ function allocationAssigneeSummary(req: AllocationRequestDto): { type: Allocatio
   switch (at) {
     case 'DEPARTMENT': {
       const d = req.beneficiaryDepartment;
-      return { type: 'DEPARTMENT', text: d ? `${d.code ?? d.id} — ${d.name ?? ''}` : '—' };
+      const e = req.beneficiaryEmployee;
+      const deptText = d ? `${d.code ?? d.id} — ${d.name ?? ''}` : '—';
+      if (e?.id != null) {
+        const en = `${(e.code ?? '').trim() || e.id} — ${(e.fullName ?? '').trim() || '—'}`;
+        return { type: 'DEPARTMENT', text: `${deptText} · NV nhận: ${en}` };
+      }
+      return { type: 'DEPARTMENT', text: deptText };
     }
     case 'LOCATION': {
       const loc = req.beneficiaryLocation;

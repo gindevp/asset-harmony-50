@@ -4,6 +4,7 @@ import { Link, useLocation, useNavigate, useSearchParams } from 'react-router-do
 import { useQueryClient } from '@tanstack/react-query';
 import { AttachmentNoteView } from '@/components/shared/AttachmentNoteView';
 import { DataTable, type Column } from '@/components/shared/DataTable';
+import { FilterBar, type FilterField } from '@/components/shared/FilterBar';
 import { StatusBadge } from '@/components/shared/StatusBadge';
 import { Button } from '@/components/ui/button';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
@@ -38,10 +39,12 @@ import { ApiError, apiGet, apiPatch, parseProblemDetailJson } from '@/api/http';
 import type { RepairRequestDto, RepairRequestLineDto } from '@/api/types';
 import { formatBizCodeDisplay, formatEquipmentCodeDisplay } from '@/utils/formatCodes';
 import {
-  allocationRequestListNoteDisplay,
-  buildAllocationDetailRows,
-  sumAllocationLineQuantities,
-} from '@/utils/allocationDisplayRows';
+  repairLineAssetCatalogCode,
+  repairLineDisplayName,
+  repairLineQuantityDisplay,
+  repairLineSerialDisplay,
+} from '@/utils/repairRequestLineDisplay';
+import { buildAllocationDetailRows, sumAllocationLineQuantities } from '@/utils/allocationDisplayRows';
 import {
   canCancelAllocationAsEmployee,
   canCancelReturnAsEmployee,
@@ -50,8 +53,36 @@ import {
   canEditReturnRequestFields,
 } from '@/utils/requestRecordActions';
 import { cn } from '@/lib/utils';
+import { LoadingIndicator, PageLoading } from '@/components/shared/page-loading';
 
 type RequestSection = 'allocation' | 'repair' | 'return';
+
+function matchesAllocationSearch(r: AllocationRequest, q: string): boolean {
+  if (!q.trim()) return true;
+  const s = q.trim().toLowerCase();
+  const blob = [r.code, formatBizCodeDisplay(r.code), r.reason, r.assigneeSummary, r.beneficiaryNote]
+    .filter(Boolean)
+    .join(' ')
+    .toLowerCase();
+  return blob.includes(s);
+}
+
+function matchesRepairSearch(r: RepairRequest, q: string): boolean {
+  if (!q.trim()) return true;
+  const s = q.trim().toLowerCase();
+  const blob = [r.code, formatBizCodeDisplay(r.code), r.issue, r.description, r.attachmentNote]
+    .filter(Boolean)
+    .join(' ')
+    .toLowerCase();
+  return blob.includes(s);
+}
+
+function matchesReturnSearch(r: ReturnRequest, q: string): boolean {
+  if (!q.trim()) return true;
+  const s = q.trim().toLowerCase();
+  const blob = [r.code, formatBizCodeDisplay(r.code), r.reason].filter(Boolean).join(' ').toLowerCase();
+  return blob.includes(s);
+}
 
 const EmployeeRequests = () => {
   const qc = useQueryClient();
@@ -108,6 +139,57 @@ const EmployeeRequests = () => {
 
   const isAdminRequestHub = location.pathname === '/admin/request-create';
 
+  const [filters, setFilters] = useState({ search: '', status: '' });
+  useEffect(() => {
+    setFilters({ search: '', status: '' });
+  }, [section]);
+
+  const filterFields: FilterField[] = useMemo(() => {
+    const statusOpts =
+      section === 'allocation'
+        ? Object.entries(allocationStatusLabels).map(([value, label]) => ({ value, label }))
+        : section === 'repair'
+          ? Object.entries(repairStatusLabels).map(([value, label]) => ({ value, label }))
+          : Object.entries(returnStatusLabels).map(([value, label]) => ({ value, label }));
+    const placeholder =
+      section === 'allocation'
+        ? 'Mã, lý do, đối tượng nhận…'
+        : section === 'repair'
+          ? 'Mã, vấn đề, mô tả, đính kèm…'
+          : 'Mã, ghi chú…';
+    return [
+      {
+        key: 'search',
+        label: 'Tìm kiếm',
+        type: 'text',
+        placeholder,
+        inputClassName: 'min-w-[12rem] max-w-xl w-full sm:w-72 md:w-96',
+      },
+      { key: 'status', label: 'Trạng thái', type: 'select', options: statusOpts },
+    ];
+  }, [section]);
+
+  const filteredAllocations = useMemo(() => {
+    let list = myAllocations;
+    if (filters.status) list = list.filter(r => r.status === filters.status);
+    if (filters.search.trim()) list = list.filter(r => matchesAllocationSearch(r, filters.search));
+    return list;
+  }, [myAllocations, filters]);
+
+  const filteredRepairs = useMemo(() => {
+    let list = myRepairs;
+    if (filters.status) list = list.filter(r => r.status === filters.status);
+    if (filters.search.trim()) list = list.filter(r => matchesRepairSearch(r, filters.search));
+    return list;
+  }, [myRepairs, filters]);
+
+  const filteredReturns = useMemo(() => {
+    let list = myReturns;
+    if (filters.status) list = list.filter(r => r.status === filters.status);
+    if (filters.search.trim()) list = list.filter(r => matchesReturnSearch(r, filters.search));
+    return list;
+  }, [myReturns, filters]);
+
   const invalidate = async () => {
     await qc.invalidateQueries({ queryKey: ['api', 'allocation-requests-view'] });
     await qc.invalidateQueries({ queryKey: ['api', 'repair-requests-view'] });
@@ -128,6 +210,9 @@ const EmployeeRequests = () => {
   const assetItems = useMemo(() => (iQ.data ?? []).map(mapAssetItemDto), [iQ.data]);
   const assetLinesApi = alQ.data ?? [];
 
+  const hubLoading =
+    arQ.isLoading || rrQ.isLoading || retQ.isLoading || eqQ.isLoading || iQ.isLoading || alQ.isLoading;
+
   type EmpDetail =
     | null
     | { section: 'allocation'; mode: 'view' | 'edit'; row: AllocationRequest }
@@ -136,7 +221,6 @@ const EmployeeRequests = () => {
 
   const [empDetail, setEmpDetail] = useState<EmpDetail>(null);
   const [eaReason, setEaReason] = useState('');
-  const [eaAttach, setEaAttach] = useState('');
   const [erIssue, setErIssue] = useState('');
   const [erDesc, setErDesc] = useState('');
   const [erAttach, setErAttach] = useState('');
@@ -165,27 +249,23 @@ const EmployeeRequests = () => {
       {
         key: 'item',
         label: 'Tài sản',
-        render: l => getItemName(String(l.assetItem?.id ?? ''), assetItems),
+        render: l => repairLineDisplayName(l, assetItems),
       },
       {
         key: 'equipmentCode',
-        label: 'Mã TB',
-        render: l =>
-          l.equipment?.equipmentCode ? formatEquipmentCodeDisplay(l.equipment.equipmentCode) : '—',
+        label: 'Mã tài sản',
+        render: l => repairLineAssetCatalogCode(l, assetItems),
       },
       {
         key: 'serial',
         label: 'Serial',
-        render: l =>
-          String(l.lineType ?? 'DEVICE').toUpperCase() === 'CONSUMABLE'
-            ? '—'
-            : (l.equipment?.serial ?? '—'),
+        render: l => repairLineSerialDisplay(l),
       },
       {
         key: 'quantity',
         label: 'SL',
         className: 'text-right',
-        render: l => l.quantity ?? 0,
+        render: l => repairLineQuantityDisplay(l),
       },
     ],
     [assetItems],
@@ -195,7 +275,6 @@ const EmployeeRequests = () => {
     if (!empDetail || empDetail.mode !== 'edit') return;
     if (empDetail.section === 'allocation') {
       setEaReason(empDetail.row.reason ?? '');
-      setEaAttach(empDetail.row.attachmentNote ?? '');
     } else if (empDetail.section === 'repair') {
       setErIssue(empDetail.row.issue ?? '');
       setErDesc(empDetail.row.description ?? '');
@@ -212,7 +291,6 @@ const EmployeeRequests = () => {
       await apiPatch(`/api/allocation-requests/${empDetail.row.id}`, {
         id: Number(empDetail.row.id),
         reason: eaReason.trim() || undefined,
-        attachmentNote: eaAttach.trim() || undefined,
       });
       toast.success('Đã lưu thay đổi');
       setEmpDetail(null);
@@ -303,7 +381,7 @@ const EmployeeRequests = () => {
           <Plus className="h-4 w-4 mr-1 shrink-0" />
           <span className="hidden sm:inline">{createButtonLabel}</span>
           <span className="sm:hidden">{createButtonLabelShort}</span>
-        </Button>
+            </Button>
       </div>
 
       {isAdminRequestHub ? (
@@ -347,17 +425,30 @@ const EmployeeRequests = () => {
         </nav>
       ) : null}
 
+      {hubLoading ? (
+        <PageLoading minHeight="min-h-[45vh]" />
+      ) : (
+        <>
+      <div className="mb-4">
+        <FilterBar
+          fields={filterFields}
+          values={filters}
+          onChange={(k, v) => setFilters(prev => ({ ...prev, [k]: v }))}
+          onReset={() => setFilters({ search: '', status: '' })}
+        />
+      </div>
+
       {section === 'allocation' && (
-        <DataTable
-          columns={[
-            {
-              key: 'code',
-              label: 'Mã YC',
-              render: (r: any) => (
-                <span className="font-mono text-sm font-medium">{formatBizCodeDisplay(r.code)}</span>
-              ),
-            },
-            { key: 'reason', label: 'Lý do' },
+          <DataTable
+            columns={[
+              {
+                key: 'code',
+                label: 'Mã YC',
+                render: (r: any) => (
+                  <span className="font-mono text-sm font-medium">{formatBizCodeDisplay(r.code)}</span>
+                ),
+              },
+              { key: 'reason', label: 'Lý do' },
             {
               key: 'attach',
               label: 'Đính kèm',
@@ -371,35 +462,26 @@ const EmployeeRequests = () => {
                   <span className="text-muted-foreground">—</span>
                 ),
             },
-            {
-              key: 'assignee',
-              label: 'Đối tượng nhận',
-              render: (r: any) => (
-                <span className="max-w-[14rem] truncate block" title={r.assigneeSummary}>
-                  {r.assigneeSummary}
-                </span>
-              ),
-            },
-            {
-              key: 'benNote',
-              label: 'Ghi chú',
-              render: (r: AllocationRequest) => (
-                <span className="max-w-[14rem] truncate block" title={allocationRequestListNoteDisplay(r) || undefined}>
-                  {allocationRequestListNoteDisplay(r) || '—'}
-                </span>
-              ),
-            },
+              {
+                key: 'assignee',
+                label: 'Đối tượng nhận',
+                render: (r: any) => (
+                  <span className="max-w-[14rem] truncate block" title={r.assigneeSummary}>
+                    {r.assigneeSummary}
+                  </span>
+                ),
+              },
             { key: 'lines', label: 'Số lượng', render: (r: AllocationRequest) => sumAllocationLineQuantities(r.lines) },
-            {
-              key: 'status',
-              label: 'Trạng thái',
-              render: (r: any) => (
-                <StatusBadge status={r.status} label={allocationStatusLabels[r.status] ?? r.status} />
-              ),
-            },
-            { key: 'createdAt', label: 'Ngày tạo', render: (r: any) => formatDate(r.createdAt) },
-            {
-              key: 'act',
+              {
+                key: 'status',
+                label: 'Trạng thái',
+                render: (r: any) => (
+                  <StatusBadge status={r.status} label={allocationStatusLabels[r.status] ?? r.status} />
+                ),
+              },
+              { key: 'createdAt', label: 'Ngày tạo', render: (r: any) => formatDate(r.createdAt) },
+              {
+                key: 'act',
               label: 'Thao tác',
               className: 'min-w-[7.5rem]',
               render: (r: AllocationRequest) => (
@@ -442,28 +524,32 @@ const EmployeeRequests = () => {
               ),
             },
           ]}
-          data={myAllocations}
-          emptyMessage="Bạn chưa có yêu cầu cấp phát nào"
+          data={filteredAllocations}
+          emptyMessage={
+            myAllocations.length === 0
+              ? 'Bạn chưa có yêu cầu cấp phát nào'
+              : 'Không có yêu cầu nào khớp tìm kiếm hoặc lọc trạng thái.'
+          }
         />
       )}
 
       {section === 'repair' && (
-        <DataTable
-          columns={[
-            {
-              key: 'code',
-              label: 'Mã YC',
-              render: (r: any) => (
-                <span className="font-mono text-sm font-medium">{formatBizCodeDisplay(r.code)}</span>
-              ),
-            },
-            { key: 'issue', label: 'Vấn đề' },
-            {
-              key: 'status',
-              label: 'Trạng thái',
-              render: (r: any) => <StatusBadge status={r.status} label={repairStatusLabels[r.status] ?? r.status} />,
-            },
-            { key: 'createdAt', label: 'Ngày tạo', render: (r: any) => formatDate(r.createdAt) },
+          <DataTable
+            columns={[
+              {
+                key: 'code',
+                label: 'Mã YC',
+                render: (r: any) => (
+                  <span className="font-mono text-sm font-medium">{formatBizCodeDisplay(r.code)}</span>
+                ),
+              },
+              { key: 'issue', label: 'Vấn đề' },
+              {
+                key: 'status',
+                label: 'Trạng thái',
+                render: (r: any) => <StatusBadge status={r.status} label={repairStatusLabels[r.status] ?? r.status} />,
+              },
+              { key: 'createdAt', label: 'Ngày tạo', render: (r: any) => formatDate(r.createdAt) },
             {
               key: 'act',
               label: 'Thao tác',
@@ -496,30 +582,34 @@ const EmployeeRequests = () => {
               ),
             },
           ]}
-          data={myRepairs}
-          emptyMessage="Bạn chưa có yêu cầu sửa chữa nào"
+          data={filteredRepairs}
+          emptyMessage={
+            myRepairs.length === 0
+              ? 'Bạn chưa có yêu cầu sửa chữa nào'
+              : 'Không có yêu cầu nào khớp tìm kiếm hoặc lọc trạng thái.'
+          }
         />
       )}
 
       {section === 'return' && (
-        <DataTable
-          columns={[
-            {
-              key: 'code',
-              label: 'Mã YC',
-              render: (r: any) => (
-                <span className="font-mono text-sm font-medium">{formatBizCodeDisplay(r.code)}</span>
-              ),
-            },
-            { key: 'reason', label: 'Lý do' },
-            {
-              key: 'status',
-              label: 'Trạng thái',
-              render: (r: any) => <StatusBadge status={r.status} label={returnStatusLabels[r.status] ?? r.status} />,
-            },
-            { key: 'createdAt', label: 'Ngày tạo', render: (r: any) => formatDate(r.createdAt) },
-            {
-              key: 'act',
+          <DataTable
+            columns={[
+              {
+                key: 'code',
+                label: 'Mã YC',
+                render: (r: any) => (
+                  <span className="font-mono text-sm font-medium">{formatBizCodeDisplay(r.code)}</span>
+                ),
+              },
+              { key: 'reason', label: 'Lý do' },
+              {
+                key: 'status',
+                label: 'Trạng thái',
+                render: (r: any) => <StatusBadge status={r.status} label={returnStatusLabels[r.status] ?? r.status} />,
+              },
+              { key: 'createdAt', label: 'Ngày tạo', render: (r: any) => formatDate(r.createdAt) },
+              {
+                key: 'act',
               label: 'Thao tác',
               className: 'min-w-[7.5rem]',
               render: (r: ReturnRequest) => (
@@ -562,9 +652,15 @@ const EmployeeRequests = () => {
               ),
             },
           ]}
-          data={myReturns}
-          emptyMessage="Bạn chưa có yêu cầu thu hồi nào"
+          data={filteredReturns}
+          emptyMessage={
+            myReturns.length === 0
+              ? 'Bạn chưa có yêu cầu thu hồi nào'
+              : 'Không có yêu cầu nào khớp tìm kiếm hoặc lọc trạng thái.'
+          }
         />
+      )}
+        </>
       )}
 
       <Dialog open={!!empDetail} onOpenChange={open => { if (!open) setEmpDetail(null); }}>
@@ -594,10 +690,6 @@ const EmployeeRequests = () => {
                     <Label>Lý do</Label>
                     <Textarea value={eaReason} onChange={e => setEaReason(e.target.value)} rows={3} disabled={empBusy} />
                   </div>
-                  <div className="space-y-2">
-                    <Label>Ghi chú</Label>
-                    <Textarea value={eaAttach} onChange={e => setEaAttach(e.target.value)} rows={2} disabled={empBusy} />
-                  </div>
                   <div className="flex gap-2">
                     <Button type="button" size="sm" disabled={empBusy} onClick={() => void saveEmpAllocation()}>
                       Lưu
@@ -612,7 +704,7 @@ const EmployeeRequests = () => {
                   <div><span className="text-muted-foreground">Lý do:</span> {empDetail.row.reason}</div>
                   {empDetail.row.attachmentNote ? (
                     <div className="space-y-1">
-                      <div className="text-muted-foreground">Ghi chú</div>
+                      <div className="text-muted-foreground">Đính kèm</div>
                       <AttachmentNoteView text={empDetail.row.attachmentNote} showCaption={false} />
                     </div>
                   ) : null}
@@ -659,7 +751,7 @@ const EmployeeRequests = () => {
             <div className="space-y-3 text-sm">
               <div className="space-y-2">
                 <p className="text-sm font-medium text-foreground">Thiết bị / vật tư</p>
-                {repairEmpDetailQ.isLoading && <p className="text-sm text-muted-foreground">Đang tải dòng…</p>}
+                {repairEmpDetailQ.isLoading && <LoadingIndicator label="Đang tải dòng…" />}
                 {repairEmpDetailQ.isError && (
                   <p className="text-sm text-muted-foreground">Không tải được chi tiết dòng — thử đóng và mở lại.</p>
                 )}

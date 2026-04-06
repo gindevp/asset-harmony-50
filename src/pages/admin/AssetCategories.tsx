@@ -1,4 +1,4 @@
-import { useState, useMemo } from 'react';
+import { useState, useMemo, useEffect } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
 import { DataTable, Column } from '@/components/shared/DataTable';
 import { FilterBar, FilterField } from '@/components/shared/FilterBar';
@@ -90,15 +90,17 @@ const AssetCategories = () => {
     void qc.invalidateQueries({ queryKey: ['api', 'asset-items'] });
   };
 
-  const [tab, setTab] = useState<TabKey>('items');
+  const [tab, setTab] = useState<TabKey>('groups');
   const [filters, setFilters] = useState<Record<string, string>>({});
+  const [groupFilters, setGroupFilters] = useState<Record<string, string>>({});
+  const [lineFilters, setLineFilters] = useState<Record<string, string>>({});
   const [page, setPage] = useState(1);
   const [pageGroups, setPageGroups] = useState(1);
   const [pageLines, setPageLines] = useState(1);
   const [busy, setBusy] = useState(false);
 
   const [addOpen, setAddOpen] = useState(false);
-  const [addKind, setAddKind] = useState<TabKey>('items');
+  const [addKind, setAddKind] = useState<TabKey>('groups');
   const [groupAdd, setGroupAdd] = useState({ name: '', description: '' });
   const [lineAdd, setLineAdd] = useState({
     groupId: '',
@@ -132,6 +134,14 @@ const AssetCategories = () => {
   const [editMgmt, setEditMgmt] = useState<'DEVICE' | 'CONSUMABLE'>('DEVICE');
   const [editDep, setEditDep] = useState(false);
   const [editSer, setEditSer] = useState(false);
+
+  useEffect(() => {
+    setPageGroups(1);
+  }, [groupFilters]);
+
+  useEffect(() => {
+    setPageLines(1);
+  }, [lineFilters]);
 
   const openAdd = () => {
     setAddKind(tab);
@@ -314,6 +324,45 @@ const AssetCategories = () => {
     return true;
   });
 
+  const filteredLines = useMemo(() => {
+    return assetLines.filter(line => {
+      if (lineFilters.search) {
+        const s = lineFilters.search.toLowerCase();
+        if (
+          !line.code.toLowerCase().includes(s) &&
+          !line.name.toLowerCase().includes(s)
+        ) {
+          return false;
+        }
+      }
+      if (lineFilters.groupId && line.groupId !== lineFilters.groupId) return false;
+      if (lineFilters.lineType) {
+        const t = (line.typeId || DEFAULT_GROUP_ASSET_TYPE).toUpperCase();
+        if (t !== lineFilters.lineType) return false;
+      }
+      return true;
+    });
+  }, [assetLines, lineFilters]);
+
+  const filteredGroups = useMemo(() => {
+    return assetGroups.filter(g => {
+      if (groupFilters.search) {
+        const s = groupFilters.search.toLowerCase();
+        if (
+          !g.code.toLowerCase().includes(s) &&
+          !g.name.toLowerCase().includes(s)
+        ) {
+          return false;
+        }
+      }
+      if (groupFilters.groupType) {
+        const t = (g.typeId || DEFAULT_GROUP_ASSET_TYPE).toUpperCase();
+        if (t !== groupFilters.groupType) return false;
+      }
+      return true;
+    });
+  }, [assetGroups, groupFilters]);
+
   const itemColumns: Column<AssetItem>[] = [
     { key: 'code', label: 'Mã', render: r => <span className="font-mono text-sm font-medium">{r.code}</span> },
     { key: 'name', label: 'Tên tài sản' },
@@ -467,6 +516,41 @@ const AssetCategories = () => {
       ],
     },
   ];
+
+  const groupFilterFields: FilterField[] = [
+    { key: 'search', label: 'Tìm kiếm', type: 'text', placeholder: 'Mã, tên nhóm...' },
+    {
+      key: 'groupType',
+      label: 'Loại tài sản',
+      type: 'select',
+      options: [
+        { value: 'DEVICE', label: 'Thiết bị' },
+        { value: 'CONSUMABLE', label: 'Vật tư' },
+      ],
+    },
+  ];
+
+  const lineFilterFields: FilterField[] = useMemo(
+    () => [
+      { key: 'search', label: 'Tìm kiếm', type: 'text', placeholder: 'Mã, tên dòng...' },
+      {
+        key: 'groupId',
+        label: 'Nhóm',
+        type: 'select',
+        options: assetGroups.map(g => ({ value: g.id, label: g.name })),
+      },
+      {
+        key: 'lineType',
+        label: 'Loại tài sản',
+        type: 'select',
+        options: [
+          { value: 'DEVICE', label: 'Thiết bị' },
+          { value: 'CONSUMABLE', label: 'Vật tư' },
+        ],
+      },
+    ],
+    [assetGroups],
+  );
 
   const addFormBody = () => {
     if (addKind === 'groups') {
@@ -646,30 +730,42 @@ const AssetCategories = () => {
         }}
       >
         <TabsList>
-          <TabsTrigger value="items">Item tài sản</TabsTrigger>
           <TabsTrigger value="groups">Nhóm</TabsTrigger>
           <TabsTrigger value="lines">Dòng</TabsTrigger>
+          <TabsTrigger value="items">Item tài sản</TabsTrigger>
         </TabsList>
 
-        <TabsContent value="items" className="space-y-4 mt-4">
-          <FilterBar fields={filterFields} values={filters} onChange={(k, v) => setFilters(p => ({ ...p, [k]: v }))} onReset={() => setFilters({})} />
-          <DataTable columns={itemColumns} data={filteredItems} currentPage={page} onPageChange={setPage} />
-        </TabsContent>
-        <TabsContent value="groups" className="mt4">
+        <TabsContent value="groups" className="mt-4 space-y-4">
+          <FilterBar
+            fields={groupFilterFields}
+            values={groupFilters}
+            onChange={(k, v) => setGroupFilters(p => ({ ...p, [k]: v }))}
+            onReset={() => setGroupFilters({})}
+          />
           <DataTable
             columns={groupColumns}
-            data={assetGroups}
+            data={filteredGroups}
             currentPage={pageGroups}
             onPageChange={setPageGroups}
           />
         </TabsContent>
-        <TabsContent value="lines" className="mt-4">
+        <TabsContent value="lines" className="mt-4 space-y-4">
+          <FilterBar
+            fields={lineFilterFields}
+            values={lineFilters}
+            onChange={(k, v) => setLineFilters(p => ({ ...p, [k]: v }))}
+            onReset={() => setLineFilters({})}
+          />
           <DataTable
             columns={lineColumns}
-            data={assetLines}
+            data={filteredLines}
             currentPage={pageLines}
             onPageChange={setPageLines}
           />
+        </TabsContent>
+        <TabsContent value="items" className="space-y-4 mt-4">
+          <FilterBar fields={filterFields} values={filters} onChange={(k, v) => setFilters(p => ({ ...p, [k]: v }))} onReset={() => setFilters({})} />
+          <DataTable columns={itemColumns} data={filteredItems} currentPage={page} onPageChange={setPage} />
         </TabsContent>
       </Tabs>
 

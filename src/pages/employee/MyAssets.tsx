@@ -1,13 +1,7 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
-import { useQueryClient } from '@tanstack/react-query';
+import { useMemo } from 'react';
 import { DataTable, Column } from '@/components/shared/DataTable';
 import { StatusBadge } from '@/components/shared/StatusBadge';
 import { Card, CardContent } from '@/components/ui/card';
-import { Button } from '@/components/ui/button';
-import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
-import { Input } from '@/components/ui/input';
-import { Label } from '@/components/ui/label';
-import { Textarea } from '@/components/ui/textarea';
 import {
   equipmentStatusLabels,
   getItemCode,
@@ -16,54 +10,92 @@ import {
   formatDate,
 } from '@/data/mockData';
 import { resolveEmployeeIdForRequests, resolveEmployeeLocationIdForRequests } from '@/api/account';
-import { makeBizCode } from '@/api/businessCode';
-import { ApiError, apiPost, getStoredToken, parseProblemDetailJson } from '@/api/http';
-import { hasAnyAuthority } from '@/auth/jwt';
-import type { ConsumableAssignmentDto } from '@/api/types';
 import {
   mapAssetItemDto,
   useAssetItems,
   useConsumableAssignments,
   useEmployees,
   useEnrichedEquipmentList,
+  useLossReportRequests,
   useRepairRequestsView,
+  useReturnRequestsView,
 } from '@/hooks/useEntityApi';
-import type { Equipment } from '@/data/mockData';
 import {
-  consumableQuantityHeld,
-  filterConsumableAssignmentsWithDepartmentPeers,
-  filterEquipmentWithDepartmentPeers,
-  myAssetScopeLabel,
-  resolveMyAssetScopeWithPeers,
-  resolveMyConsumableScopeWithPeers,
+  filterConsumableAssignmentsForMyAccount,
+  filterEquipmentForMyAccount,
   getConsumableAssignmentDisplayStatus,
 } from '@/utils/myEquipment';
-import { formatEquipmentCodeDisplay } from '@/utils/formatCodes';
 import {
-  lossLocationLabelFromConsumableAssignment,
-  lossLocationLabelFromEquipment,
-  lossOccurredAtFromDatetimeLocal,
-  nowDatetimeLocalValue,
-} from '@/utils/lossReportForm';
-import { toast } from 'sonner';
+  groupConsumableAssignmentsByAssetItem,
+  sortEquipmentForDisplay,
+  totalHeldForConsumableGroup,
+  totalReturnedForConsumableGroup,
+  type GroupedConsumableRow,
+} from '@/utils/myHoldingsAggregate';
+import { mapAssetItemIdToConsumablePending } from '@/utils/openAssetRequestBlocks';
+import { formatEquipmentCodeDisplay } from '@/utils/formatCodes';
+import type { Equipment, RepairRequest } from '@/data/mockData';
+import type { ConsumableAssignmentDto } from '@/api/types';
+import { PageLoading } from '@/components/shared/page-loading';
 
-type LossDialogState =
-  | null
-  | { kind: 'equipment'; equipment: Equipment }
-  | { kind: 'consumable'; assignment: ConsumableAssignmentDto };
+type MyConsumableGroupRow = GroupedConsumableRow & { id: string };
+
+function getConsumableGroupDisplayStatus(
+  g: GroupedConsumableRow,
+  repairRequests: RepairRequest[],
+  pending: ReturnType<typeof mapAssetItemIdToConsumablePending>,
+  approvedLossSet: Set<string>,
+): { status: string; label: string } {
+  const held = totalHeldForConsumableGroup(g.assignments);
+  const pend = pending.get(g.assetItemId);
+  if (held <= 0) {
+    const anyLost = g.assignments.some(a => approvedLossSet.has(String(a.id ?? '')));
+    if (anyLost) return { status: 'LOST', label: equipmentStatusLabels.LOST };
+    return { status: 'IN_STOCK', label: equipmentStatusLabels.IN_STOCK };
+  }
+  if ((pend?.repairQty ?? 0) > 0) {
+    return { status: 'UNDER_REPAIR', label: equipmentStatusLabels.UNDER_REPAIR };
+  }
+  for (const a of g.assignments) {
+    const st = getConsumableAssignmentDisplayStatus(a, repairRequests, approvedLossSet);
+    if (st.status === 'UNDER_REPAIR') return st;
+  }
+  return { status: 'IN_USE', label: equipmentStatusLabels.IN_USE };
+}
 
 const MyAssets = () => {
-  const qc = useQueryClient();
   const eqQ = useEnrichedEquipmentList();
   const caQ = useConsumableAssignments();
   const repairQ = useRepairRequestsView();
+  const returnQ = useReturnRequestsView();
+  const lossQ = useLossReportRequests();
   const iQ = useAssetItems();
   const empQ = useEmployees();
   const equipments = eqQ.data ?? [];
   const repairRequests = repairQ.data ?? [];
+  const returnRequests = returnQ.data ?? [];
   const consumableAssignments = caQ.data ?? [];
   const assetItems = useMemo(() => (iQ.data ?? []).map(mapAssetItemDto), [iQ.data]);
-  const listLoading = eqQ.isLoading || caQ.isLoading || repairQ.isLoading;
+  const listLoading =
+    eqQ.isLoading || caQ.isLoading || repairQ.isLoading || returnQ.isLoading || lossQ.isLoading;
+
+  const approvedLossConsumableIds = useMemo(() => {
+    const s = new Set<string>();
+    for (const r of lossQ.data ?? []) {
+      if (r.status !== 'APPROVED') continue;
+      if (r.lossKind === 'CONSUMABLE' && r.consumableAssignment?.id != null) {
+        s.add(String(r.consumableAssignment.id));
+      }
+      if (r.lossKind === 'COMBINED' && r.lossEntries?.length) {
+        for (const line of r.lossEntries) {
+          if (String(line.lineType ?? '').toUpperCase() === 'CONSUMABLE' && line.consumableAssignmentId != null) {
+            s.add(String(line.consumableAssignmentId));
+          }
+        }
+      }
+    }
+    return s;
+  }, [lossQ.data]);
 
   const empId = resolveEmployeeIdForRequests();
   const myDeptId = useMemo(() => {
@@ -73,163 +105,40 @@ const MyAssets = () => {
   }, [empId, empQ.data]);
   const myLocId = resolveEmployeeLocationIdForRequests();
 
-  const deptPeerIds = useMemo(() => {
-    if (!myDeptId || !empQ.data) return [] as string[];
-    return empQ.data.filter(e => String(e.department?.id ?? '') === myDeptId).map(e => String(e.id ?? ''));
-  }, [myDeptId, empQ.data]);
-
-  const isDeptCoordinator = hasAnyAuthority(getStoredToken(), ['ROLE_DEPARTMENT_COORDINATOR']);
-
-  const peerIdsForScope =
-    isDeptCoordinator && deptPeerIds.length > 0 ? deptPeerIds : undefined;
-
   const myEquipments = useMemo(
-    () =>
-      filterEquipmentWithDepartmentPeers(
-        equipments,
-        empId,
-        myDeptId,
-        myLocId,
-        isDeptCoordinator ? deptPeerIds : [],
-      ),
-    [equipments, empId, myDeptId, myLocId, isDeptCoordinator, deptPeerIds],
+    () => filterEquipmentForMyAccount(equipments, empId, myDeptId, myLocId),
+    [equipments, empId, myDeptId, myLocId],
   );
 
   const myConsumables = useMemo(
     () =>
-      filterConsumableAssignmentsWithDepartmentPeers(
+      filterConsumableAssignmentsForMyAccount(
         consumableAssignments,
         empId,
         myDeptId,
         myLocId,
-        isDeptCoordinator ? deptPeerIds : [],
+        approvedLossConsumableIds,
       ),
-    [consumableAssignments, empId, myDeptId, myLocId, isDeptCoordinator, deptPeerIds],
+    [consumableAssignments, empId, myDeptId, myLocId, approvedLossConsumableIds],
   );
 
-  const totalConsumableQtyHeld = useMemo(
-    () => myConsumables.reduce((s, a) => s + consumableQuantityHeld(a), 0),
+  const equipmentSorted = useMemo(() => sortEquipmentForDisplay(myEquipments), [myEquipments]);
+
+  const consumablePendingByAssetItem = useMemo(
+    () => mapAssetItemIdToConsumablePending(empId, repairRequests, returnRequests, lossQ.data ?? []),
+    [empId, repairRequests, returnRequests, lossQ.data],
+  );
+
+  const consumableGroupRows = useMemo(
+    (): MyConsumableGroupRow[] =>
+      groupConsumableAssignmentsByAssetItem(myConsumables).map(g => ({ ...g, id: g.assetItemId })),
     [myConsumables],
   );
 
-  const [lossDialog, setLossDialog] = useState<LossDialogState>(null);
-  const [lossContextAt, setLossContextAt] = useState('');
-  const [lossContextLocation, setLossContextLocation] = useState('');
-  const [lossReason, setLossReason] = useState('');
-  const [lossDescription, setLossDescription] = useState('');
-  const [lossQty, setLossQty] = useState(1);
-  const [lossBusy, setLossBusy] = useState(false);
-
-  useEffect(() => {
-    if (!lossDialog) {
-      setLossContextAt('');
-      setLossContextLocation('');
-      return;
-    }
-    setLossContextAt(nowDatetimeLocalValue());
-    if (lossDialog.kind === 'equipment') {
-      setLossContextLocation(lossLocationLabelFromEquipment(lossDialog.equipment));
-    } else {
-      setLossContextLocation(lossLocationLabelFromConsumableAssignment(lossDialog.assignment));
-    }
-    setLossReason('');
-    setLossDescription('');
-  }, [lossDialog]);
-
-  useEffect(() => {
-    if (!lossDialog || lossDialog.kind !== 'consumable') return;
-    const held = consumableQuantityHeld(lossDialog.assignment);
-    setLossQty(h => Math.min(Math.max(1, h), Math.max(1, held)));
-  }, [lossDialog]);
-
-  const invalidateAfterLoss = useCallback(() => {
-    void qc.invalidateQueries({ queryKey: ['api', 'loss-report-requests'] });
-    void qc.invalidateQueries({ queryKey: ['api', 'equipment'] });
-    void qc.invalidateQueries({ queryKey: ['api', 'equipment-assignments'] });
-    void qc.invalidateQueries({ queryKey: ['api', 'consumable-assignments'] });
-    void qc.invalidateQueries({ queryKey: ['api', 'consumable-stocks'] });
-    void qc.invalidateQueries({ queryKey: ['api', 'consumable-stocks-view'] });
-  }, [qc]);
-
-  const submitLossReport = async () => {
-    const eid = empId != null ? Number(empId) : NaN;
-    if (!Number.isFinite(eid)) {
-      toast.error('Chưa liên kết nhân viên.');
-      return;
-    }
-    if (!lossDialog) return;
-    const ltIso = lossOccurredAtFromDatetimeLocal(lossContextAt);
-    const ll = lossContextLocation.trim();
-    const lr = lossReason.trim();
-    const ld = lossDescription.trim();
-    if (!ltIso) {
-      toast.error('Chọn thời gian xảy ra / phát hiện mất.');
-      return;
-    }
-    if (!ll) {
-      toast.error('Nhập địa điểm.');
-      return;
-    }
-    if (!lr) {
-      toast.error('Nhập lý do.');
-      return;
-    }
-    if (!ld) {
-      toast.error('Nhập mô tả mất.');
-      return;
-    }
-    setLossBusy(true);
-    try {
-      if (lossDialog.kind === 'equipment') {
-        await apiPost('/api/loss-report-requests', {
-          code: makeBizCode('BM'),
-          requestDate: new Date().toISOString(),
-          status: 'PENDING',
-          lossKind: 'EQUIPMENT',
-          lossOccurredAt: ltIso,
-          lossLocation: ll,
-          reason: lr,
-          lossDescription: ld,
-          requester: { id: eid },
-          equipment: { id: Number(lossDialog.equipment.id) },
-        });
-      } else {
-        const held = consumableQuantityHeld(lossDialog.assignment);
-        const q = Math.min(Math.max(1, lossQty), held);
-        if (q < 1 || q > held) {
-          toast.error(`Số lượng từ 1 đến ${held}`);
-          setLossBusy(false);
-          return;
-        }
-        await apiPost('/api/loss-report-requests', {
-          code: makeBizCode('BM'),
-          requestDate: new Date().toISOString(),
-          status: 'PENDING',
-          lossKind: 'CONSUMABLE',
-          quantity: q,
-          lossOccurredAt: ltIso,
-          lossLocation: ll,
-          reason: lr,
-          lossDescription: ld,
-          requester: { id: eid },
-          consumableAssignment: { id: Number(lossDialog.assignment.id) },
-        });
-      }
-      toast.success('Đã gửi yêu cầu báo mất — chờ QLTS xác nhận');
-      setLossDialog(null);
-      setLossContextAt('');
-      setLossContextLocation('');
-      setLossReason('');
-      setLossDescription('');
-      setLossQty(1);
-      invalidateAfterLoss();
-    } catch (e) {
-      const body = e instanceof ApiError ? e.body : undefined;
-      toast.error(parseProblemDetailJson(body ?? '') || (e instanceof Error ? e.message : 'Lỗi API'));
-    } finally {
-      setLossBusy(false);
-    }
-  };
+  const totalConsumableQtyHeld = useMemo(
+    () => consumableGroupRows.reduce((s, g) => s + totalHeldForConsumableGroup(g.assignments), 0),
+    [consumableGroupRows],
+  );
 
   const equipmentInUseCount = useMemo(
     () => myEquipments.filter(e => e.status === 'IN_USE').length,
@@ -243,173 +152,163 @@ const MyAssets = () => {
 
   const consumableInUseRowCount = useMemo(
     () =>
-      myConsumables.filter(
-        a => getConsumableAssignmentDisplayStatus(a, repairRequests).status === 'IN_USE',
+      consumableGroupRows.filter(
+        g =>
+          getConsumableGroupDisplayStatus(
+            g,
+            repairRequests,
+            consumablePendingByAssetItem,
+            approvedLossConsumableIds,
+          ).status === 'IN_USE',
       ).length,
-    [myConsumables, repairRequests],
+    [consumableGroupRows, repairRequests, consumablePendingByAssetItem, approvedLossConsumableIds],
   );
 
   const consumableUnderRepairRowCount = useMemo(
     () =>
-      myConsumables.filter(
-        a => getConsumableAssignmentDisplayStatus(a, repairRequests).status === 'UNDER_REPAIR',
+      consumableGroupRows.filter(
+        g =>
+          getConsumableGroupDisplayStatus(
+            g,
+            repairRequests,
+            consumablePendingByAssetItem,
+            approvedLossConsumableIds,
+          ).status === 'UNDER_REPAIR',
       ).length,
-    [myConsumables, repairRequests],
+    [consumableGroupRows, repairRequests, consumablePendingByAssetItem, approvedLossConsumableIds],
   );
 
-  const columns: Column<Equipment>[] = useMemo(
+  const equipmentColumns: Column<Equipment>[] = useMemo(
     () => [
-      {
-        key: 'qty',
-        label: 'SL (chiếc)',
-        className: 'text-right w-[6.5rem]',
-        render: () => <span className="tabular-nums">1</span>,
-      },
       {
         key: 'equipmentCode',
         label: 'Mã thiết bị',
-        render: r => (
-          <span className="font-mono text-sm font-medium">{formatEquipmentCodeDisplay(r.equipmentCode)}</span>
+        render: e => (
+          <span className="font-mono text-sm font-medium">{formatEquipmentCodeDisplay(e.equipmentCode)}</span>
         ),
       },
       {
         key: 'itemCode',
         label: 'Mã danh mục',
-        render: r => (
-          <span className="font-mono text-sm">
-            {r.itemId ? getItemCode(r.itemId, assetItems) : '—'}
-          </span>
+        render: e => (
+          <span className="font-mono text-sm">{e.itemId ? getItemCode(e.itemId, assetItems) : '—'}</span>
         ),
       },
       {
         key: 'name',
         label: 'Tên (danh mục)',
-        render: r => (r.itemId ? getItemName(r.itemId, assetItems) : '—'),
+        render: e => (e.itemId ? getItemName(e.itemId, assetItems) : '—'),
       },
-      { key: 'serial', label: 'Serial' },
       {
-        key: 'scope',
-        label: 'Phạm vi',
-        render: r => (
-          <span className="text-sm text-muted-foreground">
-            {myAssetScopeLabel(resolveMyAssetScopeWithPeers(r, empId, myDeptId, myLocId, peerIdsForScope))}
-          </span>
+        key: 'serial',
+        label: 'Serial',
+        render: e => (e.serial ?? '').trim() || '—',
+      },
+      {
+        key: 'status',
+        label: 'Trạng thái',
+        render: e => (
+          <StatusBadge status={e.status} label={equipmentStatusLabels[e.status] ?? e.status} />
         ),
       },
-      { key: 'status', label: 'Trạng thái', render: r => <StatusBadge status={r.status} label={equipmentStatusLabels[r.status]} /> },
-      { key: 'capitalizedDate', label: 'Ngày bàn giao', render: r => formatDate(r.capitalizedDate) },
       {
-        key: 'loss',
-        label: 'Báo mất',
-        className: 'w-[7rem]',
-        render: r => {
-          const can = empId && r.status === 'IN_USE';
-          return (
-            <Button
-              type="button"
-              variant="outline"
-              size="sm"
-              className="h-8 text-xs"
-              disabled={!can || lossBusy}
-              onClick={() => setLossDialog({ kind: 'equipment', equipment: r })}
-            >
-              Báo mất
-            </Button>
-          );
-        },
+        key: 'capitalizedDate',
+        label: 'Ngày bàn giao',
+        render: e => formatDate(e.capitalizedDate ?? ''),
       },
     ],
-    [assetItems, empId, myDeptId, myLocId, peerIdsForScope, lossBusy],
+    [assetItems],
   );
 
-  const consumableColumns: Column<ConsumableAssignmentDto>[] = useMemo(
+  const consumableColumns: Column<MyConsumableGroupRow>[] = useMemo(
     () => [
-    {
-      key: 'code',
-      label: 'Mã vật tư',
-      render: r => {
-        const id = r.assetItem?.id != null ? String(r.assetItem.id) : '';
-        const fromApi = r.assetItem?.code?.trim();
-        const fromCatalog = id ? getItemCode(id, assetItems) : '';
-        const code = fromApi || fromCatalog;
-        return <span className="font-mono text-sm font-medium">{code?.trim() || '—'}</span>;
-      },
-    },
-    {
-      key: 'name',
-      label: 'Tên (danh mục)',
-      render: r =>
-        r.assetItem?.id != null ? getItemName(String(r.assetItem.id), assetItems) : (r.assetItem?.name?.trim() || '—'),
-    },
-    {
-      key: 'unit',
-      label: 'ĐVT',
-      render: r => {
-        const id = r.assetItem?.id != null ? String(r.assetItem.id) : '';
-        const fromApi = r.assetItem?.unit?.trim();
-        if (fromApi) return fromApi;
-        return id ? getItemUnit(id, assetItems) : '—';
-      },
-    },
-    {
-      key: 'status',
-      label: 'Trạng thái',
-      render: r => {
-        const { status, label } = getConsumableAssignmentDisplayStatus(r, repairRequests);
-        return <StatusBadge status={status} label={label} />;
-      },
-    },
-    {
-      key: 'scope',
-      label: 'Phạm vi',
-      render: r => (
-        <span className="text-sm text-muted-foreground">
-          {myAssetScopeLabel(
-            resolveMyConsumableScopeWithPeers(r, empId, myDeptId, myLocId, isDeptCoordinator ? deptPeerIds : undefined),
-          )}
-        </span>
-      ),
-    },
-    {
-      key: 'qtyHeld',
-      label: 'SL còn giữ',
-      className: 'text-right font-medium',
-      render: r => consumableQuantityHeld(r).toLocaleString('vi-VN'),
-    },
-    {
-      key: 'returned',
-      label: 'Đã thu hồi',
-      className: 'text-right text-muted-foreground',
-      render: r => (r.returnedQuantity ?? 0).toLocaleString('vi-VN'),
-    },
-    { key: 'assignedDate', label: 'Ngày bàn giao', render: r => formatDate(r.assignedDate ?? '') },
       {
-        key: 'loss',
-        label: 'Báo mất',
-        className: 'w-[7rem]',
-        render: r => {
-          const held = consumableQuantityHeld(r);
-          const st = getConsumableAssignmentDisplayStatus(r, repairRequests).status;
-          const can = empId && held > 0 && st === 'IN_USE';
-          return (
-            <Button
-              type="button"
-              variant="outline"
-              size="sm"
-              className="h-8 text-xs"
-              disabled={!can || lossBusy}
-              onClick={() => {
-                setLossQty(Math.min(held, 1));
-                setLossDialog({ kind: 'consumable', assignment: r });
-              }}
-            >
-              Báo mất
-            </Button>
+        key: 'code',
+        label: 'Mã vật tư',
+        render: g => {
+          const id = g.assetItemId;
+          const first = g.assignments[0];
+          const fromApi = first?.assetItem?.code?.trim();
+          const fromCatalog = id ? getItemCode(id, assetItems) : '';
+          const code = fromApi || fromCatalog;
+          return <span className="font-mono text-sm font-medium">{code?.trim() || '—'}</span>;
+        },
+      },
+      {
+        key: 'name',
+        label: 'Tên (danh mục)',
+        render: g => {
+          const id = g.assetItemId;
+          const first = g.assignments[0];
+          return id ? getItemName(id, assetItems) : first?.assetItem?.name?.trim() || '—';
+        },
+      },
+      {
+        key: 'unit',
+        label: 'ĐVT',
+        render: g => {
+          const id = g.assetItemId;
+          const fromApi = g.assignments[0]?.assetItem?.unit?.trim();
+          if (fromApi) return fromApi;
+          return id ? getItemUnit(id, assetItems) : '—';
+        },
+      },
+      {
+        key: 'status',
+        label: 'Trạng thái',
+        render: g => {
+          const { status, label } = getConsumableGroupDisplayStatus(
+            g,
+            repairRequests,
+            consumablePendingByAssetItem,
+            approvedLossConsumableIds,
           );
+          return <StatusBadge status={status} label={label} />;
+        },
+      },
+      {
+        key: 'qtyHeld',
+        label: 'SL còn giữ',
+        className: 'text-right font-medium',
+        render: g => totalHeldForConsumableGroup(g.assignments).toLocaleString('vi-VN'),
+      },
+      {
+        key: 'repairPending',
+        label: 'Đang sửa chữa',
+        className: 'text-right tabular-nums',
+        render: g => {
+          const q = consumablePendingByAssetItem.get(g.assetItemId)?.repairQty ?? 0;
+          return <span className="font-medium">{(q > 0 ? q : 0).toLocaleString('vi-VN')}</span>;
+        },
+      },
+      {
+        key: 'lossPending',
+        label: 'Mất',
+        className: 'text-right tabular-nums',
+        render: g => {
+          const q = consumablePendingByAssetItem.get(g.assetItemId)?.lossQty ?? 0;
+          return <span className="font-medium">{(q > 0 ? q : 0).toLocaleString('vi-VN')}</span>;
+        },
+      },
+      {
+        key: 'returned',
+        label: 'Đã thu hồi',
+        className: 'text-right text-muted-foreground',
+        render: g => totalReturnedForConsumableGroup(g.assignments).toLocaleString('vi-VN'),
+      },
+      {
+        key: 'assignedDate',
+        label: 'Ngày BG (sớm nhất)',
+        render: g => {
+          const dates = g.assignments
+            .map(a => a.assignedDate)
+            .filter((d): d is string => Boolean(d))
+            .sort();
+          return formatDate(dates[0] ?? '');
         },
       },
     ],
-    [assetItems, empId, myDeptId, myLocId, isDeptCoordinator, deptPeerIds, lossBusy, repairRequests],
+    [assetItems, repairRequests, consumablePendingByAssetItem, approvedLossConsumableIds],
   );
 
   return (
@@ -438,9 +337,9 @@ const MyAssets = () => {
               <span className="text-muted-foreground hidden sm:inline">·</span>
               <span>
                 <span className="text-muted-foreground">Số lượng vật tư:</span>{' '}
-                <span className="font-semibold tabular-nums">{listLoading ? '—' : myConsumables.length}</span>
-                <span className="text-muted-foreground"> dòng</span>
-                {!listLoading && myConsumables.length > 0 && (
+                <span className="font-semibold tabular-nums">{listLoading ? '—' : consumableGroupRows.length}</span>
+                <span className="text-muted-foreground"> mặt hàng</span>
+                {!listLoading && consumableGroupRows.length > 0 && (
                   <>
                     <span className="text-muted-foreground"> — tổng SL còn giữ: </span>
                     <span className="font-semibold tabular-nums text-emerald-800">
@@ -454,6 +353,10 @@ const MyAssets = () => {
         </div>
       </div>
 
+      {listLoading ? (
+        <PageLoading minHeight="min-h-[50vh]" />
+      ) : (
+      <>
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
         <Card>
           <CardContent className="pt-6">
@@ -463,10 +366,10 @@ const MyAssets = () => {
             <div className="text-xs text-muted-foreground mt-2 pt-2 border-t border-border/60">
               Vật tư:{' '}
               <span className="font-medium text-foreground tabular-nums">
-                {listLoading ? '—' : myConsumables.length}
+                {listLoading ? '—' : consumableGroupRows.length}
               </span>{' '}
-              dòng
-              {!listLoading && myConsumables.length > 0 && (
+              mặt hàng
+              {!listLoading && consumableGroupRows.length > 0 && (
                 <>
                   {' '}
                   · tổng SL còn giữ{' '}
@@ -490,7 +393,7 @@ const MyAssets = () => {
               <span className="font-medium text-emerald-800 tabular-nums">
                 {listLoading ? '—' : consumableInUseRowCount}
               </span>{' '}
-              dòng đang giữ (chưa trong phiếu sửa chữa)
+              mặt hàng đang giữ (chưa trong phiếu sửa chữa)
             </div>
           </CardContent>
         </Card>
@@ -506,7 +409,7 @@ const MyAssets = () => {
               <span className="font-medium text-amber-700 tabular-nums">
                 {listLoading ? '—' : consumableUnderRepairRowCount}
               </span>{' '}
-              dòng trong phiếu sửa chữa
+              mặt hàng trong phiếu sửa chữa
             </div>
           </CardContent>
         </Card>
@@ -514,7 +417,7 @@ const MyAssets = () => {
           <CardContent className="pt-6">
             <div className="text-sm text-muted-foreground">Số lượng vật tư</div>
             <div className="text-2xl font-bold text-emerald-800 tabular-nums">
-              {listLoading ? '—' : myConsumables.length}
+              {listLoading ? '—' : consumableGroupRows.length}
             </div>
             <div className="text-xs text-muted-foreground mt-1">
               {listLoading ? '—' : `${totalConsumableQtyHeld.toLocaleString('vi-VN')} SL còn giữ (tổng)`}
@@ -537,17 +440,17 @@ const MyAssets = () => {
             {!listLoading && (
               <span className="font-normal text-muted-foreground">
                 {' '}
-                — {myEquipments.length} chiếc
+                — {myEquipments.length} chiếc (từng dòng một)
               </span>
             )}
           </h2>
         </div>
-        <DataTable
-          columns={columns}
-          data={myEquipments}
-          emptyMessage={
-            empId
-              ? 'Không có thiết bị gán cho bạn, phòng ban hoặc vị trí của bạn (theo bàn giao đang hiệu lực).'
+      <DataTable
+        columns={equipmentColumns}
+        data={equipmentSorted}
+        emptyMessage={
+          empId
+            ? 'Không có thiết bị gán cho bạn, phòng ban hoặc vị trí của bạn (theo bàn giao đang hiệu lực).'
               : 'Không thể lọc thiết bị — chưa gán nhân viên.'
           }
         />
@@ -572,7 +475,7 @@ const MyAssets = () => {
             {!listLoading && (
               <span className="font-normal text-muted-foreground">
                 {' '}
-                — {myConsumables.length} dòng · tổng SL còn{' '}
+                — {consumableGroupRows.length} mặt hàng (gộp theo mã) · tổng SL còn{' '}
                 <span className="tabular-nums">{totalConsumableQtyHeld.toLocaleString('vi-VN')}</span>
               </span>
             )}
@@ -580,118 +483,24 @@ const MyAssets = () => {
         </div>
         <DataTable
           columns={consumableColumns}
-          data={myConsumables}
+          data={consumableGroupRows}
           emptyMessage={
             empId
               ? 'Không có vật tư đang gán cho bạn, phòng ban hoặc vị trí (theo phiếu cấp còn hiệu lực).'
               : 'Không thể lọc vật tư — chưa gán nhân viên.'
           }
         />
-        {!listLoading && myConsumables.length > 0 && (
+        {!listLoading && consumableGroupRows.length > 0 && (
           <p className="text-sm text-muted-foreground pt-1">
-            Tổng số dòng vật tư: <span className="font-medium text-foreground tabular-nums">{myConsumables.length}</span> — tổng số
+            Số mặt hàng vật tư (đã gộp theo mã): <span className="font-medium text-foreground tabular-nums">{consumableGroupRows.length}</span> — tổng số
             lượng còn giữ:{' '}
             <span className="font-medium text-foreground tabular-nums">{totalConsumableQtyHeld.toLocaleString('vi-VN')}</span>
           </p>
         )}
       </div>
+      </>
+      )}
 
-      <Dialog
-        open={!!lossDialog}
-        onOpenChange={open => {
-          if (!open) setLossDialog(null);
-        }}
-      >
-        <DialogContent className="max-w-lg">
-          <DialogHeader>
-            <DialogTitle>Báo mất tài sản</DialogTitle>
-          </DialogHeader>
-          {lossDialog?.kind === 'equipment' && (
-            <p className="text-sm text-muted-foreground">
-              Thiết bị:{' '}
-              <span className="font-mono font-medium text-foreground">
-                {formatEquipmentCodeDisplay(lossDialog.equipment.equipmentCode)}
-              </span>
-            </p>
-          )}
-          {lossDialog?.kind === 'consumable' && (
-            <div className="space-y-2 text-sm">
-              <p className="text-muted-foreground">
-                Vật tư:{' '}
-                <span className="font-medium text-foreground">
-                  {lossDialog.assignment.assetItem?.id != null
-                    ? getItemName(String(lossDialog.assignment.assetItem.id), assetItems)
-                    : (lossDialog.assignment.assetItem?.name ?? '—')}
-                </span>
-              </p>
-              <div className="space-y-1.5">
-                <Label htmlFor="loss-qty">Số lượng báo mất (còn giữ tối đa {consumableQuantityHeld(lossDialog.assignment)})</Label>
-                <Input
-                  id="loss-qty"
-                  type="number"
-                  min={1}
-                  max={consumableQuantityHeld(lossDialog.assignment)}
-                  value={lossQty}
-                  onChange={e => setLossQty(Number(e.target.value))}
-                  disabled={lossBusy}
-                />
-              </div>
-            </div>
-          )}
-          <div className="space-y-2">
-            <Label htmlFor="loss-time">Thời gian <span className="text-destructive">*</span></Label>
-            <Input
-              id="loss-time"
-              type="datetime-local"
-              value={lossContextAt}
-              onChange={e => setLossContextAt(e.target.value)}
-              disabled={lossBusy}
-            />
-            <p className="text-xs text-muted-foreground">Chọn ngày giờ (giờ địa phương). Có thể chỉnh sau khi điền mặc định.</p>
-          </div>
-          <div className="space-y-2">
-            <Label htmlFor="loss-place">Địa điểm <span className="text-destructive">*</span></Label>
-            <Textarea
-              id="loss-place"
-              placeholder="Điền từ vị trí / phòng ban bàn giao — có thể sửa…"
-              value={lossContextLocation}
-              onChange={e => setLossContextLocation(e.target.value)}
-              rows={2}
-              disabled={lossBusy}
-            />
-          </div>
-          <div className="space-y-2">
-            <Label htmlFor="loss-reason">Lý do <span className="text-destructive">*</span></Label>
-            <Textarea
-              id="loss-reason"
-              placeholder="Nêu lý do báo mất…"
-              value={lossReason}
-              onChange={e => setLossReason(e.target.value)}
-              rows={2}
-              disabled={lossBusy}
-            />
-          </div>
-          <div className="space-y-2">
-            <Label htmlFor="loss-desc">Mô tả mất <span className="text-destructive">*</span></Label>
-            <Textarea
-              id="loss-desc"
-              placeholder="Mô tả chi tiết tình huống mất…"
-              value={lossDescription}
-              onChange={e => setLossDescription(e.target.value)}
-              rows={3}
-              disabled={lossBusy}
-            />
-          </div>
-          <DialogFooter className="gap-2 sm:gap-0">
-            <Button type="button" variant="outline" disabled={lossBusy} onClick={() => setLossDialog(null)}>
-              Hủy
-            </Button>
-            <Button type="button" disabled={lossBusy} onClick={() => void submitLossReport()}>
-              Gửi yêu cầu
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
     </div>
   );
 };

@@ -26,13 +26,18 @@ import {
   repairStatusLabels,
   getEmployeeName,
   getDepartmentName,
-  getItemName,
   formatDate,
 } from '@/data/mockData';
 import { toast } from 'sonner';
 import { getStoredToken } from '@/api/http';
 import { hasAnyAuthority } from '@/auth/jwt';
-import { formatBizCodeDisplay, formatEquipmentCodeDisplay } from '@/utils/formatCodes';
+import { formatBizCodeDisplay } from '@/utils/formatCodes';
+import {
+  repairLineAssetCatalogCode,
+  repairLineDisplayName,
+  repairLineQuantityDisplay,
+  repairLineSerialDisplay,
+} from '@/utils/repairRequestLineDisplay';
 import { ApprovalActionBar } from '@/components/shared/ApprovalActionBar';
 import { RequesterEmployeeInfo } from '@/components/shared/RequesterEmployeeInfo';
 import {
@@ -47,6 +52,7 @@ import { ApiError, apiDelete, apiGet, apiPatch, parseProblemDetailJson } from '@
 import type { RepairRequestDto, RepairRequestLineDto } from '@/api/types';
 import { AttachmentNoteView } from '@/components/shared/AttachmentNoteView';
 import { canDeleteRepairRequest, canEditRepairRequestFields } from '@/utils/requestRecordActions';
+import { LoadingIndicator, PageLoading } from '@/components/shared/page-loading';
 
 const outcomeLabels: Record<string, string> = {
   RETURN_USER: 'Trả lại người dùng',
@@ -88,6 +94,8 @@ const RepairRequests = () => {
   const [rejectReason, setRejectReason] = useState('');
   const [busy, setBusy] = useState(false);
 
+  const listLoading = rrQ.isLoading || eqQ.isLoading || iQ.isLoading || empQ.isLoading || depQ.isLoading;
+
   const repairDetailQ = useQuery({
     queryKey: ['api', 'repair-requests', selected?.id],
     queryFn: () => apiGet<RepairRequestDto>(`/api/repair-requests/${selected!.id}`),
@@ -110,27 +118,23 @@ const RepairRequests = () => {
       {
         key: 'item',
         label: 'Tài sản',
-        render: l => getItemName(String(l.assetItem?.id ?? ''), assetItems),
+        render: l => repairLineDisplayName(l, assetItems),
       },
       {
         key: 'equipmentCode',
-        label: 'Mã TB',
-        render: l =>
-          l.equipment?.equipmentCode ? formatEquipmentCodeDisplay(l.equipment.equipmentCode) : '—',
+        label: 'Mã tài sản',
+        render: l => repairLineAssetCatalogCode(l, assetItems),
       },
       {
         key: 'serial',
         label: 'Serial',
-        render: l =>
-          String(l.lineType ?? 'DEVICE').toUpperCase() === 'CONSUMABLE'
-            ? '—'
-            : (l.equipment?.serial ?? '—'),
+        render: l => repairLineSerialDisplay(l),
       },
       {
         key: 'quantity',
         label: 'SL',
         className: 'text-right',
-        render: l => l.quantity ?? 0,
+        render: l => repairLineQuantityDisplay(l),
       },
     ],
     [assetItems],
@@ -329,6 +333,10 @@ const RepairRequests = () => {
           <h1 className="page-title">Yêu cầu sửa chữa</h1>
         </div>
       </div>
+      {listLoading ? (
+        <PageLoading minHeight="min-h-[45vh]" />
+      ) : (
+        <>
       <FilterBar
         fields={[
           { key: 'search', label: 'Tìm kiếm', type: 'text', placeholder: 'Mã YC, thiết bị, người YC...' },
@@ -339,6 +347,8 @@ const RepairRequests = () => {
         onReset={() => { setFilters({}); setPage(1); }}
       />
       <DataTable columns={columns} data={sorted} currentPage={page} onPageChange={setPage} />
+        </>
+      )}
 
       <Dialog
         open={!!selected}
@@ -362,7 +372,7 @@ const RepairRequests = () => {
               <div className="space-y-3 text-sm">
                 <div className="space-y-2">
                   <p className="text-sm font-medium text-foreground">Thiết bị / vật tư</p>
-                  {repairDetailQ.isLoading && <p className="text-sm text-muted-foreground">Đang tải dòng…</p>}
+                  {repairDetailQ.isLoading && <LoadingIndicator label="Đang tải dòng…" />}
                   {repairDetailQ.isError && (
                     <p className="text-sm text-muted-foreground">Không tải được chi tiết dòng — thử đóng và mở lại.</p>
                   )}

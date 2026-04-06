@@ -8,7 +8,8 @@ import { apiPost, setStoredToken } from '@/api/http';
 import { fetchAndStoreAccountContext } from '@/api/account';
 import { hasAnyAuthority } from '@/auth/jwt';
 import { toast } from 'sonner';
-import { Eye, EyeOff, Package } from 'lucide-react';
+import { BrandMark } from '@/components/shared/BrandMark';
+import { Eye, EyeOff } from 'lucide-react';
 
 type JwtResponse = { id_token: string };
 
@@ -78,8 +79,8 @@ const Login = () => {
 
       <div className="relative z-10 w-full max-w-md flex flex-col items-center -translate-y-8 sm:-translate-y-12 md:-translate-y-14">
         <div className="mb-5 flex w-full flex-col items-center text-center motion-safe:animate-login-fade-up motion-reduce:animate-none">
-          <div className="mb-3 flex h-14 w-14 items-center justify-center rounded-xl bg-primary shadow-sm motion-safe:transition-transform motion-safe:duration-300 motion-safe:hover:scale-[1.03] motion-safe:hover:shadow-md">
-            <Package className="h-7 w-7 text-primary-foreground" />
+          <div className="mb-3 motion-safe:transition-transform motion-safe:duration-300 motion-safe:hover:scale-[1.03]">
+            <BrandMark className="h-14 w-14 rounded-xl shadow-sm" />
           </div>
           <h1 className="mb-1.5 px-1 text-2xl font-bold tracking-tight text-foreground sm:text-3xl">
             Hệ thống Quản lý Tài sản Nội bộ

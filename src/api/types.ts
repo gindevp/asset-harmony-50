@@ -295,6 +295,16 @@ export type StockDocumentEventDto = {
   message?: string;
 };
 
+/** Dòng trong phiếu báo mất gộp (COMBINED). */
+export type LossReportEntryLineDto = {
+  lineType: string;
+  equipmentId?: number;
+  consumableAssignmentId?: number;
+  quantity?: number;
+  /** BE bổ sung khi GET */
+  assetItemId?: number;
+};
+
 /** Yêu cầu báo mất — POST/GET /api/loss-report-requests */
 export type LossReportRequestDto = {
   id?: number;
@@ -314,5 +324,7 @@ export type LossReportRequestDto = {
   requester?: EmployeeDto;
   equipment?: EquipmentDto;
   consumableAssignment?: { id?: number; assetItem?: AssetItemDto };
+  /** lossKind === COMBINED */
+  lossEntries?: LossReportEntryLineDto[];
 };
 

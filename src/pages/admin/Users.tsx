@@ -91,6 +91,8 @@ const UsersPage = () => {
   });
   const [accDeleteLogin, setAccDeleteLogin] = useState<string | null>(null);
   const [accEditOpen, setAccEditOpen] = useState(false);
+  /** Đã có liên kết NV → không cho đổi (đồng bộ với quy tắc backend). */
+  const [accEditEmployeeLocked, setAccEditEmployeeLocked] = useState(false);
   const [accEditForm, setAccEditForm] = useState({
     id: '',
     login: '',
@@ -139,6 +141,7 @@ const UsersPage = () => {
   };
 
   const openAccEdit = (r: AdminUserDto) => {
+    setAccEditEmployeeLocked(r.employeeId != null && r.employeeId !== undefined);
     setAccEditForm({
       id: String(r.id ?? ''),
       login: r.login ?? '',
@@ -382,6 +385,13 @@ const UsersPage = () => {
   ];
 
   const adminUsers = adminUsersQ.data ?? [];
+  const employeeIdsAlreadyLinked = useMemo(() => {
+    const s = new Set<number>();
+    for (const u of adminUsers) {
+      if (u.employeeId != null && u.employeeId !== undefined) s.add(u.employeeId);
+    }
+    return s;
+  }, [adminUsers]);
 
   return (
     <div className="page-container">
@@ -487,6 +497,7 @@ const UsersPage = () => {
         open={accEditOpen}
         onClose={() => {
           setAccEditOpen(false);
+          setAccEditEmployeeLocked(false);
           setAccEditForm({
             id: '',
             login: '',
@@ -540,22 +551,35 @@ const UsersPage = () => {
           </div>
           <div className="space-y-2 col-span-2">
             <Label>Liên kết nhân viên HRM</Label>
-            <Select
-              value={accEditForm.employeeId ? accEditForm.employeeId : '_none_'}
-              onValueChange={v => setAccEditForm(p => ({ ...p, employeeId: v === '_none_' ? '' : v }))}
-            >
-              <SelectTrigger>
-                <SelectValue placeholder="Không liên kết" />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="_none_">Không liên kết</SelectItem>
-                {(empQ.data ?? []).map(e => (
-                  <SelectItem key={e.id} value={String(e.id)}>
-                    {e.code ?? e.id} — {e.fullName ?? ''}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
+            {accEditEmployeeLocked ? (
+              <div className="text-sm rounded-md border border-border bg-muted/30 px-3 py-2 text-muted-foreground">
+                <span className="text-foreground">
+                  {accEditForm.employeeId
+                    ? employeeLabelById.get(Number(accEditForm.employeeId)) ?? `#${accEditForm.employeeId}`
+                    : '—'}
+                </span>
+                <p className="mt-1 text-xs">Đã gán nhân viên — không thể đổi hoặc gỡ liên kết.</p>
+              </div>
+            ) : (
+              <Select
+                value={accEditForm.employeeId ? accEditForm.employeeId : '_none_'}
+                onValueChange={v => setAccEditForm(p => ({ ...p, employeeId: v === '_none_' ? '' : v }))}
+              >
+                <SelectTrigger>
+                  <SelectValue placeholder="Không liên kết" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="_none_">Không liên kết</SelectItem>
+                  {(empQ.data ?? [])
+                    .filter(e => e.id != null && !employeeIdsAlreadyLinked.has(e.id))
+                    .map(e => (
+                      <SelectItem key={e.id} value={String(e.id)}>
+                        {e.code ?? e.id} — {e.fullName ?? ''}
+                      </SelectItem>
+                    ))}
+                </SelectContent>
+              </Select>
+            )}
           </div>
         </div>
       </EntityFormModal>
@@ -598,15 +622,17 @@ const UsersPage = () => {
               </SelectTrigger>
               <SelectContent>
                 <SelectItem value="_none_">Không liên kết</SelectItem>
-                {(empQ.data ?? []).map(e => (
-                  <SelectItem key={e.id} value={String(e.id)}>
-                    {e.code ?? e.id} — {e.fullName ?? ''}
-                  </SelectItem>
-                ))}
+                {(empQ.data ?? [])
+                  .filter(e => e.id != null && !employeeIdsAlreadyLinked.has(e.id))
+                  .map(e => (
+                    <SelectItem key={e.id} value={String(e.id)}>
+                      {e.code ?? e.id} — {e.fullName ?? ''}
+                    </SelectItem>
+                  ))}
               </SelectContent>
             </Select>
             <p className="text-xs text-muted-foreground">
-              Cần liên kết để nhân viên dùng «Yêu cầu của tôi» / «Tài sản của tôi» đúng theo tài khoản.
+              Chỉ hiện nhân viên chưa gán tài khoản (mỗi nhân viên một tài khoản). Cần liên kết để dùng «Yêu cầu của tôi» / «Tài sản của tôi».
             </p>
           </div>
         </div>

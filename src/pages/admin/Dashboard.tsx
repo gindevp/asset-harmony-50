@@ -23,7 +23,7 @@ import {
   useRepairRequestsView,
   useReturnRequestsView,
 } from '@/hooks/useEntityApi';
-import { Skeleton } from '@/components/ui/skeleton';
+import { PageLoading } from '@/components/shared/page-loading';
 
 const Dashboard = () => {
   const eqQ = useEnrichedEquipmentList();
@@ -151,13 +151,8 @@ const Dashboard = () => {
 
   if (loading && !eqQ.data) {
     return (
-      <div className="page-container space-y-4">
-        <Skeleton className="h-10 w-64" />
-        <div className="grid grid-cols-5 gap-4">
-          {[1, 2, 3, 4, 5].map(i => (
-            <Skeleton key={i} className="h-24" />
-          ))}
-        </div>
+      <div className="page-container">
+        <PageLoading minHeight="min-h-[50vh]" />
       </div>
     );
   }

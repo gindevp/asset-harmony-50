@@ -11,6 +11,7 @@ import {
   ClipboardCheck, FileText, Wrench, RotateCcw, Users, Shield, ScrollText,
   ChevronDown, Menu, X, BarChart3
 } from 'lucide-react';
+import { BrandMark } from '@/components/shared/BrandMark';
 import { cn } from '@/lib/utils';
 import { useState } from 'react';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
@@ -65,11 +66,12 @@ function isRouteActive(pathname: string, path: string) {
   return pathname === path || pathname.startsWith(`${path}/`);
 }
 
-/** Đang tạo YC: /admin/request-new | .../repair | .../return */
-function adminRequestNewKind(pathname: string): 'allocation' | 'repair' | 'return' | null {
+/** Đang tạo YC: /admin/request-new | .../repair | .../return | .../loss */
+function adminRequestNewKind(pathname: string): 'allocation' | 'repair' | 'return' | 'loss' | null {
   if (!pathname.startsWith('/admin/request-new')) return null;
   if (pathname.startsWith('/admin/request-new/repair')) return 'repair';
   if (pathname.startsWith('/admin/request-new/return')) return 'return';
+  if (pathname.startsWith('/admin/request-new/loss')) return 'loss';
   return 'allocation';
 }
 
@@ -78,10 +80,11 @@ function isRequestMgmtListActive(pathname: string, listPath: string): boolean {
   if (isRouteActive(pathname, listPath)) return true;
   const kind = adminRequestNewKind(pathname);
   if (!kind) return false;
-  const byKind: Record<'allocation' | 'repair' | 'return', string> = {
+  const byKind: Record<'allocation' | 'repair' | 'return' | 'loss', string> = {
     allocation: '/admin/allocation-requests',
     repair: '/admin/repair-requests',
     return: '/admin/return-requests',
+    loss: '/admin/loss-report-requests',
   };
   return byKind[kind] === listPath;
 }
@@ -97,8 +100,6 @@ export const AdminSidebar = () => {
     queryKey: ['api', 'account'],
     queryFn: () => apiGet<AdminUserDto>('/api/account'),
     enabled: !!getStoredToken(),
-    staleTime: 0,
-    refetchOnWindowFocus: true,
   });
   const accountLabel = getAccountDisplayLabel(accountQ.data ?? undefined);
   const employeeId = accountQ.data?.employeeId != null ? Number(accountQ.data.employeeId) : NaN;
@@ -106,8 +107,6 @@ export const AdminSidebar = () => {
     queryKey: ['api', 'employees', 'me-linked', employeeId],
     queryFn: () => apiGet<EmployeeDto>(`/api/employees/${employeeId}`),
     enabled: Number.isFinite(employeeId),
-    staleTime: 0,
-    refetchOnWindowFocus: true,
   });
   const [hoveredGroup, setHoveredGroup] = useState<string | null>(null);
   const [expandedGroups, setExpandedGroups] = useState<string[]>(() => {
@@ -151,9 +150,7 @@ export const AdminSidebar = () => {
       <div className="h-14 flex items-center px-4 border-b border-sidebar-border flex-shrink-0">
         {!collapsed && (
           <div className="flex items-center gap-2 flex-1 min-w-0">
-            <div className="w-8 h-8 rounded-lg bg-primary flex items-center justify-center flex-shrink-0">
-              <Package className="h-4 w-4 text-primary-foreground" />
-            </div>
+            <BrandMark className="h-8 w-8" />
             <span className="font-bold text-sm truncate">Quản lý Tài sản</span>
           </div>
         )}

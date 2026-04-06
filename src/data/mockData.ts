@@ -485,6 +485,7 @@ export const lossReportStatusLabels: Record<string, string> = {
 export const lossReportKindLabels: Record<string, string> = {
   EQUIPMENT: 'Thiết bị',
   CONSUMABLE: 'Vật tư',
+  COMBINED: 'Gộp (nhiều tài sản)',
 };
 
 /** Khớp enum backend ReturnDisposition */

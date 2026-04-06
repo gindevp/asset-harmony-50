@@ -2,14 +2,13 @@ import type { ConsumableAssignmentDto } from '@/api/types';
 import type { Equipment, RepairRequest } from '@/data/mockData';
 import { equipmentStatusLabels } from '@/data/mockData';
 
-/** Cách thiết bị «thuộc» tài khoản NV theo bàn giao (cá nhân / PB / vị trí / đồng phòng ban). */
-export type MyAssetScope = 'personal' | 'department' | 'location' | 'peer';
+/** Cách thiết bị «thuộc» tài khoản NV theo bàn giao (cá nhân / PB / vị trí — chỉ khi phiếu không gán cá nhân). */
+export type MyAssetScope = 'personal' | 'department' | 'location';
 
 const scopeLabels: Record<MyAssetScope, string> = {
   personal: 'Cá nhân',
   department: 'Phòng ban',
   location: 'Vị trí',
-  peer: 'Đồng phòng ban',
 };
 
 export function myAssetScopeLabel(scope: MyAssetScope | null | undefined): string {
@@ -18,7 +17,7 @@ export function myAssetScopeLabel(scope: MyAssetScope | null | undefined): strin
 }
 
 /**
- * Xác định thiết bị có hiển thị trong «Tài sản của tôi» không (đang IN_USE/PENDING với bàn giao khớp).
+ * Xác định thiết bị có hiển thị trong «Tài sản của tôi» không (đang gán / đã báo mất duyệt — vẫn hiện với trạng thái Mất).
  */
 export function resolveMyAssetScope(
   e: Equipment,
@@ -27,12 +26,23 @@ export function resolveMyAssetScope(
   locationId: string | null,
 ): MyAssetScope | null {
   if (!employeeId) return null;
-  const inUse = e.status === 'IN_USE' || e.status === 'PENDING_ISSUE';
-  if (!inUse) return null;
+  const visible =
+    e.status === 'IN_USE' || e.status === 'PENDING_ISSUE' || e.status === 'LOST';
+  if (!visible) return null;
 
   if (e.assignedTo === employeeId) return 'personal';
-  if (e.assignedDepartment && departmentId && e.assignedDepartment === departmentId) return 'department';
-  if (e.assignedLocation && locationId && e.assignedLocation === locationId) return 'location';
+  /**
+   * Chỉ «Phòng ban» / «Vị trí» khi phiếu gán không gán cho cá nhân.
+   * mapEquipmentDto lấy assignedDepartment/assignedLocation cả từ NV đang giữ (để hiển thị),
+   * nếu so khớp PB/Vị trí khi vẫn có assignedTo thì cả phòng sẽ thấy tài sản cá nhân của đồng nghiệp.
+   */
+  const noPersonalHolder = !e.assignedTo || String(e.assignedTo).trim() === '';
+  if (noPersonalHolder && e.assignedDepartment && departmentId && e.assignedDepartment === departmentId) {
+    return 'department';
+  }
+  if (noPersonalHolder && e.assignedLocation && locationId && e.assignedLocation === locationId) {
+    return 'location';
+  }
   return null;
 }
 
@@ -43,48 +53,6 @@ export function filterEquipmentForMyAccount(
   locationId: string | null,
 ): Equipment[] {
   return list.filter(eq => resolveMyAssetScope(eq, employeeId, departmentId, locationId) != null);
-}
-
-/**
- * Điều phối phòng ban: thêm thiết bị đang gán cho nhân viên cùng phòng (theo tài liệu «xem tài sản phòng ban»).
- */
-export function filterEquipmentWithDepartmentPeers(
-  list: Equipment[],
-  employeeId: string | null,
-  departmentId: string | null,
-  locationId: string | null,
-  sameDepartmentEmployeeIds: string[],
-): Equipment[] {
-  const base = filterEquipmentForMyAccount(list, employeeId, departmentId, locationId);
-  if (!departmentId || sameDepartmentEmployeeIds.length === 0) {
-    return base;
-  }
-  const peerSet = new Set(sameDepartmentEmployeeIds);
-  const baseIds = new Set(base.map(e => e.id));
-  const extras = list.filter(eq => {
-    if (baseIds.has(eq.id)) return false;
-    const inUse = eq.status === 'IN_USE' || eq.status === 'PENDING_ISSUE';
-    if (!inUse || !eq.assignedTo) return false;
-    return peerSet.has(eq.assignedTo);
-  });
-  return [...base, ...extras];
-}
-
-/** Phạm vi hiển thị (kèm đồng phòng ban cho điều phối). */
-export function resolveMyAssetScopeWithPeers(
-  e: Equipment,
-  employeeId: string | null,
-  departmentId: string | null,
-  locationId: string | null,
-  sameDepartmentEmployeeIds: string[] | undefined,
-): MyAssetScope | null {
-  const s = resolveMyAssetScope(e, employeeId, departmentId, locationId);
-  if (s) return s;
-  if (!sameDepartmentEmployeeIds?.length || !e.assignedTo) return null;
-  const peerSet = new Set(sameDepartmentEmployeeIds);
-  const inUse = e.status === 'IN_USE' || e.status === 'PENDING_ISSUE';
-  if (inUse && peerSet.has(e.assignedTo)) return 'peer';
-  return null;
 }
 
 /** Số lượng vật tư còn đang giữ (đã cấp − đã thu hồi). */
@@ -102,13 +70,22 @@ export function resolveMyConsumableScope(
   employeeId: string | null,
   departmentId: string | null,
   locationId: string | null,
+  /** Dòng đã duyệt báo mất (SL còn giữ = 0) vẫn hiển thị trong «Tài sản của tôi». */
+  lossApprovedAssignmentIds?: Set<string>,
 ): MyAssetScope | null {
   if (!employeeId) return null;
-  if (consumableQuantityHeld(a) <= 0) return null;
+  const held = consumableQuantityHeld(a);
+  const lossLine = lossApprovedAssignmentIds?.has(String(a.id ?? ''));
+  if (held <= 0 && !lossLine) return null;
 
   if (a.employee?.id != null && String(a.employee.id) === employeeId) return 'personal';
-  if (a.department?.id != null && departmentId && String(a.department.id) === departmentId) return 'department';
-  if (a.location?.id != null && locationId && String(a.location.id) === locationId) return 'location';
+  const noPersonalHolder = a.employee?.id == null;
+  if (noPersonalHolder && a.department?.id != null && departmentId && String(a.department.id) === departmentId) {
+    return 'department';
+  }
+  if (noPersonalHolder && a.location?.id != null && locationId && String(a.location.id) === locationId) {
+    return 'location';
+  }
   return null;
 }
 
@@ -117,49 +94,11 @@ export function filterConsumableAssignmentsForMyAccount(
   employeeId: string | null,
   departmentId: string | null,
   locationId: string | null,
+  lossApprovedAssignmentIds?: Set<string>,
 ): ConsumableAssignmentDto[] {
-  return list.filter(a => resolveMyConsumableScope(a, employeeId, departmentId, locationId) != null);
-}
-
-/** Điều phối PB: thêm vật tư gán cho NV cùng phòng (cùng logic thiết bị). */
-export function filterConsumableAssignmentsWithDepartmentPeers(
-  list: ConsumableAssignmentDto[],
-  employeeId: string | null,
-  departmentId: string | null,
-  locationId: string | null,
-  sameDepartmentEmployeeIds: string[],
-): ConsumableAssignmentDto[] {
-  const base = filterConsumableAssignmentsForMyAccount(list, employeeId, departmentId, locationId);
-  if (!departmentId || sameDepartmentEmployeeIds.length === 0) {
-    return base;
-  }
-  const peerSet = new Set(sameDepartmentEmployeeIds);
-  const baseIds = new Set(base.map(x => String(x.id ?? '')));
-  const extras = list.filter(a => {
-    if (baseIds.has(String(a.id ?? ''))) return false;
-    if (consumableQuantityHeld(a) <= 0) return false;
-    const aid = a.employee?.id != null ? String(a.employee.id) : null;
-    if (!aid || !peerSet.has(aid)) return false;
-    return true;
-  });
-  return [...base, ...extras];
-}
-
-export function resolveMyConsumableScopeWithPeers(
-  a: ConsumableAssignmentDto,
-  employeeId: string | null,
-  departmentId: string | null,
-  locationId: string | null,
-  sameDepartmentEmployeeIds: string[] | undefined,
-): MyAssetScope | null {
-  const s = resolveMyConsumableScope(a, employeeId, departmentId, locationId);
-  if (s) return s;
-  if (!sameDepartmentEmployeeIds?.length || a.employee?.id == null) return null;
-  if (consumableQuantityHeld(a) <= 0) return null;
-  const peerSet = new Set(sameDepartmentEmployeeIds);
-  const aid = String(a.employee.id);
-  if (peerSet.has(aid) && aid !== employeeId) return 'peer';
-  return null;
+  return list.filter(
+    a => resolveMyConsumableScope(a, employeeId, departmentId, locationId, lossApprovedAssignmentIds) != null,
+  );
 }
 
 /**
@@ -170,9 +109,13 @@ export function resolveMyConsumableScopeWithPeers(
 export function getConsumableAssignmentDisplayStatus(
   a: ConsumableAssignmentDto,
   repairRequests: RepairRequest[],
+  lossApprovedAssignmentIds?: Set<string>,
 ): { status: string; label: string } {
   const held = consumableQuantityHeld(a);
   if (held <= 0) {
+    if (lossApprovedAssignmentIds?.has(String(a.id ?? ''))) {
+      return { status: 'LOST', label: equipmentStatusLabels.LOST };
+    }
     return { status: 'IN_STOCK', label: equipmentStatusLabels.IN_STOCK };
   }
 

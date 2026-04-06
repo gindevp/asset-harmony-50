@@ -3,6 +3,7 @@ import { Input } from '@/components/ui/input';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Button } from '@/components/ui/button';
 import { Search, X } from 'lucide-react';
+import { cn } from '@/lib/utils';
 
 export interface FilterField {
   key: string;
@@ -10,6 +11,8 @@ export interface FilterField {
   type: 'text' | 'select';
   options?: { value: string; label: string }[];
   placeholder?: string;
+  /** Thêm class cho ô tìm (vd `flex-1 min-w-[12rem] max-w-xl w-full`) */
+  inputClassName?: string;
 }
 
 interface FilterBarProps {
@@ -21,7 +24,7 @@ interface FilterBarProps {
 }
 
 export const FilterBar = ({ fields, values, onChange, onReset, children }: FilterBarProps) => (
-  <div className="filter-bar">
+  <div className="filter-bar flex flex-wrap items-center gap-2">
     {fields.map(f => (
       <div key={f.key} className="flex-shrink-0">
         {f.type === 'text' ? (
@@ -31,7 +34,7 @@ export const FilterBar = ({ fields, values, onChange, onReset, children }: Filte
               placeholder={f.placeholder || f.label}
               value={values[f.key] || ''}
               onChange={e => onChange(f.key, e.target.value)}
-              className="pl-9 w-48 h-9"
+              className={cn('pl-9 h-9 w-48', f.inputClassName)}
             />
           </div>
         ) : (

@@ -1,6 +1,7 @@
 import { NavLink, useLocation, useNavigate } from 'react-router-dom';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { AlertTriangle, ClipboardList, Menu, Package, RotateCcw, Wrench, X } from 'lucide-react';
+import { BrandMark } from '@/components/shared/BrandMark';
 import { AccountInfoDialog } from '@/components/layout/AccountInfoDialog';
 import { SidebarUserPanel } from '@/components/layout/SidebarUserPanel';
 import { apiGet, getStoredToken, setStoredToken } from '@/api/http';
@@ -14,8 +15,8 @@ interface NavItem {
   label: string;
   path: string;
   icon: ComponentType<{ className?: string }>;
-  /** Highlight khi đang tạo YC tại /employee/request-new (và /repair, /return) */
-  requestNewKind?: 'allocation' | 'repair' | 'return';
+  /** Highlight khi đang tạo YC tại /employee/request-new (và /repair, /return, /loss) */
+  requestNewKind?: 'allocation' | 'repair' | 'return' | 'loss';
 }
 
 const navItems: NavItem[] = [
@@ -41,6 +42,7 @@ const navItems: NavItem[] = [
     label: 'Yêu cầu báo mất',
     path: '/employee/loss-report-requests',
     icon: AlertTriangle,
+    requestNewKind: 'loss',
   },
   { label: 'Tài sản của tôi', path: '/employee/my-assets', icon: Package },
 ];
@@ -55,8 +57,6 @@ export const EmployeeSidebar = () => {
     queryKey: ['api', 'account'],
     queryFn: () => apiGet<AdminUserDto>('/api/account'),
     enabled: !!getStoredToken(),
-    staleTime: 0,
-    refetchOnWindowFocus: true,
   });
   const accountLabel = getAccountDisplayLabel(accountQ.data ?? undefined);
   const [accountDialogOpen, setAccountDialogOpen] = useState(false);
@@ -65,18 +65,17 @@ export const EmployeeSidebar = () => {
     queryKey: ['api', 'employees', 'me-linked', employeeId],
     queryFn: () => apiGet<EmployeeDto>(`/api/employees/${employeeId}`),
     enabled: Number.isFinite(employeeId),
-    staleTime: 0,
-    refetchOnWindowFocus: true,
   });
 
   const showPersonalNav = showEmployeePersonalNavLinks(getStoredToken());
   const visibleNavItems = showPersonalNav ? navItems : [];
 
-  /** Loại YC đang tạo theo path (/request-new, /repair, /return) — không dùng ?kind= nữa. */
-  const requestNewKindFromPath = (): 'allocation' | 'repair' | 'return' | null => {
+  /** Loại YC đang tạo theo path (/request-new, /repair, /return, /loss) — không dùng ?kind= nữa. */
+  const requestNewKindFromPath = (): 'allocation' | 'repair' | 'return' | 'loss' | null => {
     if (!pathname.startsWith('/employee/request-new')) return null;
     if (pathname.startsWith('/employee/request-new/repair')) return 'repair';
     if (pathname.startsWith('/employee/request-new/return')) return 'return';
+    if (pathname.startsWith('/employee/request-new/loss')) return 'loss';
     return 'allocation';
   };
 
@@ -99,9 +98,7 @@ export const EmployeeSidebar = () => {
       <div className="h-14 flex items-center px-4 border-b border-sidebar-border flex-shrink-0">
         {!collapsed && (
           <div className="flex items-center gap-2 flex-1 min-w-0">
-            <div className="w-8 h-8 rounded-lg bg-primary flex items-center justify-center flex-shrink-0">
-              <Package className="h-4 w-4 text-primary-foreground" />
-            </div>
+            <BrandMark className="h-8 w-8" />
             <span className="font-bold text-sm truncate">Tài sản nội bộ</span>
           </div>
         )}

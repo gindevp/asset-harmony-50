@@ -16,7 +16,6 @@ import { FilterBar } from '@/components/shared/FilterBar';
 import { Button } from '@/components/ui/button';
 import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
-import { Checkbox } from '@/components/ui/checkbox';
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Eye, Pencil, Trash2 } from 'lucide-react';
 import type { ReturnRequest } from '@/data/mockData';
@@ -43,6 +42,7 @@ import { ApiError, apiDelete, apiGet, apiPatch, getStoredToken, parseProblemDeta
 import { hasAnyAuthority } from '@/auth/jwt';
 import type { ReturnRequestLineDto } from '@/api/types';
 import { canDeleteReturnRequest, canEditReturnRequestFields } from '@/utils/requestRecordActions';
+import { LoadingIndicator, PageLoading } from '@/components/shared/page-loading';
 
 /** QLTS không có quyền sửa/xóa phiếu (Admin / GĐ vẫn có). */
 function hideReturnEditDeleteForQlts(): boolean {
@@ -70,10 +70,7 @@ const ReturnRequests = () => {
   const [deleteTarget, setDeleteTarget] = useState<ReturnRequest | null>(null);
   const [busy, setBusy] = useState(false);
 
-  useEffect(() => {
-    if (!selected || dialogMode !== 'edit') return;
-    setEditReturnReason(selected.reason ?? '');
-  }, [selected?.id, dialogMode, selected?.reason]);
+  const listLoading = retQ.isLoading || empQ.isLoading || depQ.isLoading || iQ.isLoading;
 
   const rawLinesQ = useQuery({
     queryKey: ['api', 'return-request-lines', 'for', selected?.id],
@@ -83,6 +80,37 @@ const ReturnRequests = () => {
     },
     enabled: !!selected?.id,
   });
+
+  useEffect(() => {
+    if (!selected || dialogMode !== 'edit') return;
+    setEditReturnReason(selected.reason ?? '');
+  }, [selected?.id, dialogMode, selected?.reason]);
+
+  /** Phiếu APPROVED: tự chọn hết dòng (bỏ checkbox) — backend vẫn cần selected=true khi hoàn tất. */
+  useEffect(() => {
+    if (!selected?.id || selected.status !== 'APPROVED') return;
+    const lines = rawLinesQ.data;
+    if (!lines?.length || rawLinesQ.isLoading) return;
+    const need = lines.filter(l => l.selected !== true);
+    if (need.length === 0) return;
+    let cancelled = false;
+    (async () => {
+      setBusy(true);
+      try {
+        await Promise.all(
+          need.map(l => apiPatch(`/api/return-request-lines/${l.id}`, { id: Number(l.id), selected: true })),
+        );
+        if (!cancelled) await rawLinesQ.refetch();
+      } catch (e) {
+        if (!cancelled) toast.error(e instanceof Error ? e.message : 'Lỗi API');
+      } finally {
+        if (!cancelled) setBusy(false);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [selected?.id, selected?.status, rawLinesQ.data, rawLinesQ.isLoading]);
 
   const invalidate = () => {
     void qc.invalidateQueries({ queryKey: ['api', 'return-requests-view'] });
@@ -139,7 +167,7 @@ const ReturnRequests = () => {
     try {
       await apiPatch(`/api/return-requests/${selected.id}`, { id: Number(selected.id), status });
       if (status === 'APPROVED') {
-        toast.success('Đã duyệt yêu cầu thu hồi — chọn dòng thực tế rồi hoàn tất');
+        toast.success('Đã duyệt yêu cầu thu hồi — bấm Hoàn tất khi sẵn sàng');
         setSelected(prev => (prev ? { ...prev, status: 'APPROVED' } : null));
       } else if (status === 'REJECTED') {
         toast.success('Đã từ chối yêu cầu');
@@ -162,26 +190,13 @@ const ReturnRequests = () => {
     }
   };
 
-  const patchLineSelected = async (lineId: number, sel: boolean) => {
-    setBusy(true);
-    try {
-      await apiPatch(`/api/return-request-lines/${lineId}`, { id: lineId, selected: sel });
-      await rawLinesQ.refetch();
-      invalidate();
-    } catch (e) {
-      toast.error(e instanceof Error ? e.message : 'Lỗi API');
-    } finally {
-      setBusy(false);
-    }
-  };
-
   const sortedReturnLines = useMemo(() => {
     const raw = rawLinesQ.data ?? [];
     return [...raw].sort((a, b) => (a.lineNo ?? 0) - (b.lineNo ?? 0));
   }, [rawLinesQ.data]);
 
   const returnDetailLineColumns = useMemo((): Column<ReturnRequestLineDto>[] => {
-    const base: Column<ReturnRequestLineDto>[] = [
+    return [
       {
         key: 'lineType',
         label: 'Loại',
@@ -211,30 +226,29 @@ const ReturnRequests = () => {
       { key: 'quantity', label: 'SL', className: 'text-right', render: l => l.quantity ?? 0 },
       { key: 'notes', label: 'Ghi chú', render: l => l.note ?? '' },
     ];
-    if (selected?.status !== 'APPROVED') return base;
-    return [
-      {
-        key: 'pick',
-        label: 'Chọn',
-        render: (l: ReturnRequestLineDto) => (
-          <Checkbox
-            checked={l.selected === true}
-            disabled={busy}
-            onCheckedChange={v => void patchLineSelected(l.id!, v === true)}
-          />
-        ),
-      },
-      ...base,
-    ];
-  }, [selected?.status, assetItems, busy]);
+  }, [assetItems]);
 
   const completeReturn = async () => {
     if (!selected) return;
     const lines = sortedReturnLines;
-    const anySel = lines.some(l => l.selected === true);
-    if (!anySel) {
-      toast.error('Chọn ít nhất một dòng thu hồi thực tế');
+    if (lines.length === 0) {
+      toast.error('Không có dòng thu hồi');
       return;
+    }
+    const missing = lines.filter(l => l.selected !== true);
+    if (missing.length > 0) {
+      setBusy(true);
+      try {
+        await Promise.all(
+          missing.map(l => apiPatch(`/api/return-request-lines/${l.id}`, { id: Number(l.id), selected: true })),
+        );
+        await rawLinesQ.refetch();
+      } catch (e) {
+        toast.error(e instanceof Error ? e.message : 'Lỗi API');
+        setBusy(false);
+        return;
+      }
+      setBusy(false);
     }
     await patchReturnStatus('COMPLETED');
   };
@@ -325,6 +339,10 @@ const ReturnRequests = () => {
           <h1 className="page-title">Yêu cầu thu hồi</h1>
         </div>
       </div>
+      {listLoading ? (
+        <PageLoading minHeight="min-h-[45vh]" />
+      ) : (
+        <>
       <FilterBar
         fields={[
           { key: 'search', label: 'Tìm kiếm', type: 'text', placeholder: 'Mã YC, người yêu cầu...' },
@@ -335,6 +353,8 @@ const ReturnRequests = () => {
         onReset={() => { setFilters({}); setPage(1); }}
       />
       <DataTable columns={columns} data={sorted} currentPage={page} onPageChange={setPage} />
+        </>
+      )}
 
       <Dialog
         open={!!selected}
@@ -351,43 +371,51 @@ const ReturnRequests = () => {
               {dialogMode === 'edit' && !hideRowEditDelete ? 'Sửa yêu cầu' : 'Chi tiết yêu cầu'} thu hồi {selected?.code}
             </DialogTitle>
             <DialogDescription className="sr-only">
-              Xem hoặc chỉnh sửa yêu cầu thu hồi; khi đã duyệt, chọn dòng thu hồi thực tế — hệ thống xử lý mặc định trả về kho.
+              Xem hoặc chỉnh sửa yêu cầu thu hồi; khi đã duyệt, các dòng được chọn tự động — hoàn tất để cập nhật kho (mặc định trả về kho).
             </DialogDescription>
           </DialogHeader>
           {selected && (
             <div className="space-y-4">
-              <RequesterEmployeeInfo requesterId={selected.requesterId} employees={employees} />
-              <div className="grid grid-cols-2 gap-3 text-sm">
-                <div><span className="text-muted-foreground">Phòng ban (trên phiếu):</span> {getDepartmentName(selected.departmentId, departments)}</div>
-                <div><span className="text-muted-foreground">Ngày tạo:</span> {formatDate(selected.createdAt)}</div>
-                <div><span className="text-muted-foreground">Trạng thái:</span> <StatusBadge status={selected.status} label={returnStatusLabels[selected.status]} /></div>
-                {dialogMode === 'edit' && !hideRowEditDelete && canEditReturnRequestFields(selected.status) ? (
-                  <div className="col-span-2 space-y-2 border rounded-md p-3 bg-muted/20">
-                    <Label>Lý do / ghi chú</Label>
-                    <Textarea value={editReturnReason} onChange={e => setEditReturnReason(e.target.value)} rows={3} disabled={busy} />
-                    <div className="flex flex-wrap gap-2 pt-1">
-                      <Button type="button" size="sm" disabled={busy} onClick={() => void saveReturnNote()}>
-                        Lưu
-                      </Button>
-                      <Button type="button" size="sm" variant="outline" disabled={busy} onClick={() => setDialogMode('view')}>
-                        Xem (thoát sửa)
-                      </Button>
-                    </div>
+              <RequesterEmployeeInfo
+                requesterId={selected.requesterId}
+                employees={employees}
+                hideLocation
+                appendRows={[
+                  { label: 'Ngày tạo', value: formatDate(selected.createdAt) },
+                  {
+                    label: 'Trạng thái',
+                    value: <StatusBadge status={selected.status} label={returnStatusLabels[selected.status]} />,
+                  },
+                ]}
+              />
+              {dialogMode === 'edit' && !hideRowEditDelete && canEditReturnRequestFields(selected.status) ? (
+                <div className="space-y-2 border rounded-md p-3 bg-muted/20 text-sm">
+                  <Label>Lý do / ghi chú</Label>
+                  <Textarea value={editReturnReason} onChange={e => setEditReturnReason(e.target.value)} rows={3} disabled={busy} />
+                  <div className="flex flex-wrap gap-2 pt-1">
+                    <Button type="button" size="sm" disabled={busy} onClick={() => void saveReturnNote()}>
+                      Lưu
+                    </Button>
+                    <Button type="button" size="sm" variant="outline" disabled={busy} onClick={() => setDialogMode('view')}>
+                      Xem (thoát sửa)
+                    </Button>
                   </div>
-                ) : (
-                  <div className="col-span-2"><span className="text-muted-foreground">Lý do:</span> {selected.reason}</div>
-                )}
-              </div>
+                </div>
+              ) : (
+                <div className="text-sm">
+                  <span className="text-muted-foreground">Lý do:</span> {selected.reason}
+                </div>
+              )}
 
               <div className="space-y-2">
                 <p className="text-sm font-medium text-foreground">Thiết bị / vật tư thu hồi</p>
                 {selected.status === 'APPROVED' ? (
                   <p className="text-sm text-muted-foreground">
-                    Đánh dấu dòng sẽ thu hồi thực tế (chỉ các dòng được chọn mới cập nhật kho khi hoàn tất). Hướng xử lý mặc định:{' '}
+                    Tất cả dòng được áp dụng khi hoàn tất. Hướng xử lý mặc định:{' '}
                     <span className="font-medium text-foreground">trả về kho</span>.
                   </p>
                 ) : null}
-                {rawLinesQ.isLoading && <p className="text-sm text-muted-foreground">Đang tải dòng…</p>}
+                {rawLinesQ.isLoading && <LoadingIndicator label="Đang tải dòng…" />}
                 {rawLinesQ.isError && (
                   <p className="text-sm text-destructive">Không tải được chi tiết dòng từ máy chủ.</p>
                 )}

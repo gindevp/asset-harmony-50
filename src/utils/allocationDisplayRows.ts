@@ -45,21 +45,3 @@ export function sumAllocationLineQuantities(lines: AllocationRequestLine[]): num
   }, 0);
 }
 
-/**
- * Text hiển thị cột «Ghi chú» danh sách YC: ưu tiên ghi chú người nhận; nếu trống thì lấy phần chữ
- * trong đính kèm (bỏ dòng FILE:...) — form tạo YC thường chỉ gửi attachmentNote, không gửi beneficiaryNote.
- */
-export function allocationRequestListNoteDisplay(r: {
-  beneficiaryNote?: string;
-  attachmentNote?: string;
-}): string {
-  const ben = r.beneficiaryNote?.trim();
-  if (ben) return ben;
-  const raw = r.attachmentNote?.trim();
-  if (!raw) return '';
-  const textLines = raw
-    .split('\n')
-    .map(l => l.trim())
-    .filter(l => l.length > 0 && !l.startsWith('FILE:'));
-  return textLines.join('\n').trim();
-}

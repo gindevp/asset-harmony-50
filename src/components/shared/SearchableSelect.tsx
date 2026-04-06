@@ -12,7 +12,7 @@ import {
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { cn } from '@/lib/utils';
 
-export type SearchableSelectOption = { value: string; label: string; searchText?: string };
+export type SearchableSelectOption = { value: string; label: string; searchText?: string; disabled?: boolean };
 
 /**
  * Combobox có ô tìm kiếm (cmdk), dùng cho danh sách dài.
@@ -80,10 +80,13 @@ export function SearchableSelect({
                 <CommandItem
                   key={opt.value}
                   value={opt.value}
+                  disabled={opt.disabled}
                   onSelect={() => {
+                    if (opt.disabled) return;
                     onValueChange(opt.value);
                     setOpen(false);
                   }}
+                  className={cn(opt.disabled && 'opacity-50 cursor-not-allowed')}
                 >
                   <Check className={cn('mr-2 h-4 w-4 shrink-0', value === opt.value ? 'opacity-100' : 'opacity-0')} />
                   <span className="truncate">{opt.label}</span>

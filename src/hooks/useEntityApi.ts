@@ -156,7 +156,7 @@ export function useConsumableAssignments() {
   });
 }
 
-/** Thiết bị + gán hiện tại (equipment-assignments chưa trả — ưu tiên bản ghi id lớn nhất).
+/** Thiết bị + phiếu gán (ưu tiên gán đang hiệu lực; thiết bị LOST thì lấy phiếu mới nhất kể cả đã trả — xem pickAssignmentForEquipment).
  *  Ghép theo equipmentId (FK phẳng từ BE) hoặc equipmentCode — tránh lỗi khi object equipment lồng nhau thiếu id.
  *  Nếu assignments lỗi/chưa có, vẫn hiển thị thiết bị (chưa gán). */
 export function useEnrichedEquipmentList() {
@@ -169,9 +169,10 @@ export function useEnrichedEquipmentList() {
   }, [qe.data, qa.data]);
   return {
     data: list,
-    isLoading: qe.isLoading,
-    isError: qe.isError,
-    error: qe.error,
+    /** Chờ cả thiết bị và phiếu gán — tránh hiển thị/ghép sai khi một trong hai còn đang tải. */
+    isLoading: qe.isLoading || qa.isLoading,
+    isError: qe.isError || qa.isError,
+    error: qe.error ?? qa.error,
     refetch: () => {
       void qe.refetch();
       void qa.refetch();

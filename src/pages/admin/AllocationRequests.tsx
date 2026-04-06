@@ -45,13 +45,9 @@ import {
   useEmployees,
   useEnrichedEquipmentList,
 } from '@/hooks/useEntityApi';
-import {
-  type AllocationDetailRow,
-  allocationRequestListNoteDisplay,
-  buildAllocationDetailRows,
-  sumAllocationLineQuantities,
-} from '@/utils/allocationDisplayRows';
+import { type AllocationDetailRow, buildAllocationDetailRows, sumAllocationLineQuantities } from '@/utils/allocationDisplayRows';
 import { canDeleteAllocationRequest, canEditAllocationRequestFields } from '@/utils/requestRecordActions';
+import { PageLoading } from '@/components/shared/page-loading';
 
 /** QLTS không có quyền sửa/xóa phiếu (Admin / GĐ vẫn có). */
 function hideAllocationEditDeleteForQlts(): boolean {
@@ -143,6 +139,9 @@ const AllocationRequests = () => {
   const [rejectReason, setRejectReason] = useState('');
   const [busy, setBusy] = useState(false);
 
+  const listLoading =
+    arQ.isLoading || empQ.isLoading || depQ.isLoading || iQ.isLoading || alQ.isLoading || eqQ.isLoading;
+
   useEffect(() => {
     if (!selected || dialogMode !== 'edit') return;
     setEditReason(selected.reason ?? '');
@@ -170,15 +169,6 @@ const AllocationRequests = () => {
       key: 'assignee',
       label: 'Đối tượng nhận',
       render: r => <span className="max-w-[12rem] truncate block" title={r.assigneeSummary}>{r.assigneeSummary}</span>,
-    },
-    {
-      key: 'noteList',
-      label: 'Ghi chú',
-      render: r => (
-        <span className="max-w-[12rem] truncate block" title={allocationRequestListNoteDisplay(r) || undefined}>
-          {allocationRequestListNoteDisplay(r) || '—'}
-        </span>
-      ),
     },
     {
       key: 'stockIssue',
@@ -664,8 +654,14 @@ const AllocationRequests = () => {
         </div>
       </div>
 
+      {listLoading ? (
+        <PageLoading minHeight="min-h-[45vh]" />
+      ) : (
+        <>
       <FilterBar fields={filterFields} values={filters} onChange={(k, v) => setFilters(p => ({ ...p, [k]: v }))} onReset={() => setFilters({})} />
       <DataTable columns={columns} data={filtered} currentPage={page} onPageChange={setPage} />
+        </>
+      )}
 
       <Dialog
         open={!!selected}
@@ -688,11 +684,20 @@ const AllocationRequests = () => {
           </DialogHeader>
           {selected && (
             <div className="space-y-4">
-              <RequesterEmployeeInfo requesterId={selected.requesterId} employees={employees} />
+              <RequesterEmployeeInfo
+                requesterId={selected.requesterId}
+                employees={employees}
+                hideLocation
+                appendRows={[
+                  { label: 'Ngày tạo', value: formatDate(selected.createdAt) },
+                  {
+                    label: 'Trạng thái',
+                    value: <StatusBadge status={selected.status} label={allocationStatusLabels[selected.status]} />,
+                  },
+                ]}
+              />
+              {/* Đối tượng / lý do từ chối — không «Phòng ban trên phiếu»; giống nhau khi Xem và Sửa */}
               <div className="grid grid-cols-2 gap-3 text-sm">
-                <div><span className="text-muted-foreground">Phòng ban (trên phiếu):</span> {getDepartmentName(selected.departmentId, departments)}</div>
-                <div><span className="text-muted-foreground">Ngày tạo:</span> {formatDate(selected.createdAt)}</div>
-                <div><span className="text-muted-foreground">Trạng thái:</span> <StatusBadge status={selected.status} label={allocationStatusLabels[selected.status]} /></div>
                 {selected.status === 'REJECTED' && selected.rejectionReason?.trim() ? (
                   <div className="col-span-2 rounded-md border border-destructive/25 bg-destructive/5 p-3">
                     <span className="text-muted-foreground">Lý do từ chối:</span>
@@ -706,43 +711,43 @@ const AllocationRequests = () => {
                     <span className="text-muted-foreground text-xs ml-2">({selected.assigneeType})</span>
                   )}
                 </div>
-                {dialogMode === 'edit' && !hideRowEditDelete && canEditAllocationRequestFields(selected.status) ? (
-                  <div className="col-span-2 space-y-2 border rounded-md p-3 bg-muted/20">
-                    <div className="space-y-2">
-                      <Label>Lý do</Label>
-                      <Textarea value={editReason} onChange={e => setEditReason(e.target.value)} rows={3} disabled={busy} />
-                    </div>
-                    <div className="space-y-2">
-                      <Label>Ghi chú</Label>
-                      <Textarea value={editAttach} onChange={e => setEditAttach(e.target.value)} rows={2} disabled={busy} />
-                    </div>
-                    <div className="flex flex-wrap gap-2 pt-1">
-                      <Button type="button" size="sm" disabled={busy} onClick={() => void saveAllocationContent()}>
-                        Lưu
-                      </Button>
-                      <Button type="button" size="sm" variant="outline" disabled={busy} onClick={() => setDialogMode('view')}>
-                        Xem (thoát sửa)
-                      </Button>
-                    </div>
-                  </div>
-                ) : (
-                  <>
-                    <div className="col-span-2"><span className="text-muted-foreground">Lý do:</span> {selected.reason}</div>
-                    {selected.attachmentNote ? (
-                      <div className="col-span-2 space-y-1">
-                        <div className="text-muted-foreground">Ghi chú</div>
-                        <AttachmentNoteView text={selected.attachmentNote} showCaption={false} />
-                      </div>
-                    ) : null}
-                  </>
-                )}
-                {selected.stockIssueCode && (
-                  <div className="col-span-2">
-                    <span className="text-muted-foreground">Phiếu xuất kho:</span>{' '}
-                    <span className="font-mono text-sm font-medium">{selected.stockIssueCode}</span>
-                  </div>
-                )}
               </div>
+              {dialogMode === 'edit' && !hideRowEditDelete && canEditAllocationRequestFields(selected.status) ? (
+                <div className="space-y-2 border rounded-md p-3 bg-muted/20 text-sm">
+                  <div className="space-y-2">
+                    <Label>Lý do</Label>
+                    <Textarea value={editReason} onChange={e => setEditReason(e.target.value)} rows={3} disabled={busy} />
+                  </div>
+                  <div className="space-y-2">
+                    <Label>Ghi chú</Label>
+                    <Textarea value={editAttach} onChange={e => setEditAttach(e.target.value)} rows={2} disabled={busy} />
+                  </div>
+                  <div className="flex flex-wrap gap-2 pt-1">
+                    <Button type="button" size="sm" disabled={busy} onClick={() => void saveAllocationContent()}>
+                      Lưu
+                    </Button>
+                    <Button type="button" size="sm" variant="outline" disabled={busy} onClick={() => setDialogMode('view')}>
+                      Xem (thoát sửa)
+                    </Button>
+                  </div>
+                </div>
+              ) : (
+                <div className="space-y-2 text-sm">
+                  <div><span className="text-muted-foreground">Lý do:</span> {selected.reason}</div>
+                  {selected.attachmentNote ? (
+                    <div className="space-y-1">
+                      <div className="text-muted-foreground">Đính kèm</div>
+                      <AttachmentNoteView text={selected.attachmentNote} showCaption={false} />
+                    </div>
+                  ) : null}
+                </div>
+              )}
+              {selected.stockIssueCode ? (
+                <div className="text-sm">
+                  <span className="text-muted-foreground">Phiếu xuất kho:</span>{' '}
+                  <span className="font-mono text-sm font-medium">{selected.stockIssueCode}</span>
+                </div>
+              ) : null}
 
               <DataTable
                 columns={detailColumns}

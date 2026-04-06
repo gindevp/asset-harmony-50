@@ -1,10 +1,16 @@
 import { useMemo, useState } from 'react';
 import { Link, useLocation, useNavigate } from 'react-router-dom';
 import { useQueryClient } from '@tanstack/react-query';
-import { ArrowLeft } from 'lucide-react';
+import { ArrowLeft, Monitor, Package } from 'lucide-react';
 import { toast } from 'sonner';
 
 import { RequiredMark } from '@/components/shared/RequiredMark';
+import {
+  AssetPickColumn,
+  AssetPickConsumableRow,
+  AssetPickEquipmentRow,
+  AssetPickTwoColumnGrid,
+} from '@/components/shared/RequestAssetPickRows';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
@@ -12,24 +18,27 @@ import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
 
 import { resolveEmployeeIdForRequests, resolveEmployeeLocationIdForRequests } from '@/api/account';
-import { apiPost, getApiErrorMessage, getStoredToken } from '@/api/http';
-import { hasAnyAuthority } from '@/auth/jwt';
+import { apiPost, getApiErrorMessage } from '@/api/http';
 import { makeBizCode } from '@/api/businessCode';
 import type { Equipment } from '@/data/mockData';
 import { getItemName } from '@/data/mockData';
-import {
-  consumableQuantityHeld,
-  filterConsumableAssignmentsWithDepartmentPeers,
-  filterEquipmentWithDepartmentPeers,
-} from '@/utils/myEquipment';
+import { consumableQuantityHeld, filterConsumableAssignmentsForMyAccount, filterEquipmentForMyAccount } from '@/utils/myEquipment';
+import { groupConsumableAssignmentsByAssetItem, sortEquipmentForDisplay, totalHeldForConsumableGroup } from '@/utils/myHoldingsAggregate';
+import { hasBackendOpenEquipmentAssignment } from '@/utils/equipmentJoin';
+import { mapAssetItemIdToConsumablePending, mapEquipmentIdToOpenRequestHints } from '@/utils/openAssetRequestBlocks';
 import {
   mapAssetItemDto,
   useAssetItems,
   useConsumableAssignments,
   useEmployees,
   useEnrichedEquipmentList,
+  useEquipmentAssignments,
+  useLossReportRequests,
+  useRepairRequestsView,
+  useReturnRequestsView,
 } from '@/hooks/useEntityApi';
 import { requestsListPath } from './requestNewPaths';
+import { PageLoading } from '@/components/shared/page-loading';
 import type { ConsumableAssignmentDto } from '@/api/types';
 
 function requireEmployeeId(): number | null {
@@ -50,9 +59,13 @@ export default function RequestNewReturn() {
   const backTo = requestsListPath('return', isAdminArea);
 
   const eqQ = useEnrichedEquipmentList();
+  const eqAssignQ = useEquipmentAssignments();
   const caQ = useConsumableAssignments();
   const aiQ = useAssetItems();
   const allEmpQ = useEmployees();
+  const repairQ = useRepairRequestsView();
+  const returnQ = useReturnRequestsView();
+  const lossQ = useLossReportRequests();
   const equipments = eqQ.data ?? [];
   const assetItems = useMemo(() => (aiQ.data ?? []).map(mapAssetItemDto), [aiQ.data]);
   const myEmpIdStr = resolveEmployeeIdForRequests();
@@ -63,37 +76,34 @@ export default function RequestNewReturn() {
   }, [myEmpIdStr, allEmpQ.data]);
   const myLocIdStr = resolveEmployeeLocationIdForRequests();
 
-  const deptPeerIds = useMemo(() => {
-    if (!myDeptIdStr || !allEmpQ.data) return [] as string[];
-    return allEmpQ.data
-      .filter(e => String(e.department?.id ?? '') === myDeptIdStr)
-      .map(e => String(e.id ?? ''));
-  }, [myDeptIdStr, allEmpQ.data]);
-
-  const isDeptCoordinator = hasAnyAuthority(getStoredToken(), ['ROLE_DEPARTMENT_COORDINATOR']);
-
   const myEquipment: Equipment[] = useMemo(
     () =>
-      filterEquipmentWithDepartmentPeers(
-        equipments,
-        myEmpIdStr,
-        myDeptIdStr,
-        myLocIdStr,
-        isDeptCoordinator ? deptPeerIds : [],
+      filterEquipmentForMyAccount(equipments, myEmpIdStr, myDeptIdStr, myLocIdStr).filter(e =>
+        hasBackendOpenEquipmentAssignment(String(e.id), eqAssignQ.data ?? []),
       ),
-    [equipments, myEmpIdStr, myDeptIdStr, myLocIdStr, isDeptCoordinator, deptPeerIds],
+    [equipments, myEmpIdStr, myDeptIdStr, myLocIdStr, eqAssignQ.data],
   );
 
   const myConsumables: ConsumableAssignmentDto[] = useMemo(() => {
-    const raw = filterConsumableAssignmentsWithDepartmentPeers(
-      caQ.data ?? [],
-      myEmpIdStr,
-      myDeptIdStr,
-      myLocIdStr,
-      isDeptCoordinator ? deptPeerIds : [],
-    );
+    const raw = filterConsumableAssignmentsForMyAccount(caQ.data ?? [], myEmpIdStr, myDeptIdStr, myLocIdStr);
     return raw.filter(a => consumableQuantityHeld(a) > 0);
-  }, [caQ.data, myEmpIdStr, myDeptIdStr, myLocIdStr, isDeptCoordinator, deptPeerIds]);
+  }, [caQ.data, myEmpIdStr, myDeptIdStr, myLocIdStr]);
+
+  const consumableGroups = useMemo(
+    () => groupConsumableAssignmentsByAssetItem(myConsumables),
+    [myConsumables],
+  );
+  const equipmentRows = useMemo(() => sortEquipmentForDisplay(myEquipment), [myEquipment]);
+
+  const equipmentOpenHints = useMemo(
+    () => mapEquipmentIdToOpenRequestHints(myEmpIdStr, repairQ.data ?? [], returnQ.data ?? [], lossQ.data ?? []),
+    [myEmpIdStr, repairQ.data, returnQ.data, lossQ.data],
+  );
+
+  const consumablePendingByAssetItem = useMemo(
+    () => mapAssetItemIdToConsumablePending(myEmpIdStr, repairQ.data ?? [], returnQ.data ?? [], lossQ.data ?? []),
+    [myEmpIdStr, repairQ.data, returnQ.data, lossQ.data],
+  );
 
   const [retNote, setRetNote] = useState('');
   const [retSelected, setRetSelected] = useState<Record<string, boolean>>({});
@@ -101,11 +111,11 @@ export default function RequestNewReturn() {
   const [retConsumableQty, setRetConsumableQty] = useState<Record<string, string>>({});
   const [retBusy, setRetBusy] = useState(false);
   const toggleRet = (id: string) => setRetSelected(p => ({ ...p, [id]: !p[id] }));
-  const toggleRetConsumable = (assignmentId: string) => {
+  const toggleRetConsumable = (assetItemId: string) => {
     setRetConsumableSelected(p => {
-      const next = { ...p, [assignmentId]: !p[assignmentId] };
-      if (next[assignmentId]) {
-        setRetConsumableQty(q => ({ ...q, [assignmentId]: q[assignmentId] ?? '1' }));
+      const next = { ...p, [assetItemId]: !p[assetItemId] };
+      if (next[assetItemId]) {
+        setRetConsumableQty(q => ({ ...q, [assetItemId]: q[assetItemId] ?? '1' }));
       }
       return next;
     });
@@ -113,26 +123,43 @@ export default function RequestNewReturn() {
 
   const submitReturn = async () => {
     const eqIds = Object.entries(retSelected).filter(([, v]) => v).map(([k]) => k);
-    const consumableRows: { aid: string; assetItemId: number; qty: number; max: number }[] = [];
-    for (const a of myConsumables) {
-      const aid = String(a.id ?? '');
-      if (!retConsumableSelected[aid]) continue;
-      const itemId = a.assetItem?.id;
-      if (itemId == null) continue;
-      const max = consumableQuantityHeld(a);
-      const raw = (retConsumableQty[aid] ?? '1').trim();
+    const mergedReturnQty = new Map<number, number>();
+    for (const g of consumableGroups) {
+      const assetItemIdStr = g.assetItemId;
+      if (!retConsumableSelected[assetItemIdStr]) continue;
+      const itemId = Number(assetItemIdStr);
+      if (!Number.isFinite(itemId)) continue;
+      const max = totalHeldForConsumableGroup(g.assignments);
+      const raw = (retConsumableQty[assetItemIdStr] ?? '1').trim();
       const qty = Number.parseInt(raw, 10);
       if (!Number.isFinite(qty) || qty < 1) {
         toast.error('Số lượng vật tư phải là số nguyên ≥ 1');
         return;
       }
       if (qty > max) {
-        toast.error(`Số lượng vật tư không vượt quá SL đang giữ (${max})`);
+        toast.error(`Số lượng không vượt quá tổng SL đang giữ của mặt hàng (${max})`);
         return;
       }
-      consumableRows.push({ aid, assetItemId: itemId, qty, max });
+      mergedReturnQty.set(itemId, qty);
     }
-    if (eqIds.length === 0 && consumableRows.length === 0) return toast.error('Chọn ít nhất một thiết bị hoặc một vật tư');
+    if (eqIds.length === 0 && mergedReturnQty.size === 0) return toast.error('Chọn ít nhất một thiết bị hoặc một vật tư');
+    for (const id of eqIds) {
+      const hint = equipmentOpenHints.get(id);
+      if (hint) {
+        toast.error(`Thiết bị đang có yêu cầu sửa/thu hồi/báo mất chưa xử lý — không tạo phiếu mới trùng. (${hint})`);
+        return;
+      }
+    }
+    for (const [assetItemId] of mergedReturnQty) {
+      const pend = consumablePendingByAssetItem.get(String(assetItemId));
+      const blocked = pend && pend.repairQty + pend.returnQty + pend.lossQty > 0;
+      if (blocked) {
+        toast.error(
+          `Mặt hàng vật tư đang có SL trong phiếu sửa/thu hồi/báo mất chưa xử lý — không chọn trùng. (${pend!.summary})`,
+        );
+        return;
+      }
+    }
     const retEid = requireEmployeeId();
     if (retEid == null) return;
     setRetBusy(true);
@@ -158,10 +185,6 @@ export default function RequestNewReturn() {
           assetItem: { id: Number(eq.itemId) },
         });
       }
-      const mergedReturnQty = new Map<number, number>();
-      for (const c of consumableRows) {
-        mergedReturnQty.set(c.assetItemId, (mergedReturnQty.get(c.assetItemId) ?? 0) + c.qty);
-      }
       for (const [assetItemId, qty] of mergedReturnQty) {
         await apiPost('/api/return-request-lines', {
           lineNo: lineNo++,
@@ -176,6 +199,7 @@ export default function RequestNewReturn() {
       await qc.invalidateQueries({ queryKey: ['api', 'allocation-requests-view'] });
       await qc.invalidateQueries({ queryKey: ['api', 'repair-requests-view'] });
       await qc.invalidateQueries({ queryKey: ['api', 'return-requests-view'] });
+      await qc.invalidateQueries({ queryKey: ['api', 'loss-report-requests'] });
       navigate(backTo);
     } catch (e) {
       toast.error(getApiErrorMessage(e));
@@ -185,7 +209,8 @@ export default function RequestNewReturn() {
   };
 
   const hasAnyAsset = myEquipment.length > 0 || myConsumables.length > 0;
-  const loadingAssets = eqQ.isLoading || caQ.isLoading;
+  const loadingAssets =
+    eqQ.isLoading || caQ.isLoading || repairQ.isLoading || returnQ.isLoading || lossQ.isLoading;
 
   return (
     <div className="page-container max-w-none w-full pb-8">
@@ -207,7 +232,7 @@ export default function RequestNewReturn() {
         </CardHeader>
         <CardContent className="space-y-4">
           {loadingAssets ? (
-            <p className="text-sm text-muted-foreground">Đang tải tài sản…</p>
+            <PageLoading label="Đang tải tài sản…" minHeight="min-h-[28vh]" />
           ) : !hasAnyAsset ? (
             <p className="text-sm text-muted-foreground">Bạn không có thiết bị hoặc vật tư đang giữ.</p>
           ) : (
@@ -217,65 +242,98 @@ export default function RequestNewReturn() {
                   Tài sản cần thu hồi (thiết bị và/hoặc vật tư)
                   <RequiredMark />
                 </Label>
-                <p className="text-xs text-muted-foreground">Bắt buộc chọn ít nhất một thiết bị hoặc một vật tư.</p>
+                <p className="text-xs text-muted-foreground">
+                  Bắt buộc chọn ít nhất một thiết bị hoặc một vật tư. Mỗi thiết bị / mặt hàng chỉ một yêu cầu sửa, thu hồi hoặc
+                  báo mất ở trạng thái chờ duyệt / đang xử lý — dòng gạch mờ là đã có phiếu như vậy.
+                </p>
               </div>
-              <div className="space-y-2">
-                <Label>Thiết bị</Label>
-                {myEquipment.length > 0 ? (
-                  <div className="max-h-48 overflow-y-auto border rounded-md p-2 space-y-1">
-                    {myEquipment.map(e => {
-                      const deviceName = getItemName(e.itemId, assetItems);
+              <AssetPickTwoColumnGrid>
+                <AssetPickColumn
+                  icon={Monitor}
+                  title="Thiết bị"
+                  description={<>Mỗi serial = 1 chiếc khi thu hồi. Dòng tô vàng là đã có phiếu chờ xử lý.</>}
+                >
+                  {myEquipment.length > 0 ? (
+                    equipmentRows.map(e => {
+                      const deviceName = e.itemId ? getItemName(e.itemId, assetItems) : '—';
                       const serial = (e.serial ?? '').trim() || '—';
+                      const hint = equipmentOpenHints.get(e.id);
+                      const blocked = Boolean(hint);
+                      const checked = !blocked && !!retSelected[e.id];
+                      const lineText = blocked
+                        ? `${deviceName} (Đã có yêu cầu sửa/báo mất/thu hồi${hint ? `: ${hint}` : ''})`
+                        : `${deviceName} (Serial: ${serial})`;
                       return (
-                        <label key={e.id} className="flex items-center gap-2 text-sm py-1 cursor-pointer">
-                          <input type="checkbox" checked={!!retSelected[e.id]} onChange={() => toggleRet(e.id)} />
-                          <span className="min-w-0">
-                            <span className="font-medium">{deviceName}</span>
-                            <span className="text-muted-foreground"> - </span>
-                            <span className="font-mono tabular-nums">{serial}</span>
-                          </span>
-                        </label>
+                        <AssetPickEquipmentRow
+                          key={e.id}
+                          rowId={String(e.id)}
+                          title={lineText}
+                          deviceName={deviceName}
+                          serial={serial}
+                          blocked={blocked}
+                          hint={hint}
+                          checked={checked}
+                          onCheckedChange={next => {
+                            if (blocked) return;
+                            if (next && !retSelected[e.id]) toggleRet(e.id);
+                            else if (!next && retSelected[e.id]) toggleRet(e.id);
+                          }}
+                        />
                       );
-                    })}
-                  </div>
-                ) : (
-                  <p className="text-xs text-muted-foreground">Không có thiết bị đang gán.</p>
-                )}
-              </div>
-              <div className="space-y-2">
-                <Label>Vật tư (số lượng thu hồi)</Label>
-                {myConsumables.length > 0 ? (
-                  <div className="max-h-56 overflow-y-auto border rounded-md p-2 space-y-2">
-                    {myConsumables.map(a => {
-                      const aid = String(a.id ?? '');
-                      const held = consumableQuantityHeld(a);
-                      const itemId = a.assetItem?.id != null ? String(a.assetItem.id) : '';
+                    })
+                  ) : (
+                    <p className="px-1 py-6 text-center text-xs text-muted-foreground">Không có thiết bị đang gán.</p>
+                  )}
+                </AssetPickColumn>
+
+                <AssetPickColumn
+                  icon={Package}
+                  title="Vật tư (số lượng thu hồi, gộp theo mặt hàng)"
+                  description={<>Theo mặt hàng đang giữ — SL thu hồi không vượt quá tổng còn.</>}
+                >
+                  {consumableGroups.length > 0 ? (
+                    consumableGroups.map(g => {
+                      const itemId = g.assetItemId;
+                      const held = totalHeldForConsumableGroup(g.assignments);
                       const label = itemId ? getItemName(itemId, assetItems) : '—';
+                      const pend = itemId ? consumablePendingByAssetItem.get(itemId) : undefined;
+                      const blocked = pend != null && pend.repairQty + pend.returnQty + pend.lossQty > 0;
+                      const rowTitle = `${label} · Còn ${held.toLocaleString('vi-VN')}`;
                       return (
-                        <div key={aid} className="flex flex-wrap items-center gap-2 text-sm py-1">
-                          <label className="flex items-center gap-2 cursor-pointer min-w-0">
-                            <input type="checkbox" checked={!!retConsumableSelected[aid]} onChange={() => toggleRetConsumable(aid)} />
-                            <span className="truncate">{label}</span>
-                            <span className="text-muted-foreground shrink-0">(còn {held})</span>
-                          </label>
-                          {retConsumableSelected[aid] ? (
-                            <Input
-                              className="w-20 h-8"
-                              type="number"
-                              min={1}
-                              max={held}
-                              value={retConsumableQty[aid] ?? '1'}
-                              onChange={e => setRetConsumableQty(q => ({ ...q, [aid]: e.target.value }))}
-                            />
-                          ) : null}
-                        </div>
+                        <AssetPickConsumableRow
+                          key={itemId}
+                          rowId={itemId}
+                          title={rowTitle}
+                          itemLabel={label}
+                          held={held}
+                          blocked={blocked}
+                          pendingSummary={pend?.summary}
+                          checked={blocked ? false : !!retConsumableSelected[itemId]}
+                          onCheckedChange={next => {
+                            if (blocked) return;
+                            if (next !== !!retConsumableSelected[itemId]) toggleRetConsumable(itemId);
+                          }}
+                          quantitySlot={
+                            !blocked && retConsumableSelected[itemId] ? (
+                              <Input
+                                className="h-9 w-full font-sans tabular-nums"
+                                type="number"
+                                min={1}
+                                max={held}
+                                placeholder="SL"
+                                value={retConsumableQty[itemId] ?? '1'}
+                                onChange={e => setRetConsumableQty(q => ({ ...q, [itemId]: e.target.value }))}
+                              />
+                            ) : null
+                          }
+                        />
                       );
-                    })}
-                  </div>
-                ) : (
-                  <p className="text-xs text-muted-foreground">Không có vật tư đang giữ.</p>
-                )}
-              </div>
+                    })
+                  ) : (
+                    <p className="px-1 py-6 text-center text-xs text-muted-foreground">Không có vật tư đang giữ.</p>
+                  )}
+                </AssetPickColumn>
+              </AssetPickTwoColumnGrid>
               <div className="space-y-2">
                 <Label>Ghi chú</Label>
                 <Textarea value={retNote} onChange={e => setRetNote(e.target.value)} rows={2} />
