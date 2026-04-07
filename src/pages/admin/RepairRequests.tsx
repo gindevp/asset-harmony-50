@@ -21,7 +21,7 @@ import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Textarea } from '@/components/ui/textarea';
 import { Eye, Pencil, Trash2 } from 'lucide-react';
-import { repairRequestTargetsSummary, type RepairRequest } from '@/data/mockData';
+import type { RepairRequest } from '@/data/mockData';
 import {
   repairStatusLabels,
   getEmployeeName,
@@ -52,6 +52,7 @@ import { ApiError, apiDelete, apiGet, apiPatch, parseProblemDetailJson } from '@
 import type { RepairRequestDto, RepairRequestLineDto } from '@/api/types';
 import { AttachmentNoteView } from '@/components/shared/AttachmentNoteView';
 import { canDeleteRepairRequest, canEditRepairRequestFields } from '@/utils/requestRecordActions';
+import { formatRepairRequestAssetNamesSummary, getRepairListKindLabel } from '@/utils/repairRequestListDisplay';
 import { LoadingIndicator, PageLoading } from '@/components/shared/page-loading';
 
 const outcomeLabels: Record<string, string> = {
@@ -249,10 +250,12 @@ const RepairRequests = () => {
     .filter(r => {
       if (filters.search) {
         const s = filters.search.toLowerCase();
-        const eqLabel = repairRequestTargetsSummary(r, equipments, assetItems);
+        const kindHit = getRepairListKindLabel(r).toLowerCase().includes(s);
+        const namesHit = formatRepairRequestAssetNamesSummary(r, equipments, assetItems).toLowerCase().includes(s);
         if (
           !r.code.toLowerCase().includes(s) &&
-          !eqLabel.toLowerCase().includes(s) &&
+          !kindHit &&
+          !namesHit &&
           !getEmployeeName(r.requesterId, employees).toLowerCase().includes(s)
         ) {
           return false;
@@ -271,7 +274,20 @@ const RepairRequests = () => {
     },
     { key: 'requester', label: 'Người yêu cầu', render: r => getEmployeeName(r.requesterId, employees) },
     { key: 'department', label: 'Phòng ban', render: r => getDepartmentName(r.departmentId, departments) },
-    { key: 'issue', label: 'Vấn đề' },
+    {
+      key: 'assetKind',
+      label: 'Loại',
+      render: r => getRepairListKindLabel(r),
+    },
+    {
+      key: 'assetNames',
+      label: 'Tên tài sản',
+      render: r => (
+        <span className="max-w-md truncate block" title={formatRepairRequestAssetNamesSummary(r, equipments, assetItems)}>
+          {formatRepairRequestAssetNamesSummary(r, equipments, assetItems)}
+        </span>
+      ),
+    },
     { key: 'status', label: 'Trạng thái', render: r => <StatusBadge status={r.status} label={repairStatusLabels[r.status]} /> },
     { key: 'result', label: 'Kết quả', render: r => (r.result ? outcomeLabels[r.result] ?? r.result : '—') },
     { key: 'createdAt', label: 'Ngày tạo', render: r => formatDate(r.createdAt) },
@@ -339,7 +355,7 @@ const RepairRequests = () => {
         <>
       <FilterBar
         fields={[
-          { key: 'search', label: 'Tìm kiếm', type: 'text', placeholder: 'Mã YC, thiết bị, người YC...' },
+          { key: 'search', label: 'Tìm kiếm', type: 'text', placeholder: 'Mã YC, loại, tên tài sản, người YC…' },
           { key: 'status', label: 'Trạng thái', type: 'select', options: Object.entries(repairStatusLabels).map(([v, l]) => ({ value: v, label: l })) },
         ]}
         values={filters}

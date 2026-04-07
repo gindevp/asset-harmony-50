@@ -107,18 +107,17 @@ export function AssetPickEquipmentRow({
         >
           <div className="space-y-1">
             <p className="text-sm font-medium leading-snug text-foreground">{deviceName}</p>
+            <p className="text-xs text-muted-foreground">
+              Serial{' '}
+              <span className="rounded bg-muted/80 px-1 py-px font-mono text-[11px] tabular-nums text-foreground/90">
+                {serial}
+              </span>
+            </p>
             {blocked ? (
               <p className="text-xs leading-snug text-amber-800 dark:text-amber-400">
                 Không chọn được — đã có yêu cầu sửa / báo mất / thu hồi{hint ? ` · ${hint}` : ''}
               </p>
-            ) : (
-              <p className="text-xs text-muted-foreground">
-                Serial{' '}
-                <span className="rounded bg-muted/80 px-1 py-px font-mono text-[11px] tabular-nums text-foreground/90">
-                  {serial}
-                </span>
-              </p>
-            )}
+            ) : null}
           </div>
         </label>
       </div>

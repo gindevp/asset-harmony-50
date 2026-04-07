@@ -32,48 +32,38 @@ type AllocConsumableLine = {
   localId: string;
   lineType: 'CONSUMABLE';
   assetLineId: string;
-  quantity: number;
+  /** null = ô trống, người dùng tự nhập (không gán mặc định 1). */
+  quantity: number | null;
 };
 
-/** Mỗi chiếc thiết bị: serial + model (ghi vào `note` dòng khi gửi). */
 type AllocDeviceLine = {
   localId: string;
   lineType: 'DEVICE';
   assetLineId: string;
-  quantity: number;
-  units: { serial: string; modelName: string }[];
+  quantity: number | null;
 };
-
-function syncDeviceUnits(units: { serial: string; modelName: string }[], qty: number): { serial: string; modelName: string }[] {
-  const q = Math.max(1, Math.floor(qty));
-  const next = units.slice(0, q);
-  while (next.length < q) next.push({ serial: '', modelName: '' });
-  return next;
-}
-
-/** Ghi chú dòng thiết bị — cùng kiểu key với nhập kho (SN|MODEL) để QLTS đọc thống nhất. */
-function formatAllocationDeviceNote(serial: string, modelName: string): string {
-  const sn = serial.trim();
-  const m = (modelName ?? '').trim();
-  const parts = [`SN:${sn}`];
-  if (m) parts.push(`MODEL:${m}`);
-  return parts.join('|');
-}
 
 const newConsumableLine = (): AllocConsumableLine => ({
   localId: `L-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`,
   lineType: 'CONSUMABLE',
   assetLineId: '',
-  quantity: 1,
+  quantity: null,
 });
 
 const newDeviceLine = (): AllocDeviceLine => ({
   localId: `L-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`,
   lineType: 'DEVICE',
   assetLineId: '',
-  quantity: 1,
-  units: [{ serial: '', modelName: '' }],
+  quantity: null,
 });
+
+function parseAllocQuantityInput(raw: string): number | null {
+  const t = raw.trim();
+  if (t === '') return null;
+  const n = Math.floor(Number(t));
+  if (!Number.isFinite(n) || n < 1) return null;
+  return n;
+}
 
 function requireEmployeeId(): number | null {
   const id = resolveEmployeeIdForRequests();
@@ -187,8 +177,8 @@ export default function RequestNew() {
   const [beneficiaryEmployeeId, setBeneficiaryEmployeeId] = useState(myEmpIdStr ?? '');
   const [beneficiaryDepartmentId, setBeneficiaryDepartmentId] = useState('');
   const [beneficiaryLocationId, setBeneficiaryLocationId] = useState('');
-  const [consumableLines, setConsumableLines] = useState<AllocConsumableLine[]>([newConsumableLine()]);
-  const [deviceLines, setDeviceLines] = useState<AllocDeviceLine[]>([newDeviceLine()]);
+  const [consumableLines, setConsumableLines] = useState<AllocConsumableLine[]>([]);
+  const [deviceLines, setDeviceLines] = useState<AllocDeviceLine[]>([]);
   const [allocFile, setAllocFile] = useState<File | null>(null);
   const [allocBusy, setAllocBusy] = useState(false);
 
@@ -235,21 +225,14 @@ export default function RequestNew() {
     }
     for (const line of consumableLines) {
       if (!line.assetLineId) return toast.error('Chọn tên dòng vật tư cho mọi dòng vật tư');
-      if (line.quantity < 1) return toast.error('Số lượng vật tư không hợp lệ');
+      if (line.quantity == null || line.quantity < 1) {
+        return toast.error('Nhập số lượng vật tư (số nguyên ≥ 1) cho mọi dòng vật tư');
+      }
     }
     for (const line of deviceLines) {
       if (!line.assetLineId) return toast.error('Chọn tên dòng thiết bị cho mọi dòng thiết bị');
-      const n = Math.max(1, Math.floor(Number(line.quantity)));
-      if (n < 1) return toast.error('Số lượng thiết bị không hợp lệ');
-      const units = syncDeviceUnits(line.units, n);
-      for (let i = 0; i < n; i++) {
-        const u = units[i];
-        if (!u?.serial?.trim()) {
-          return toast.error(`Nhập serial cho từng thiết bị (chiếc ${i + 1}/${n}).`);
-        }
-        if (!u?.modelName?.trim()) {
-          return toast.error(`Nhập model cho từng thiết bị (chiếc ${i + 1}/${n}).`);
-        }
+      if (line.quantity == null || line.quantity < 1) {
+        return toast.error('Nhập số lượng thiết bị (số nguyên ≥ 1) cho mọi dòng thiết bị');
       }
     }
     const reqEid = requireEmployeeId();
@@ -328,20 +311,14 @@ export default function RequestNew() {
         await apiPost('/api/allocation-request-lines', payload);
       }
       for (const line of deviceLines) {
-        const n = Math.max(1, Math.floor(Number(line.quantity)));
-        const units = syncDeviceUnits(line.units, n);
-        for (let i = 0; i < n; i++) {
-          const u = units[i]!;
-          const payload: Record<string, unknown> = {
-            lineNo: lineNo++,
-            lineType: 'DEVICE',
-            quantity: 1,
-            request: { id: created.id },
-            assetLine: { id: Number(line.assetLineId) },
-            note: formatAllocationDeviceNote(u.serial, u.modelName),
-          };
-          await apiPost('/api/allocation-request-lines', payload);
-        }
+        const payload: Record<string, unknown> = {
+          lineNo: lineNo++,
+          lineType: 'DEVICE',
+          quantity: line.quantity,
+          request: { id: created.id },
+          assetLine: { id: Number(line.assetLineId) },
+        };
+        await apiPost('/api/allocation-request-lines', payload);
       }
       toast.success('Đã gửi yêu cầu cấp phát');
       await qc.invalidateQueries({ queryKey: ['api', 'allocation-requests-view'] });
@@ -387,7 +364,7 @@ export default function RequestNew() {
           >
             <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
               <div className="min-w-0">
-                <div className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">Mã nhân viên</div>
+                <div className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">Mã người dùng</div>
                 <div className="mt-0.5 text-sm text-foreground/90 font-mono tabular-nums">
                   {allocationRequesterSummary.state === 'loading' && '…'}
                   {allocationRequesterSummary.state === 'none' && '—'}
@@ -588,8 +565,7 @@ export default function RequestNew() {
                 <RequiredMark />
               </Label>
               <p className="text-xs text-muted-foreground">
-                Vật tư: tên dòng + số lượng. Thiết bị: tên dòng + số lượng + <strong className="font-medium">serial và model</strong>{' '}
-                từng chiếc (ghi trên phiếu cho QLTS).
+                Vật tư: tên dòng + số lượng. Thiết bị: tên dòng + số lượng.
               </p>
             </div>
 
@@ -639,16 +615,17 @@ export default function RequestNew() {
                           <Input
                             type="number"
                             min={1}
-                            value={line.quantity}
-                            onChange={e =>
+                            inputMode="numeric"
+                            placeholder="Nhập SL"
+                            value={line.quantity === null ? '' : line.quantity}
+                            onChange={e => {
+                              const q = parseAllocQuantityInput(e.target.value);
                               setConsumableLines(p =>
                                 p.map(l =>
-                                  l.localId === line.localId
-                                    ? { ...l, quantity: Math.max(1, Number(e.target.value) || 1) }
-                                    : l,
+                                  l.localId === line.localId ? { ...l, quantity: q } : l,
                                 ),
-                              )
-                            }
+                              );
+                            }}
                           />
                         </div>
                         <Button
@@ -708,14 +685,14 @@ export default function RequestNew() {
                           <Input
                             type="number"
                             min={1}
-                            value={line.quantity}
+                            inputMode="numeric"
+                            placeholder="Nhập SL"
+                            value={line.quantity === null ? '' : line.quantity}
                             onChange={e => {
-                              const q = Math.max(1, Number(e.target.value) || 1);
+                              const q = parseAllocQuantityInput(e.target.value);
                               setDeviceLines(p =>
                                 p.map(l =>
-                                  l.localId === line.localId
-                                    ? { ...l, quantity: q, units: syncDeviceUnits(l.units, q) }
-                                    : l,
+                                  l.localId === line.localId ? { ...l, quantity: q } : l,
                                 ),
                               );
                             }}
@@ -731,59 +708,6 @@ export default function RequestNew() {
                         >
                           <Trash2 className="h-4 w-4" />
                         </Button>
-                      </div>
-                      <div className="space-y-2 border-t border-border/60 pt-3">
-                        <Label className="text-xs text-muted-foreground">
-                          Serial &amp; model (từng chiếc)
-                          <RequiredMark />
-                        </Label>
-                        <div className="space-y-2">
-                          {syncDeviceUnits(line.units, line.quantity).map((u, idx) => (
-                            <div
-                              key={`${line.localId}-u-${idx}`}
-                              className="grid grid-cols-1 gap-2 sm:grid-cols-2 sm:gap-3 rounded-md bg-background/60 p-2 ring-1 ring-border/40"
-                            >
-                              <div className="space-y-1">
-                                <span className="text-[10px] font-medium uppercase tracking-wide text-muted-foreground">
-                                  Chiếc {idx + 1} — Serial
-                                </span>
-                                <Input
-                                  placeholder="Nhập serial…"
-                                  value={u.serial}
-                                  onChange={e =>
-                                    setDeviceLines(p =>
-                                      p.map(row => {
-                                        if (row.localId !== line.localId) return row;
-                                        const units = syncDeviceUnits(row.units, row.quantity);
-                                        units[idx] = { ...units[idx]!, serial: e.target.value };
-                                        return { ...row, units };
-                                      }),
-                                    )
-                                  }
-                                />
-                              </div>
-                              <div className="space-y-1">
-                                <span className="text-[10px] font-medium uppercase tracking-wide text-muted-foreground">
-                                  Chiếc {idx + 1} — Model
-                                </span>
-                                <Input
-                                  placeholder="Nhập model…"
-                                  value={u.modelName}
-                                  onChange={e =>
-                                    setDeviceLines(p =>
-                                      p.map(row => {
-                                        if (row.localId !== line.localId) return row;
-                                        const units = syncDeviceUnits(row.units, row.quantity);
-                                        units[idx] = { ...units[idx]!, modelName: e.target.value };
-                                        return { ...row, units };
-                                      }),
-                                    )
-                                  }
-                                />
-                              </div>
-                            </div>
-                          ))}
-                        </div>
                       </div>
                     </div>
                   ))

@@ -1,17 +1,41 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
+import { useQueryClient } from '@tanstack/react-query';
 import { DataTable, Column } from '@/components/shared/DataTable';
 import { FilterBar, type FilterField } from '@/components/shared/FilterBar';
 import { StatusBadge } from '@/components/shared/StatusBadge';
 import { Button } from '@/components/ui/button';
-import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
-import { Eye, Plus } from 'lucide-react';
-import { formatBizCodeDisplay, formatEquipmentCodeDisplay } from '@/utils/formatCodes';
-import { getItemName, formatDate } from '@/data/mockData';
-import { lossReportKindLabels, lossReportStatusLabels } from '@/data/mockData';
+import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from '@/components/ui/alert-dialog';
+import { Input } from '@/components/ui/input';
+import { Label } from '@/components/ui/label';
+import { Textarea } from '@/components/ui/textarea';
+import { Eye, Pencil, Plus, Trash2 } from 'lucide-react';
+import { toast } from 'sonner';
+import { formatBizCodeDisplay } from '@/utils/formatCodes';
+import { formatDate } from '@/data/mockData';
+import { lossReportStatusLabels } from '@/data/mockData';
 import type { LossReportRequestDto } from '@/api/types';
-import { mapAssetItemDto, useAssetItems, useEnrichedEquipmentList, useLossReportRequests } from '@/hooks/useEntityApi';
-import { formatCombinedLossSummary } from '@/utils/lossReportCombinedDisplay';
+import { mapAssetItemDto, useAssetItems, useEmployees, useEnrichedEquipmentList, useLossReportRequests } from '@/hooks/useEntityApi';
+import {
+  formatCombinedLossSummary,
+  getLossReportKindDisplayLabel,
+  lossReportKindUpper,
+} from '@/utils/lossReportCombinedDisplay';
+import { ApiError, apiDelete, apiPatch, getApiErrorMessage, parseProblemDetailJson } from '@/api/http';
+import { canDeleteLossReportAsRequester, canEditLossReportAsRequester } from '@/utils/requestRecordActions';
+import { buildLossAssetRows } from '@/utils/lossReportAssetRows';
+import { catalogItemNameOnly } from '@/utils/catalogItemDisplay';
+import { RequesterEmployeeInfo } from '@/components/shared/RequesterEmployeeInfo';
 import { LossReportRequestNarrativeFields } from '@/components/shared/LossReportRequestNarrativeFields';
 import { PageLoading } from '@/components/shared/page-loading';
 import type { AssetItem, Equipment } from '@/data/mockData';
@@ -33,17 +57,17 @@ function lossRowMatchesSearch(
     formatBizCodeDisplay(r.code ?? ''),
     r.reason ?? '',
     r.lossDescription ?? '',
-    lossReportKindLabels[r.lossKind ?? ''] ?? '',
+    getLossReportKindDisplayLabel(r, true),
     lossReportStatusLabels[r.status ?? ''] ?? '',
     r.status ?? '',
   ];
   if (r.equipment) {
     parts.push(r.equipment.equipmentCode ?? '');
     const iid = r.equipment.assetItem?.id;
-    if (iid != null) parts.push(getItemName(String(iid), assetItems));
+    if (iid != null) parts.push(catalogItemNameOnly(String(iid), assetItems));
   }
   if (r.consumableAssignment?.assetItem?.id != null) {
-    parts.push(getItemName(String(r.consumableAssignment.assetItem.id), assetItems));
+    parts.push(catalogItemNameOnly(String(r.consumableAssignment.assetItem.id), assetItems));
   }
   if (lossKindUpper(r) === 'COMBINED') {
     parts.push(formatCombinedLossSummary(r, assetItems, equipments));
@@ -54,14 +78,88 @@ function lossRowMatchesSearch(
 /** Danh sách YC báo mất của tài khoản (API đã lọc theo người gửi). */
 const EmployeeLossReports = () => {
   const navigate = useNavigate();
+  const qc = useQueryClient();
   const lrQ = useLossReportRequests();
   const iQ = useAssetItems();
   const eqQ = useEnrichedEquipmentList();
+  const empQ = useEmployees();
   const rows = lrQ.data ?? [];
   const assetItems = useMemo(() => (iQ.data ?? []).map(mapAssetItemDto), [iQ.data]);
   const equipments = (eqQ.data ?? []) as Equipment[];
+  const employees = empQ.data ?? [];
   const [page, setPage] = useState(1);
   const [selected, setSelected] = useState<LossReportRequestDto | null>(null);
+  const [editRow, setEditRow] = useState<LossReportRequestDto | null>(null);
+  const [editLossOccurredAt, setEditLossOccurredAt] = useState('');
+  const [editLossLocation, setEditLossLocation] = useState('');
+  const [editReason, setEditReason] = useState('');
+  const [editLossDescription, setEditLossDescription] = useState('');
+  const [editQuantity, setEditQuantity] = useState('');
+  const [deleteTarget, setDeleteTarget] = useState<LossReportRequestDto | null>(null);
+  const [busy, setBusy] = useState(false);
+
+  const invalidate = useCallback(() => {
+    void qc.invalidateQueries({ queryKey: ['api', 'loss-report-requests'] });
+  }, [qc]);
+
+  useEffect(() => {
+    if (!editRow) return;
+    setEditLossOccurredAt(editRow.lossOccurredAt?.trim() ?? '');
+    setEditLossLocation(editRow.lossLocation?.trim() ?? '');
+    setEditReason(editRow.reason?.trim() ?? '');
+    setEditLossDescription(editRow.lossDescription?.trim() ?? '');
+    setEditQuantity(editRow.quantity != null ? String(editRow.quantity) : '');
+  }, [editRow]);
+
+  const submitEdit = async () => {
+    if (!editRow?.id) return;
+    const id = editRow.id;
+    const body: Record<string, unknown> = {
+      id,
+      lossOccurredAt: editLossOccurredAt.trim(),
+      lossLocation: editLossLocation.trim(),
+      reason: editReason.trim(),
+      lossDescription: editLossDescription.trim(),
+    };
+    if (lossReportKindUpper(editRow) === 'CONSUMABLE') {
+      const q = Number.parseInt(editQuantity.trim(), 10);
+      if (!Number.isFinite(q) || q < 1) {
+        toast.error('Số lượng vật tư phải là số nguyên ≥ 1');
+        return;
+      }
+      body.quantity = q;
+    }
+    setBusy(true);
+    try {
+      await apiPatch(`/api/loss-report-requests/${id}`, body);
+      toast.success('Đã cập nhật yêu cầu báo mất');
+      setEditRow(null);
+      setSelected(null);
+      invalidate();
+    } catch (e) {
+      const bodyErr = e instanceof ApiError ? e.body : undefined;
+      toast.error(parseProblemDetailJson(bodyErr ?? '') || getApiErrorMessage(e));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const confirmDelete = async () => {
+    if (!deleteTarget?.id) return;
+    setBusy(true);
+    try {
+      await apiDelete(`/api/loss-report-requests/${deleteTarget.id}`);
+      toast.success('Đã xóa yêu cầu báo mất');
+      setDeleteTarget(null);
+      setSelected(prev => (prev?.id === deleteTarget.id ? null : prev));
+      invalidate();
+    } catch (e) {
+      const bodyErr = e instanceof ApiError ? e.body : undefined;
+      toast.error(parseProblemDetailJson(bodyErr ?? '') || getApiErrorMessage(e));
+    } finally {
+      setBusy(false);
+    }
+  };
 
   const sorted = useMemo(
     () => [...rows].sort((a, b) => (b.requestDate ?? '').localeCompare(a.requestDate ?? '')),
@@ -70,7 +168,7 @@ const EmployeeLossReports = () => {
 
   const [filters, setFilters] = useState({ search: '', status: '' });
 
-  const pageLoading = lrQ.isLoading || iQ.isLoading || eqQ.isLoading;
+  const pageLoading = lrQ.isLoading || iQ.isLoading || eqQ.isLoading || empQ.isLoading;
 
   const filterFields: FilterField[] = useMemo(
     () => [
@@ -111,39 +209,7 @@ const EmployeeLossReports = () => {
     {
       key: 'kind',
       label: 'Loại',
-      render: r => lossReportKindLabels[r.lossKind ?? ''] ?? r.lossKind,
-    },
-    {
-      key: 'target',
-      label: 'Tài sản',
-      render: r => {
-        const k = lossKindUpper(r);
-        if (k === 'EQUIPMENT' && r.equipment) {
-          const itemId = r.equipment.assetItem?.id != null ? String(r.equipment.assetItem.id) : '';
-          return (
-            <span className="text-sm">
-              {formatEquipmentCodeDisplay(r.equipment.equipmentCode)}
-              {itemId ? ` — ${getItemName(itemId, assetItems)}` : ''}
-            </span>
-          );
-        }
-        if (k === 'CONSUMABLE' && r.consumableAssignment?.assetItem?.id != null) {
-          return (
-            <span className="text-sm">
-              {getItemName(String(r.consumableAssignment.assetItem.id), assetItems)} — SL: {r.quantity ?? '—'}
-            </span>
-          );
-        }
-        if (k === 'COMBINED' && r.lossEntries?.length) {
-          const summary = formatCombinedLossSummary(r, assetItems, equipments);
-          return summary ? (
-            <span className="text-sm break-words max-w-[min(28rem,55vw)] inline-block align-top">{summary}</span>
-          ) : (
-            '—'
-          );
-        }
-        return '—';
-      },
+      render: r => getLossReportKindDisplayLabel(r, true),
     },
     {
       key: 'status',
@@ -158,11 +224,37 @@ const EmployeeLossReports = () => {
     {
       key: 'actions',
       label: '',
-      className: 'w-[3rem]',
+      className: 'w-[7.5rem]',
       render: r => (
-        <Button type="button" variant="ghost" size="icon" className="h-8 w-8" title="Xem" onClick={() => setSelected(r)}>
-          <Eye className="h-4 w-4" />
-        </Button>
+        <div className="flex items-center gap-0.5" onClick={e => e.stopPropagation()}>
+          <Button type="button" variant="ghost" size="icon" className="h-8 w-8" title="Xem" onClick={() => setSelected(r)}>
+            <Eye className="h-4 w-4" />
+          </Button>
+          {canEditLossReportAsRequester(r.status) ? (
+            <Button
+              type="button"
+              variant="ghost"
+              size="icon"
+              className="h-8 w-8"
+              title="Sửa"
+              onClick={() => setEditRow(r)}
+            >
+              <Pencil className="h-4 w-4" />
+            </Button>
+          ) : null}
+          {canDeleteLossReportAsRequester(r.status) ? (
+            <Button
+              type="button"
+              variant="ghost"
+              size="icon"
+              className="h-8 w-8 text-destructive hover:text-destructive"
+              title="Xóa"
+              onClick={() => setDeleteTarget(r)}
+            >
+              <Trash2 className="h-4 w-4" />
+            </Button>
+          ) : null}
+        </div>
       ),
     },
   ];
@@ -213,47 +305,163 @@ const EmployeeLossReports = () => {
       )}
 
       <Dialog open={!!selected} onOpenChange={open => { if (!open) setSelected(null); }}>
-        <DialogContent className="max-w-lg max-h-[90vh] overflow-y-auto">
+        <DialogContent className="max-w-4xl w-[min(100%,56rem)] max-h-[90vh] overflow-y-auto">
           <DialogHeader>
             <DialogTitle>Chi tiết {selected?.code ? formatBizCodeDisplay(selected.code) : ''}</DialogTitle>
           </DialogHeader>
           {selected && (
             <div className="space-y-4 text-sm">
-              <div>
-                <span className="text-muted-foreground">Trạng thái:</span>{' '}
-                <StatusBadge status={selected.status ?? ''} label={lossReportStatusLabels[selected.status ?? ''] ?? selected.status} />
+              <RequesterEmployeeInfo requesterId={String(selected.requester?.id ?? '')} employees={employees} />
+              <div className="grid gap-2">
+                <div>
+                  <span className="text-muted-foreground">Trạng thái:</span>{' '}
+                  <StatusBadge status={selected.status ?? ''} label={lossReportStatusLabels[selected.status ?? ''] ?? selected.status} />
+                </div>
+                <div>
+                  <span className="text-muted-foreground">Loại:</span>{' '}
+                  {getLossReportKindDisplayLabel(selected, true)}
+                </div>
               </div>
-              <div>
-                <span className="text-muted-foreground">Loại:</span>{' '}
-                {lossReportKindLabels[selected.lossKind ?? ''] ?? selected.lossKind}
-              </div>
-              {lossKindUpper(selected) === 'EQUIPMENT' && selected.equipment && (
-                <div>
-                  <span className="text-muted-foreground">Thiết bị:</span>{' '}
-                  <span className="font-mono">{formatEquipmentCodeDisplay(selected.equipment.equipmentCode)}</span>
-                  {selected.equipment.assetItem?.id != null && (
-                    <span className="ml-1">— {getItemName(String(selected.equipment.assetItem.id), assetItems)}</span>
-                  )}
-                </div>
-              )}
-              {lossKindUpper(selected) === 'CONSUMABLE' && selected.consumableAssignment?.assetItem?.id != null && (
-                <div>
-                  <span className="text-muted-foreground">Vật tư:</span>{' '}
-                  {getItemName(String(selected.consumableAssignment.assetItem.id), assetItems)} — SL báo mất:{' '}
-                  <span className="font-medium tabular-nums">{selected.quantity ?? '—'}</span>
-                </div>
-              )}
-              {lossKindUpper(selected) === 'COMBINED' && selected.lossEntries?.length ? (
-                <div>
-                  <span className="text-muted-foreground">Tài sản trong phiếu:</span>
-                  <p className="mt-1 whitespace-pre-wrap break-words">{formatCombinedLossSummary(selected, assetItems, equipments)}</p>
-                </div>
-              ) : null}
+              {(() => {
+                const assetRows = buildLossAssetRows(selected, assetItems, equipments);
+                return assetRows.length > 0 ? (
+                  <div className="space-y-2">
+                    <div className="text-muted-foreground">Tài sản trong phiếu</div>
+                    <div className="overflow-x-auto rounded-md border">
+                      <table className="w-full min-w-[28rem] text-sm">
+                        <thead className="bg-muted/40">
+                          <tr>
+                            <th className="px-3 py-2 text-left font-medium">Loại</th>
+                            <th className="px-3 py-2 text-left font-medium">Tài sản</th>
+                            <th className="px-3 py-2 text-right font-medium">SL báo mất</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {assetRows.map((a, idx) => (
+                            <tr key={`${a.type}-${idx}`} className="border-t">
+                              <td className="px-3 py-2">{a.type}</td>
+                              <td className="px-3 py-2 break-words">{a.asset}</td>
+                              <td className="px-3 py-2 text-right tabular-nums">{a.quantity}</td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  </div>
+                ) : null;
+              })()}
               <LossReportRequestNarrativeFields row={selected} />
+              {canEditLossReportAsRequester(selected.status) && (
+                <div className="flex flex-wrap gap-2 pt-2 border-t">
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    onClick={() => {
+                      setEditRow(selected);
+                      setSelected(null);
+                    }}
+                  >
+                    <Pencil className="h-3.5 w-3.5 mr-1" />
+                    Sửa
+                  </Button>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    className="text-destructive"
+                    onClick={() => setDeleteTarget(selected)}
+                  >
+                    <Trash2 className="h-3.5 w-3.5 mr-1" />
+                    Xóa
+                  </Button>
+                </div>
+              )}
             </div>
           )}
         </DialogContent>
       </Dialog>
+
+      <Dialog open={!!editRow} onOpenChange={open => { if (!open) setEditRow(null); }}>
+        <DialogContent className="max-w-4xl w-[min(100%,56rem)] max-h-[90vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle>
+              Sửa YC báo mất {editRow?.code ? formatBizCodeDisplay(editRow.code) : ''}
+            </DialogTitle>
+          </DialogHeader>
+          {editRow && (
+            <div className="space-y-3">
+              <div className="space-y-1.5">
+                <Label>Thời gian (xảy ra / phát hiện)</Label>
+                <Input value={editLossOccurredAt} onChange={e => setEditLossOccurredAt(e.target.value)} disabled={busy} />
+              </div>
+              <div className="space-y-1.5">
+                <Label>Địa điểm</Label>
+                <Input value={editLossLocation} onChange={e => setEditLossLocation(e.target.value)} disabled={busy} />
+              </div>
+              <div className="space-y-1.5">
+                <Label>Lý do</Label>
+                <Textarea value={editReason} onChange={e => setEditReason(e.target.value)} rows={2} disabled={busy} />
+              </div>
+              <div className="space-y-1.5">
+                <Label>Mô tả chi tiết</Label>
+                <Textarea value={editLossDescription} onChange={e => setEditLossDescription(e.target.value)} rows={3} disabled={busy} />
+              </div>
+              {lossReportKindUpper(editRow) === 'CONSUMABLE' ? (
+                <div className="space-y-1.5">
+                  <Label>Số lượng báo mất</Label>
+                  <Input
+                    className="tabular-nums"
+                    type="number"
+                    min={1}
+                    value={editQuantity}
+                    onChange={e => setEditQuantity(e.target.value)}
+                    disabled={busy}
+                  />
+                </div>
+              ) : null}
+            </div>
+          )}
+          <DialogFooter className="gap-2 sm:gap-0">
+            <Button type="button" variant="outline" onClick={() => setEditRow(null)} disabled={busy}>
+              Hủy
+            </Button>
+            <Button type="button" onClick={() => void submitEdit()} disabled={busy}>
+              {busy ? 'Đang lưu…' : 'Lưu'}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <AlertDialog open={!!deleteTarget} onOpenChange={open => { if (!open) setDeleteTarget(null); }}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Xóa yêu cầu báo mất?</AlertDialogTitle>
+            <AlertDialogDescription>
+              Chỉ áp dụng khi phiếu đang chờ duyệt. Không hoàn tác.
+              {deleteTarget?.code ? (
+                <>
+                  {' '}
+                  Mã: <span className="font-mono font-medium">{formatBizCodeDisplay(deleteTarget.code)}</span>
+                </>
+              ) : null}
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={busy}>Hủy</AlertDialogCancel>
+            <AlertDialogAction
+              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+              onClick={e => {
+                e.preventDefault();
+                void confirmDelete();
+              }}
+              disabled={busy}
+            >
+              Xóa
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 };

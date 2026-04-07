@@ -38,7 +38,8 @@ import RequestNew from "./pages/shared/RequestNew";
 import RequestNewRepair from "./pages/shared/RequestNewRepair";
 import RequestNewReturn from "./pages/shared/RequestNewReturn";
 import RequestNewLoss from "./pages/shared/RequestNewLoss";
-import { Navigate } from "react-router-dom";
+import { Navigate } from "react-router-dom"; 
+import { useRequestRealtime } from "@/hooks/useRequestRealtime";
 
 /** Dữ liệu danh mục / list ít đổi — cache ngắn để chuyển màn lần sau không refetch lại cả loạt API (cảm giác nhanh hơn rõ). */
 const DEFAULT_QUERY_STALE_MS = 60_000;
@@ -63,6 +64,11 @@ const EMPLOYEE_PORTAL_ROLES = [
   "ROLE_DEPARTMENT_COORDINATOR",
 ];
 
+const RequestRealtimeBridge = () => {
+  useRequestRealtime();
+  return null;
+};
+
 const App = () => {
   useEffect(() => {
     if (getStoredToken()) {
@@ -72,6 +78,7 @@ const App = () => {
 
   return (
   <QueryClientProvider client={queryClient}>
+    <RequestRealtimeBridge />
     <TooltipProvider>
       <Toaster />
       <Sonner />

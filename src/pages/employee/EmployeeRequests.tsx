@@ -21,6 +21,8 @@ import {
   returnStatusLabels,
   returnLineKindLabel,
   type AllocationRequest,
+  type AssetItem,
+  type Equipment,
   type RepairRequest,
   type ReturnRequest,
 } from '@/data/mockData';
@@ -35,7 +37,7 @@ import {
   useRepairRequestsView,
   useReturnRequestsView,
 } from '@/hooks/useEntityApi';
-import { ApiError, apiGet, apiPatch, parseProblemDetailJson } from '@/api/http';
+import { ApiError, apiDelete, apiGet, apiPatch, parseProblemDetailJson } from '@/api/http';
 import type { RepairRequestDto, RepairRequestLineDto } from '@/api/types';
 import { formatBizCodeDisplay, formatEquipmentCodeDisplay } from '@/utils/formatCodes';
 import {
@@ -44,9 +46,21 @@ import {
   repairLineQuantityDisplay,
   repairLineSerialDisplay,
 } from '@/utils/repairRequestLineDisplay';
-import { buildAllocationDetailRows, sumAllocationLineQuantities } from '@/utils/allocationDisplayRows';
+import {
+  buildAllocationDetailRows,
+  formatAllocationRequestAssetNamesSummary,
+  getAllocationListKindLabel,
+} from '@/utils/allocationDisplayRows';
+import { formatRepairRequestAssetNamesSummary, getRepairListKindLabel } from '@/utils/repairRequestListDisplay';
+import {
+  formatReturnRequestAssetNamesSummary,
+  getReturnListKindLabel,
+  returnRequestHeaderNote,
+} from '@/utils/returnRequestListDisplay';
+import { catalogItemNameOnly } from '@/utils/catalogItemDisplay';
 import {
   canCancelAllocationAsEmployee,
+  canCancelRepairAsEmployee,
   canCancelReturnAsEmployee,
   canEditAllocationRequestFields,
   canEditRepairRequestFields,
@@ -57,30 +71,71 @@ import { LoadingIndicator, PageLoading } from '@/components/shared/page-loading'
 
 type RequestSection = 'allocation' | 'repair' | 'return';
 
-function matchesAllocationSearch(r: AllocationRequest, q: string): boolean {
+function matchesAllocationSearch(
+  r: AllocationRequest,
+  q: string,
+  assetItems: AssetItem[],
+  equipments: Equipment[],
+  forEmployeePortal: boolean,
+): boolean {
   if (!q.trim()) return true;
   const s = q.trim().toLowerCase();
-  const blob = [r.code, formatBizCodeDisplay(r.code), r.reason, r.assigneeSummary, r.beneficiaryNote]
+  const blob = [
+    r.code,
+    formatBizCodeDisplay(r.code),
+    r.assigneeSummary,
+    r.beneficiaryNote,
+    getAllocationListKindLabel(r.lines, forEmployeePortal),
+    formatAllocationRequestAssetNamesSummary(r.lines, assetItems, equipments),
+  ]
     .filter(Boolean)
     .join(' ')
     .toLowerCase();
   return blob.includes(s);
 }
 
-function matchesRepairSearch(r: RepairRequest, q: string): boolean {
+function matchesRepairSearch(
+  r: RepairRequest,
+  q: string,
+  equipments: Equipment[],
+  assetItems: AssetItem[],
+  forEmployeePortal: boolean,
+): boolean {
   if (!q.trim()) return true;
   const s = q.trim().toLowerCase();
-  const blob = [r.code, formatBizCodeDisplay(r.code), r.issue, r.description, r.attachmentNote]
+  const blob = [
+    r.code,
+    formatBizCodeDisplay(r.code),
+    r.issue,
+    r.description,
+    r.attachmentNote,
+    getRepairListKindLabel(r, forEmployeePortal),
+    formatRepairRequestAssetNamesSummary(r, equipments, assetItems),
+  ]
     .filter(Boolean)
     .join(' ')
     .toLowerCase();
   return blob.includes(s);
 }
 
-function matchesReturnSearch(r: ReturnRequest, q: string): boolean {
+function matchesReturnSearch(
+  r: ReturnRequest,
+  q: string,
+  assetItems: AssetItem[],
+  forEmployeePortal: boolean,
+): boolean {
   if (!q.trim()) return true;
   const s = q.trim().toLowerCase();
-  const blob = [r.code, formatBizCodeDisplay(r.code), r.reason].filter(Boolean).join(' ').toLowerCase();
+  const blob = [
+    r.code,
+    formatBizCodeDisplay(r.code),
+    returnRequestHeaderNote(r),
+    getReturnListKindLabel(r, forEmployeePortal),
+    formatReturnRequestAssetNamesSummary(r, assetItems),
+  ]
+    .filter(Boolean)
+    .join(' ')
+    .toLowerCase();
   return blob.includes(s);
 }
 
@@ -98,6 +153,11 @@ const EmployeeRequests = () => {
   const repairRequests = rrQ.data ?? [];
   const returnRequests = retQ.data ?? [];
   const equipments = eqQ.data ?? [];
+
+  const iQ = useAssetItems();
+  const alQ = useAssetLines();
+  const assetItems = useMemo(() => (iQ.data ?? []).map(mapAssetItemDto), [iQ.data]);
+  const assetLinesApi = alQ.data ?? [];
 
   const myEmpIdStr = resolveEmployeeIdForRequests();
 
@@ -138,6 +198,8 @@ const EmployeeRequests = () => {
     section === 'repair' ? 'Tạo sửa chữa' : section === 'return' ? 'Tạo thu hồi' : 'Tạo cấp phát';
 
   const isAdminRequestHub = location.pathname === '/admin/request-create';
+  /** Nhãn «Loại» gộp TB+VT — khác trên /employee so với hub admin. */
+  const employeePortalKindLabel = location.pathname.startsWith('/employee');
 
   const [filters, setFilters] = useState({ search: '', status: '' });
   useEffect(() => {
@@ -153,10 +215,10 @@ const EmployeeRequests = () => {
           : Object.entries(returnStatusLabels).map(([value, label]) => ({ value, label }));
     const placeholder =
       section === 'allocation'
-        ? 'Mã, lý do, đối tượng nhận…'
+        ? 'Mã, loại, tên tài sản, đối tượng nhận…'
         : section === 'repair'
-          ? 'Mã, vấn đề, mô tả, đính kèm…'
-          : 'Mã, ghi chú…';
+          ? 'Mã, loại, tên tài sản, vấn đề, mô tả…'
+          : 'Mã, loại, tên tài sản, ghi chú…';
     return [
       {
         key: 'search',
@@ -172,23 +234,33 @@ const EmployeeRequests = () => {
   const filteredAllocations = useMemo(() => {
     let list = myAllocations;
     if (filters.status) list = list.filter(r => r.status === filters.status);
-    if (filters.search.trim()) list = list.filter(r => matchesAllocationSearch(r, filters.search));
+    if (filters.search.trim()) {
+      list = list.filter(r =>
+        matchesAllocationSearch(r, filters.search, assetItems, equipments, employeePortalKindLabel),
+      );
+    }
     return list;
-  }, [myAllocations, filters]);
+  }, [myAllocations, filters, assetItems, equipments, employeePortalKindLabel]);
 
   const filteredRepairs = useMemo(() => {
     let list = myRepairs;
     if (filters.status) list = list.filter(r => r.status === filters.status);
-    if (filters.search.trim()) list = list.filter(r => matchesRepairSearch(r, filters.search));
+    if (filters.search.trim()) {
+      list = list.filter(r =>
+        matchesRepairSearch(r, filters.search, equipments, assetItems, employeePortalKindLabel),
+      );
+    }
     return list;
-  }, [myRepairs, filters]);
+  }, [myRepairs, filters, equipments, assetItems, employeePortalKindLabel]);
 
   const filteredReturns = useMemo(() => {
     let list = myReturns;
     if (filters.status) list = list.filter(r => r.status === filters.status);
-    if (filters.search.trim()) list = list.filter(r => matchesReturnSearch(r, filters.search));
+    if (filters.search.trim()) {
+      list = list.filter(r => matchesReturnSearch(r, filters.search, assetItems, employeePortalKindLabel));
+    }
     return list;
-  }, [myReturns, filters]);
+  }, [myReturns, filters, assetItems, employeePortalKindLabel]);
 
   const invalidate = async () => {
     await qc.invalidateQueries({ queryKey: ['api', 'allocation-requests-view'] });
@@ -205,10 +277,6 @@ const EmployeeRequests = () => {
   };
 
   const [cancelBusy, setCancelBusy] = useState<string | null>(null);
-  const iQ = useAssetItems();
-  const alQ = useAssetLines();
-  const assetItems = useMemo(() => (iQ.data ?? []).map(mapAssetItemDto), [iQ.data]);
-  const assetLinesApi = alQ.data ?? [];
 
   const hubLoading =
     arQ.isLoading || rrQ.isLoading || retQ.isLoading || eqQ.isLoading || iQ.isLoading || alQ.isLoading;
@@ -280,7 +348,7 @@ const EmployeeRequests = () => {
       setErDesc(empDetail.row.description ?? '');
       setErAttach(empDetail.row.attachmentNote ?? '');
     } else {
-      setEtReason(empDetail.row.reason ?? '');
+      setEtReason(returnRequestHeaderNote(empDetail.row));
     }
   }, [empDetail]);
 
@@ -369,6 +437,21 @@ const EmployeeRequests = () => {
     }
   };
 
+  const cancelRepair = async (id: string) => {
+    setCancelBusy(id);
+    try {
+      await apiDelete(`/api/repair-requests/${id}`);
+      toast.success('Đã hủy yêu cầu sửa chữa');
+      setEmpDetail(prev => (prev?.section === 'repair' && prev.row.id === id ? null : prev));
+      await invalidate();
+    } catch (e) {
+      const body = e instanceof ApiError ? e.body : undefined;
+      toast.error(parseProblemDetailJson(body ?? '') || (e instanceof Error ? e.message : 'Lỗi API'));
+    } finally {
+      setCancelBusy(null);
+    }
+  };
+
   // (Form tạo yêu cầu đã chuyển sang trang /request-new)
 
   return (
@@ -448,7 +531,23 @@ const EmployeeRequests = () => {
                   <span className="font-mono text-sm font-medium">{formatBizCodeDisplay(r.code)}</span>
                 ),
               },
-              { key: 'reason', label: 'Lý do' },
+              {
+                key: 'assetKind',
+                label: 'Loại',
+                render: (r: AllocationRequest) => getAllocationListKindLabel(r.lines, employeePortalKindLabel),
+              },
+              {
+                key: 'assetNames',
+                label: 'Tên tài sản',
+                render: (r: AllocationRequest) => (
+                  <span
+                    className="max-w-md truncate block"
+                    title={formatAllocationRequestAssetNamesSummary(r.lines, assetItems, equipments)}
+                  >
+                    {formatAllocationRequestAssetNamesSummary(r.lines, assetItems, equipments)}
+                  </span>
+                ),
+              },
             {
               key: 'attach',
               label: 'Đính kèm',
@@ -471,7 +570,6 @@ const EmployeeRequests = () => {
                   </span>
                 ),
               },
-            { key: 'lines', label: 'Số lượng', render: (r: AllocationRequest) => sumAllocationLineQuantities(r.lines) },
               {
                 key: 'status',
                 label: 'Trạng thái',
@@ -543,7 +641,23 @@ const EmployeeRequests = () => {
                   <span className="font-mono text-sm font-medium">{formatBizCodeDisplay(r.code)}</span>
                 ),
               },
-              { key: 'issue', label: 'Vấn đề' },
+              {
+                key: 'assetKind',
+                label: 'Loại',
+                render: (r: RepairRequest) => getRepairListKindLabel(r, employeePortalKindLabel),
+              },
+              {
+                key: 'assetNames',
+                label: 'Tên tài sản',
+                render: (r: RepairRequest) => (
+                  <span
+                    className="max-w-md truncate block"
+                    title={formatRepairRequestAssetNamesSummary(r, equipments, assetItems)}
+                  >
+                    {formatRepairRequestAssetNamesSummary(r, equipments, assetItems)}
+                  </span>
+                ),
+              },
               {
                 key: 'status',
                 label: 'Trạng thái',
@@ -553,7 +667,7 @@ const EmployeeRequests = () => {
             {
               key: 'act',
               label: 'Thao tác',
-              className: 'min-w-[5rem]',
+              className: 'min-w-[7.5rem]',
               render: (r: RepairRequest) => (
                 <div className="flex flex-wrap items-center gap-0.5">
                   <Button
@@ -576,6 +690,18 @@ const EmployeeRequests = () => {
                       onClick={() => setEmpDetail({ section: 'repair', mode: 'edit', row: r })}
                     >
                       <Pencil className="h-4 w-4" />
+                    </Button>
+                  ) : null}
+                  {canCancelRepairAsEmployee(r.status) ? (
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      className="h-8 px-2 text-xs"
+                      disabled={cancelBusy === r.id}
+                      onClick={() => void cancelRepair(r.id)}
+                    >
+                      {cancelBusy === r.id ? '…' : 'Hủy'}
                     </Button>
                   ) : null}
                 </div>
@@ -601,7 +727,27 @@ const EmployeeRequests = () => {
                   <span className="font-mono text-sm font-medium">{formatBizCodeDisplay(r.code)}</span>
                 ),
               },
-              { key: 'reason', label: 'Lý do' },
+              {
+                key: 'kind',
+                label: 'Loại',
+                render: (r: ReturnRequest) => getReturnListKindLabel(r, employeePortalKindLabel),
+              },
+              {
+                key: 'assetNames',
+                label: 'Tên tài sản',
+                render: (r: ReturnRequest) => (
+                  <span className="text-sm break-words max-w-[min(20rem,45vw)] inline-block align-top">
+                    {formatReturnRequestAssetNamesSummary(r, assetItems)}
+                  </span>
+                ),
+              },
+              {
+                key: 'note',
+                label: 'Ghi chú',
+                render: (r: ReturnRequest) => (
+                  <span className="max-w-[12rem] truncate block">{returnRequestHeaderNote(r) || '—'}</span>
+                ),
+              },
               {
                 key: 'status',
                 label: 'Trạng thái',
@@ -810,6 +956,20 @@ const EmployeeRequests = () => {
                   {empDetail.row.attachmentNote ? <AttachmentNoteView text={empDetail.row.attachmentNote} /> : null}
                 </div>
               )}
+              {canCancelRepairAsEmployee(empDetail.row.status) ? (
+                <div className="pt-2 border-t border-border">
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    className="text-destructive border-destructive/30 hover:bg-destructive/10"
+                    disabled={cancelBusy === empDetail.row.id}
+                    onClick={() => void cancelRepair(empDetail.row.id)}
+                  >
+                    {cancelBusy === empDetail.row.id ? '…' : 'Hủy yêu cầu'}
+                  </Button>
+                </div>
+              ) : null}
             </div>
           )}
           {empDetail?.section === 'return' && (
@@ -820,7 +980,7 @@ const EmployeeRequests = () => {
               </div>
               {empDetail.mode === 'edit' && canEditReturnRequestFields(empDetail.row.status) ? (
                 <div className="space-y-2 border rounded-md p-3 bg-muted/20">
-                  <Label>Lý do / ghi chú</Label>
+                  <Label>Ghi chú</Label>
                   <Textarea value={etReason} onChange={e => setEtReason(e.target.value)} rows={3} disabled={empBusy} />
                   <div className="flex gap-2">
                     <Button type="button" size="sm" disabled={empBusy} onClick={() => void saveEmpReturn()}>
@@ -832,14 +992,16 @@ const EmployeeRequests = () => {
                   </div>
                 </div>
               ) : (
-                <div><span className="text-muted-foreground">Lý do:</span> {empDetail.row.reason}</div>
+                <div>
+                  <span className="text-muted-foreground">Ghi chú:</span> {returnRequestHeaderNote(empDetail.row) || '—'}
+                </div>
               )}
               <div className="text-muted-foreground border-t pt-2">
                 <p className="font-medium text-foreground mb-1">Thiết bị / vật tư thu hồi</p>
                 <ul className="list-disc pl-4 space-y-1">
                   {empDetail.row.lines.map(line => {
                     const kind = returnLineKindLabel(line.lineType);
-                    const name = getItemName(line.itemId, assetItems);
+                    const name = catalogItemNameOnly(line.itemId, assetItems);
                     const eqCode =
                       line.equipmentId && equipments.find(e => e.id === line.equipmentId)?.equipmentCode;
                     const tail =

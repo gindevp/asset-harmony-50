@@ -28,14 +28,14 @@ export function RequesterEmployeeInfo({
 
   const rows: { label: string; value: string }[] = e
     ? [
-        { label: 'Mã nhân viên', value: (e.code ?? '').trim() || '—' },
+        { label: 'Mã người dùng', value: (e.code ?? '').trim() || '—' },
         { label: 'Họ và tên', value: (e.fullName ?? '').trim() || '—' },
         { label: 'Chức danh', value: (e.jobTitle ?? '').trim() || '—' },
         { label: 'Phòng ban', value: (e.department?.name ?? '').trim() || '—' },
         ...(!hideLocation ? [{ label: 'Vị trí / khu vực', value: (e.location?.name ?? '').trim() || '—' }] : []),
       ]
     : [
-        { label: 'Mã nhân viên', value: id || '—' },
+        { label: 'Mã người dùng', value: id || '—' },
         { label: 'Họ và tên', value: 'Không tìm thấy trong danh sách nhân viên' },
         { label: 'Chức danh', value: '—' },
         { label: 'Phòng ban', value: '—' },

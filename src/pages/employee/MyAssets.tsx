@@ -3,11 +3,10 @@ import { DataTable, Column } from '@/components/shared/DataTable';
 import { StatusBadge } from '@/components/shared/StatusBadge';
 import { Card, CardContent } from '@/components/ui/card';
 import {
-  equipmentStatusLabels,
   getItemCode,
   getItemName,
   getItemUnit,
-  formatDate,
+  formatDateTime,
 } from '@/data/mockData';
 import { resolveEmployeeIdForRequests, resolveEmployeeLocationIdForRequests } from '@/api/account';
 import {
@@ -21,11 +20,14 @@ import {
   useReturnRequestsView,
 } from '@/hooks/useEntityApi';
 import {
+  equipmentIdsOnOpenReturnForRequester,
   filterConsumableAssignmentsForMyAccount,
   filterEquipmentForMyAccount,
   getConsumableAssignmentDisplayStatus,
+  getEquipmentDisplayStatusForMyAssets,
 } from '@/utils/myEquipment';
 import {
+  getConsumableGroupDisplayStatusForMyAssets,
   groupConsumableAssignmentsByAssetItem,
   sortEquipmentForDisplay,
   totalHeldForConsumableGroup,
@@ -34,34 +36,11 @@ import {
 } from '@/utils/myHoldingsAggregate';
 import { mapAssetItemIdToConsumablePending } from '@/utils/openAssetRequestBlocks';
 import { formatEquipmentCodeDisplay } from '@/utils/formatCodes';
-import type { Equipment, RepairRequest } from '@/data/mockData';
+import type { Equipment } from '@/data/mockData';
 import type { ConsumableAssignmentDto } from '@/api/types';
 import { PageLoading } from '@/components/shared/page-loading';
 
 type MyConsumableGroupRow = GroupedConsumableRow & { id: string };
-
-function getConsumableGroupDisplayStatus(
-  g: GroupedConsumableRow,
-  repairRequests: RepairRequest[],
-  pending: ReturnType<typeof mapAssetItemIdToConsumablePending>,
-  approvedLossSet: Set<string>,
-): { status: string; label: string } {
-  const held = totalHeldForConsumableGroup(g.assignments);
-  const pend = pending.get(g.assetItemId);
-  if (held <= 0) {
-    const anyLost = g.assignments.some(a => approvedLossSet.has(String(a.id ?? '')));
-    if (anyLost) return { status: 'LOST', label: equipmentStatusLabels.LOST };
-    return { status: 'IN_STOCK', label: equipmentStatusLabels.IN_STOCK };
-  }
-  if ((pend?.repairQty ?? 0) > 0) {
-    return { status: 'UNDER_REPAIR', label: equipmentStatusLabels.UNDER_REPAIR };
-  }
-  for (const a of g.assignments) {
-    const st = getConsumableAssignmentDisplayStatus(a, repairRequests, approvedLossSet);
-    if (st.status === 'UNDER_REPAIR') return st;
-  }
-  return { status: 'IN_USE', label: equipmentStatusLabels.IN_USE };
-}
 
 const MyAssets = () => {
   const eqQ = useEnrichedEquipmentList();
@@ -140,9 +119,18 @@ const MyAssets = () => {
     [consumableGroupRows],
   );
 
+  const equipmentOnOpenReturnIds = useMemo(
+    () => equipmentIdsOnOpenReturnForRequester(empId, returnRequests),
+    [empId, returnRequests],
+  );
+
+  /** Đang sử dụng thực sự — không tính thiết bị đã gửi thu hồi (hiển thị «Chờ thu hồi»). */
   const equipmentInUseCount = useMemo(
-    () => myEquipments.filter(e => e.status === 'IN_USE').length,
-    [myEquipments],
+    () =>
+      myEquipments.filter(
+        e => e.status === 'IN_USE' && !equipmentOnOpenReturnIds.has(String(e.id)),
+      ).length,
+    [myEquipments, equipmentOnOpenReturnIds],
   );
 
   const equipmentUnderRepairCount = useMemo(
@@ -150,11 +138,16 @@ const MyAssets = () => {
     [myEquipments],
   );
 
+  const equipmentLostCount = useMemo(
+    () => myEquipments.filter(e => e.status === 'LOST').length,
+    [myEquipments],
+  );
+
   const consumableInUseRowCount = useMemo(
     () =>
       consumableGroupRows.filter(
         g =>
-          getConsumableGroupDisplayStatus(
+          getConsumableGroupDisplayStatusForMyAssets(
             g,
             repairRequests,
             consumablePendingByAssetItem,
@@ -168,7 +161,7 @@ const MyAssets = () => {
     () =>
       consumableGroupRows.filter(
         g =>
-          getConsumableGroupDisplayStatus(
+          getConsumableGroupDisplayStatusForMyAssets(
             g,
             repairRequests,
             consumablePendingByAssetItem,
@@ -176,6 +169,50 @@ const MyAssets = () => {
           ).status === 'UNDER_REPAIR',
       ).length,
     [consumableGroupRows, repairRequests, consumablePendingByAssetItem, approvedLossConsumableIds],
+  );
+
+  const consumableLostRowCount = useMemo(
+    () =>
+      consumableGroupRows.filter(
+        g =>
+          getConsumableGroupDisplayStatusForMyAssets(
+            g,
+            repairRequests,
+            consumablePendingByAssetItem,
+            approvedLossConsumableIds,
+          ).status === 'LOST',
+      ).length,
+    [consumableGroupRows, repairRequests, consumablePendingByAssetItem, approvedLossConsumableIds],
+  );
+
+  /** Phiếu thu hồi mở (chờ duyệt / đã duyệt chưa hoàn tất) — thiết bị nằm trong phiếu của tôi. */
+  const equipmentInReturnCount = useMemo(
+    () => myEquipments.filter(e => equipmentOnOpenReturnIds.has(String(e.id))).length,
+    [myEquipments, equipmentOnOpenReturnIds],
+  );
+
+  /** Mặt hàng vật tư có SL đang trong phiếu thu hồi mở. */
+  const consumableInReturnRowCount = useMemo(
+    () =>
+      consumableGroupRows.filter(
+        g => (consumablePendingByAssetItem.get(g.assetItemId)?.returnQty ?? 0) > 0,
+      ).length,
+    [consumableGroupRows, consumablePendingByAssetItem],
+  );
+
+  /** Mặt hàng vật tư — tổng SL đang trong phiếu thu hồi mở (theo assetItem). */
+  const consumableReturnQtyPending = useMemo(() => {
+    let s = 0;
+    for (const g of consumableGroupRows) {
+      s += consumablePendingByAssetItem.get(g.assetItemId)?.returnQty ?? 0;
+    }
+    return s;
+  }, [consumableGroupRows, consumablePendingByAssetItem]);
+
+  /** Một «đơn vị» danh sách: 1 thiết bị hoặc 1 mặt hàng vật tư (gộp). */
+  const totalAssetLineCount = useMemo(
+    () => myEquipments.length + consumableGroupRows.length,
+    [myEquipments, consumableGroupRows],
   );
 
   const equipmentColumns: Column<Equipment>[] = useMemo(
@@ -207,17 +244,18 @@ const MyAssets = () => {
       {
         key: 'status',
         label: 'Trạng thái',
-        render: e => (
-          <StatusBadge status={e.status} label={equipmentStatusLabels[e.status] ?? e.status} />
-        ),
+        render: e => {
+          const { status, label } = getEquipmentDisplayStatusForMyAssets(e, empId, returnRequests);
+          return <StatusBadge status={status} label={label} />;
+        },
       },
       {
         key: 'capitalizedDate',
-        label: 'Ngày bàn giao',
-        render: e => formatDate(e.capitalizedDate ?? ''),
+        label: 'Thời điểm bàn giao',
+        render: e => formatDateTime(e.capitalizedDate ?? ''),
       },
     ],
-    [assetItems],
+    [assetItems, empId, returnRequests],
   );
 
   const consumableColumns: Column<MyConsumableGroupRow>[] = useMemo(
@@ -257,7 +295,7 @@ const MyAssets = () => {
         key: 'status',
         label: 'Trạng thái',
         render: g => {
-          const { status, label } = getConsumableGroupDisplayStatus(
+          const { status, label } = getConsumableGroupDisplayStatusForMyAssets(
             g,
             repairRequests,
             consumablePendingByAssetItem,
@@ -298,13 +336,13 @@ const MyAssets = () => {
       },
       {
         key: 'assignedDate',
-        label: 'Ngày BG (sớm nhất)',
+        label: 'BG sớm nhất (ngày giờ)',
         render: g => {
           const dates = g.assignments
             .map(a => a.assignedDate)
             .filter((d): d is string => Boolean(d))
             .sort();
-          return formatDate(dates[0] ?? '');
+          return formatDateTime(dates[0] ?? '');
         },
       },
     ],
@@ -324,30 +362,29 @@ const MyAssets = () => {
           {empId && (
             <div className="flex flex-wrap gap-x-4 gap-y-1 text-sm">
               <span>
-                <span className="text-muted-foreground">Số lượng thiết bị:</span>{' '}
-                <span className="font-semibold tabular-nums">{listLoading ? '—' : myEquipments.length}</span>
-                <span className="text-muted-foreground"> chiếc</span>
-                {!listLoading && myEquipments.length > 0 && (
-                  <span className="text-muted-foreground">
-                    {' '}
-                    (đang dùng: {equipmentInUseCount})
-                  </span>
-                )}
+                <span className="text-muted-foreground">Tổng tài sản (dòng danh sách):</span>{' '}
+                <span className="font-semibold tabular-nums text-fuchsia-600 dark:text-fuchsia-300">
+                  {listLoading ? '—' : totalAssetLineCount}
+                </span>
+                <span className="text-muted-foreground">
+                  {' '}
+                  —{' '}
+                  {listLoading
+                    ? '…'
+                    : `${myEquipments.length} thiết bị · ${consumableGroupRows.length} mặt hàng vật tư`}
+                </span>
               </span>
-              <span className="text-muted-foreground hidden sm:inline">·</span>
-              <span>
-                <span className="text-muted-foreground">Số lượng vật tư:</span>{' '}
-                <span className="font-semibold tabular-nums">{listLoading ? '—' : consumableGroupRows.length}</span>
-                <span className="text-muted-foreground"> mặt hàng</span>
-                {!listLoading && consumableGroupRows.length > 0 && (
-                  <>
-                    <span className="text-muted-foreground"> — tổng SL còn giữ: </span>
-                    <span className="font-semibold tabular-nums text-emerald-800">
+              {!listLoading && consumableGroupRows.length > 0 && (
+                <>
+                  <span className="text-muted-foreground hidden sm:inline">·</span>
+                  <span>
+                    <span className="text-muted-foreground">Tổng SL vật tư còn giữ:</span>{' '}
+                    <span className="font-semibold tabular-nums text-emerald-800 dark:text-emerald-300">
                       {totalConsumableQtyHeld.toLocaleString('vi-VN')}
                     </span>
-                  </>
-                )}
-              </span>
+                  </span>
+                </>
+              )}
             </div>
           )}
         </div>
@@ -357,77 +394,137 @@ const MyAssets = () => {
         <PageLoading minHeight="min-h-[50vh]" />
       ) : (
       <>
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-        <Card>
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5 gap-4">
+        <Card className="border-l-4 border-l-fuchsia-400 bg-fuchsia-50 dark:bg-fuchsia-950/20 border-fuchsia-100/80 dark:border-fuchsia-900/50 shadow-sm">
           <CardContent className="pt-6">
-            <div className="text-sm text-muted-foreground">Số lượng thiết bị</div>
-            <div className="text-2xl font-bold tabular-nums">{listLoading ? '—' : myEquipments.length}</div>
-            <div className="text-xs text-muted-foreground mt-1">đơn vị: chiếc</div>
-            <div className="text-xs text-muted-foreground mt-2 pt-2 border-t border-border/60">
-              Vật tư:{' '}
-              <span className="font-medium text-foreground tabular-nums">
-                {listLoading ? '—' : consumableGroupRows.length}
-              </span>{' '}
-              mặt hàng
-              {!listLoading && consumableGroupRows.length > 0 && (
-                <>
-                  {' '}
-                  · tổng SL còn giữ{' '}
-                  <span className="font-medium text-emerald-800 tabular-nums">
-                    {totalConsumableQtyHeld.toLocaleString('vi-VN')}
-                  </span>
-                </>
-              )}
+            <div className="text-sm font-medium text-fuchsia-800 dark:text-fuchsia-200">Tổng tài sản</div>
+            <div className="text-2xl font-bold tabular-nums text-fuchsia-600 dark:text-fuchsia-300">
+              {listLoading ? '—' : totalAssetLineCount}
+            </div>
+            <div className="text-xs text-muted-foreground mt-1">thiết bị + mặt hàng vật tư (số dòng danh sách)</div>
+            <div className="text-xs mt-2 pt-2 border-t border-fuchsia-200/90 dark:border-fuchsia-800/50 space-y-0.5">
+              <div>
+                <span className="text-muted-foreground">Thiết bị:</span>{' '}
+                <span className="font-semibold tabular-nums text-foreground">{listLoading ? '—' : myEquipments.length}</span>{' '}
+                <span className="text-muted-foreground">chiếc</span>
+              </div>
+              <div>
+                <span className="text-muted-foreground">Vật tư:</span>{' '}
+                <span className="font-semibold tabular-nums text-emerald-800 dark:text-emerald-300">
+                  {listLoading ? '—' : consumableGroupRows.length}
+                </span>{' '}
+                <span className="text-muted-foreground">mặt hàng</span>
+                {!listLoading && consumableGroupRows.length > 0 && (
+                  <>
+                    {' '}
+                    <span className="text-muted-foreground">· SL còn giữ</span>{' '}
+                    <span className="font-semibold tabular-nums text-emerald-800 dark:text-emerald-300">
+                      {totalConsumableQtyHeld.toLocaleString('vi-VN')}
+                    </span>
+                  </>
+                )}
+              </div>
             </div>
           </CardContent>
         </Card>
-        <Card>
+        <Card className="border-l-4 border-l-sky-400 bg-sky-50 dark:bg-sky-950/20 border-sky-100/80 dark:border-sky-900/50 shadow-sm">
           <CardContent className="pt-6">
-            <div className="text-sm text-muted-foreground">Đang sử dụng</div>
-            <div className="text-2xl font-bold text-blue-600 tabular-nums">
-              {listLoading ? '—' : equipmentInUseCount}
+            <div className="text-sm font-medium text-sky-800 dark:text-sky-200">Đang sử dụng</div>
+            <div className="text-2xl font-bold text-sky-500 dark:text-sky-300 tabular-nums">
+              {listLoading ? '—' : equipmentInUseCount + consumableInUseRowCount}
             </div>
-            <div className="text-xs text-muted-foreground mt-1">thiết bị · trên tổng {listLoading ? '—' : myEquipments.length} chiếc</div>
-            <div className="text-xs text-muted-foreground mt-2 pt-2 border-t border-border/60">
-              Vật tư:{' '}
-              <span className="font-medium text-emerald-800 tabular-nums">
-                {listLoading ? '—' : consumableInUseRowCount}
-              </span>{' '}
-              mặt hàng đang giữ (chưa trong phiếu sửa chữa)
+            <div className="text-xs text-muted-foreground mt-1">tổng dòng đang dùng (TB + VT)</div>
+            <div className="text-xs mt-2 pt-2 border-t border-sky-200/90 dark:border-sky-800/50 space-y-0.5">
+              <div>
+                <span className="text-muted-foreground">Thiết bị:</span>{' '}
+                <span className="font-semibold tabular-nums">{listLoading ? '—' : equipmentInUseCount}</span>{' '}
+                <span className="text-muted-foreground">chiếc</span>
+              </div>
+              <div>
+                <span className="text-muted-foreground">Vật tư:</span>{' '}
+                <span className="font-semibold tabular-nums text-emerald-800 dark:text-emerald-300">
+                  {listLoading ? '—' : consumableInUseRowCount}
+                </span>{' '}
+                <span className="text-muted-foreground">mặt hàng đang giữ</span>
+              </div>
             </div>
           </CardContent>
         </Card>
-        <Card>
+        <Card className="border-l-4 border-l-amber-400 bg-amber-50 dark:bg-amber-950/20 border-amber-100/80 dark:border-amber-900/50 shadow-sm">
           <CardContent className="pt-6">
-            <div className="text-sm text-muted-foreground">Đang sửa chữa</div>
-            <div className="text-2xl font-bold text-amber-600 tabular-nums">
-              {listLoading ? '—' : equipmentUnderRepairCount}
+            <div className="text-sm font-medium text-amber-800 dark:text-amber-200">Đang sửa chữa</div>
+            <div className="text-2xl font-bold text-amber-500 dark:text-amber-300 tabular-nums">
+              {listLoading ? '—' : equipmentUnderRepairCount + consumableUnderRepairRowCount}
             </div>
-            <div className="text-xs text-muted-foreground mt-1">thiết bị</div>
-            <div className="text-xs text-muted-foreground mt-2 pt-2 border-t border-border/60">
-              Vật tư:{' '}
-              <span className="font-medium text-amber-700 tabular-nums">
-                {listLoading ? '—' : consumableUnderRepairRowCount}
-              </span>{' '}
-              mặt hàng trong phiếu sửa chữa
+            <div className="text-xs text-muted-foreground mt-1">tổng dòng trong phiếu sửa chữa</div>
+            <div className="text-xs mt-2 pt-2 border-t border-amber-200/90 dark:border-amber-800/50 space-y-0.5">
+              <div>
+                <span className="text-muted-foreground">Thiết bị:</span>{' '}
+                <span className="font-semibold tabular-nums">{listLoading ? '—' : equipmentUnderRepairCount}</span>{' '}
+                <span className="text-muted-foreground">chiếc</span>
+              </div>
+              <div>
+                <span className="text-muted-foreground">Vật tư:</span>{' '}
+                <span className="font-semibold tabular-nums text-amber-700 dark:text-amber-300">
+                  {listLoading ? '—' : consumableUnderRepairRowCount}
+                </span>{' '}
+                <span className="text-muted-foreground">mặt hàng</span>
+              </div>
             </div>
           </CardContent>
         </Card>
-        <Card>
+        <Card className="border-l-4 border-l-teal-400 bg-teal-50 dark:bg-teal-950/20 border-teal-100/80 dark:border-teal-900/50 shadow-sm">
           <CardContent className="pt-6">
-            <div className="text-sm text-muted-foreground">Số lượng vật tư</div>
-            <div className="text-2xl font-bold text-emerald-800 tabular-nums">
-              {listLoading ? '—' : consumableGroupRows.length}
+            <div className="text-sm font-medium text-teal-800 dark:text-teal-200">Thu hồi</div>
+            <div className="text-2xl font-bold text-teal-500 dark:text-teal-300 tabular-nums">
+              {listLoading ? '—' : equipmentInReturnCount + consumableInReturnRowCount}
             </div>
-            <div className="text-xs text-muted-foreground mt-1">
-              {listLoading ? '—' : `${totalConsumableQtyHeld.toLocaleString('vi-VN')} SL còn giữ (tổng)`}
+            <div className="text-xs text-muted-foreground mt-1">phiếu thu hồi chờ / đang xử lý (chưa hoàn tất)</div>
+            <div className="text-xs mt-2 pt-2 border-t border-teal-200/90 dark:border-teal-800/50 space-y-0.5">
+              <div>
+                <span className="text-muted-foreground">Thiết bị:</span>{' '}
+                <span className="font-semibold tabular-nums">{listLoading ? '—' : equipmentInReturnCount}</span>{' '}
+                <span className="text-muted-foreground">chiếc trong phiếu</span>
+              </div>
+              <div>
+                <span className="text-muted-foreground">Vật tư:</span>{' '}
+                <span className="font-semibold tabular-nums text-teal-800 dark:text-teal-300">
+                  {listLoading ? '—' : consumableInReturnRowCount}
+                </span>{' '}
+                <span className="text-muted-foreground">mặt hàng</span>
+                {!listLoading && consumableInReturnRowCount > 0 && (
+                  <>
+                    {' '}
+                    <span className="text-muted-foreground">· SL yêu cầu</span>{' '}
+                    <span className="font-semibold tabular-nums text-teal-800 dark:text-teal-300">
+                      {consumableReturnQtyPending.toLocaleString('vi-VN')}
+                    </span>
+                  </>
+                )}
+              </div>
             </div>
-            <div className="text-xs text-muted-foreground mt-2 pt-2 border-t border-border/60">
-              Thiết bị:{' '}
-              <span className="font-medium text-foreground tabular-nums">
-                {listLoading ? '—' : myEquipments.length}
-              </span>{' '}
-              chiếc (danh sách phía trên)
+          </CardContent>
+        </Card>
+        <Card className="border-l-4 border-l-rose-400 bg-rose-50 dark:bg-rose-950/20 border-rose-100/80 dark:border-rose-900/50 shadow-sm">
+          <CardContent className="pt-6">
+            <div className="text-sm font-medium text-rose-800 dark:text-rose-200">Mất</div>
+            <div className="text-2xl font-bold text-rose-500 dark:text-rose-300 tabular-nums">
+              {listLoading ? '—' : equipmentLostCount + consumableLostRowCount}
+            </div>
+            <div className="text-xs text-muted-foreground mt-1">đã xác nhận mất (thiết bị + mặt hàng vật tư)</div>
+            <div className="text-xs mt-2 pt-2 border-t border-rose-200/90 dark:border-rose-800/50 space-y-0.5">
+              <div>
+                <span className="text-muted-foreground">Thiết bị:</span>{' '}
+                <span className="font-semibold tabular-nums">{listLoading ? '—' : equipmentLostCount}</span>{' '}
+                <span className="text-muted-foreground">chiếc</span>
+              </div>
+              <div>
+                <span className="text-muted-foreground">Vật tư:</span>{' '}
+                <span className="font-semibold tabular-nums text-rose-800 dark:text-rose-300">
+                  {listLoading ? '—' : consumableLostRowCount}
+                </span>{' '}
+                <span className="text-muted-foreground">mặt hàng (đã báo mất, duyệt)</span>
+              </div>
             </div>
           </CardContent>
         </Card>

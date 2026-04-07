@@ -22,25 +22,22 @@ import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
 import { Eye, Pencil, Trash2 } from 'lucide-react';
 import { toast } from 'sonner';
-import { formatBizCodeDisplay, formatEquipmentCodeDisplay } from '@/utils/formatCodes';
+import { formatBizCodeDisplay } from '@/utils/formatCodes';
 import { getEmployeeName, getItemName, formatDate } from '@/data/mockData';
-import {
-  lossReportKindLabels,
-  lossReportStatusLabels,
-} from '@/data/mockData';
+import { lossReportStatusLabels } from '@/data/mockData';
 import type { LossReportRequestDto } from '@/api/types';
 import { ApiError, apiDelete, apiPatch, getApiErrorMessage, parseProblemDetailJson } from '@/api/http';
+import { getStoredToken } from '@/api/http';
+import { hasAnyAuthority } from '@/auth/jwt';
 import type { Equipment } from '@/data/mockData';
 import { mapAssetItemDto, useAssetItems, useEmployees, useEnrichedEquipmentList, useLossReportRequests } from '@/hooks/useEntityApi';
-import { formatCombinedLossSummary } from '@/utils/lossReportCombinedDisplay';
+import { formatCombinedLossSummary, getLossReportKindDisplayLabel, lossReportKindUpper } from '@/utils/lossReportCombinedDisplay';
 import { LossReportRequestNarrativeFields } from '@/components/shared/LossReportRequestNarrativeFields';
 import { PageLoading } from '@/components/shared/page-loading';
-
-function lossKindUpper(r: LossReportRequestDto): string {
-  return String(r.lossKind ?? '').toUpperCase();
-}
+import { buildLossAssetRows } from '@/utils/lossReportAssetRows';
 
 const LossReportRequests = () => {
+  const canAdminEditDelete = hasAnyAuthority(getStoredToken(), ['ROLE_ADMIN']);
   const qc = useQueryClient();
   const lrQ = useLossReportRequests();
   const empQ = useEmployees();
@@ -118,7 +115,7 @@ const LossReportRequests = () => {
       reason: editReason.trim(),
       lossDescription: editLossDescription.trim(),
     };
-    if (lossKindUpper(editRow) === 'CONSUMABLE') {
+    if (lossReportKindUpper(editRow) === 'CONSUMABLE') {
       const q = Number.parseInt(editQuantity.trim(), 10);
       if (!Number.isFinite(q) || q < 1) {
         toast.error('Số lượng vật tư phải là số nguyên ≥ 1');
@@ -202,40 +199,7 @@ const LossReportRequests = () => {
     {
       key: 'kind',
       label: 'Loại',
-      render: r => lossReportKindLabels[r.lossKind ?? ''] ?? r.lossKind,
-    },
-    {
-      key: 'target',
-      label: 'Tài sản',
-      render: r => {
-        const k = lossKindUpper(r);
-        if (k === 'EQUIPMENT' && r.equipment) {
-          const itemId = r.equipment.assetItem?.id != null ? String(r.equipment.assetItem.id) : '';
-          return (
-            <span className="text-sm">
-              {formatEquipmentCodeDisplay(r.equipment.equipmentCode)}
-              {itemId ? ` — ${getItemName(itemId, assetItems)}` : ''}
-            </span>
-          );
-        }
-        if (k === 'CONSUMABLE' && r.consumableAssignment?.assetItem?.id != null) {
-          const id = String(r.consumableAssignment.assetItem.id);
-          return (
-            <span className="text-sm">
-              {getItemName(id, assetItems)} — SL: {r.quantity ?? '—'}
-            </span>
-          );
-        }
-        if (k === 'COMBINED' && r.lossEntries?.length) {
-          const summary = formatCombinedLossSummary(r, assetItems, equipments);
-          return summary ? (
-            <span className="text-sm break-words max-w-[min(28rem,55vw)] inline-block align-top">{summary}</span>
-          ) : (
-            '—'
-          );
-        }
-        return '—';
-      },
+      render: r => getLossReportKindDisplayLabel(r),
     },
     {
       key: 'status',
@@ -256,7 +220,7 @@ const LossReportRequests = () => {
           <Button type="button" variant="ghost" size="icon" className="h-8 w-8" title="Xem" onClick={() => setSelected(r)}>
             <Eye className="h-4 w-4" />
           </Button>
-          {r.status === 'PENDING' && (
+          {canAdminEditDelete && r.status === 'PENDING' && (
             <>
               <Button type="button" variant="ghost" size="icon" className="h-8 w-8" title="Sửa" onClick={() => openEdit(r)}>
                 <Pencil className="h-4 w-4" />
@@ -309,12 +273,16 @@ const LossReportRequests = () => {
       )}
 
       <Dialog open={!!selected} onOpenChange={open => { if (!open) setSelected(null); }}>
-        <DialogContent className="max-w-lg max-h-[90vh] overflow-y-auto">
+        <DialogContent className="max-w-4xl w-[min(100%,56rem)] max-h-[90vh] overflow-y-auto">
           <DialogHeader>
             <DialogTitle>Chi tiết YC báo mất {selected?.code ? formatBizCodeDisplay(selected.code) : ''}</DialogTitle>
           </DialogHeader>
           {selected && (
             <div className="space-y-4 text-sm">
+              {(() => {
+                const assetRows = buildLossAssetRows(selected, assetItems, equipments);
+                return (
+                  <>
               <RequesterEmployeeInfo requesterId={String(selected.requester?.id ?? '')} employees={employees} />
               <div className="grid gap-2">
                 <div>
@@ -323,33 +291,36 @@ const LossReportRequests = () => {
                 </div>
                 <div>
                   <span className="text-muted-foreground">Loại:</span>{' '}
-                  {lossReportKindLabels[selected.lossKind ?? ''] ?? selected.lossKind}
+                  {getLossReportKindDisplayLabel(selected)}
                 </div>
-                {lossKindUpper(selected) === 'EQUIPMENT' && selected.equipment && (
-                  <div>
-                    <span className="text-muted-foreground">Thiết bị:</span>{' '}
-                    <span className="font-mono">{formatEquipmentCodeDisplay(selected.equipment.equipmentCode)}</span>
-                    {selected.equipment.assetItem?.id != null && (
-                      <span className="ml-1">— {getItemName(String(selected.equipment.assetItem.id), assetItems)}</span>
-                    )}
-                  </div>
-                )}
-                {lossKindUpper(selected) === 'CONSUMABLE' && selected.consumableAssignment?.assetItem?.id != null && (
-                  <div>
-                    <span className="text-muted-foreground">Vật tư:</span>{' '}
-                    {getItemName(String(selected.consumableAssignment.assetItem.id), assetItems)} — SL báo mất:{' '}
-                    <span className="font-medium tabular-nums">{selected.quantity ?? '—'}</span>
-                  </div>
-                )}
-                {lossKindUpper(selected) === 'COMBINED' && selected.lossEntries?.length ? (
-                  <div>
-                    <span className="text-muted-foreground">Tài sản trong phiếu:</span>
-                    <p className="mt-1 whitespace-pre-wrap break-words">{formatCombinedLossSummary(selected, assetItems, equipments)}</p>
-                  </div>
-                ) : null}
               </div>
+              {assetRows.length > 0 ? (
+                <div className="space-y-2">
+                  <div className="text-muted-foreground">Tài sản trong phiếu</div>
+                  <div className="overflow-x-auto rounded-md border">
+                    <table className="w-full min-w-[28rem] text-sm">
+                      <thead className="bg-muted/40">
+                        <tr>
+                          <th className="px-3 py-2 text-left font-medium">Loại</th>
+                          <th className="px-3 py-2 text-left font-medium">Tài sản</th>
+                          <th className="px-3 py-2 text-right font-medium">SL báo mất</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {assetRows.map((a, idx) => (
+                          <tr key={`${a.type}-${idx}`} className="border-t">
+                            <td className="px-3 py-2">{a.type}</td>
+                            <td className="px-3 py-2 break-words">{a.asset}</td>
+                            <td className="px-3 py-2 text-right tabular-nums">{a.quantity}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              ) : null}
               <LossReportRequestNarrativeFields row={selected} />
-              {selected.status === 'PENDING' && (
+              {canAdminEditDelete && selected.status === 'PENDING' && (
                 <div className="flex flex-wrap gap-2">
                   <Button type="button" variant="outline" size="sm" onClick={() => { openEdit(selected); setSelected(null); }}>
                     <Pencil className="h-3.5 w-3.5 mr-1" />
@@ -371,13 +342,16 @@ const LossReportRequests = () => {
                   onExport={() => toast.info('Xuất CSV')}
                 />
               )}
+                  </>
+                );
+              })()}
             </div>
           )}
         </DialogContent>
       </Dialog>
 
       <Dialog open={!!editRow} onOpenChange={open => { if (!open) setEditRow(null); }}>
-        <DialogContent className="max-w-lg max-h-[90vh] overflow-y-auto">
+        <DialogContent className="max-w-4xl w-[min(100%,56rem)] max-h-[90vh] overflow-y-auto">
           <DialogHeader>
             <DialogTitle>
               Sửa YC báo mất {editRow?.code ? formatBizCodeDisplay(editRow.code) : ''}
@@ -401,7 +375,7 @@ const LossReportRequests = () => {
                 <Label>Mô tả chi tiết</Label>
                 <Textarea value={editLossDescription} onChange={e => setEditLossDescription(e.target.value)} rows={3} />
               </div>
-              {lossKindUpper(editRow) === 'CONSUMABLE' ? (
+              {lossReportKindUpper(editRow) === 'CONSUMABLE' ? (
                 <div className="space-y-1.5">
                   <Label>Số lượng báo mất</Label>
                   <Input

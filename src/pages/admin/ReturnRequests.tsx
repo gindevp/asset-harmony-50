@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   AlertDialog,
   AlertDialogAction,
@@ -24,7 +24,6 @@ import {
   returnLineKindLabel,
   getEmployeeName,
   getDepartmentName,
-  getItemName,
   formatDate,
 } from '@/data/mockData';
 import { toast } from 'sonner';
@@ -43,6 +42,16 @@ import { hasAnyAuthority } from '@/auth/jwt';
 import type { ReturnRequestLineDto } from '@/api/types';
 import { canDeleteReturnRequest, canEditReturnRequestFields } from '@/utils/requestRecordActions';
 import { LoadingIndicator, PageLoading } from '@/components/shared/page-loading';
+import { catalogItemNameOnly } from '@/utils/catalogItemDisplay';
+import {
+  formatReturnRequestAssetNamesSummary,
+  getReturnListKindLabel,
+  returnRequestHeaderNote,
+} from '@/utils/returnRequestListDisplay';
+
+function returnStatusKey(s: string | undefined): string {
+  return String(s ?? '').trim().toUpperCase();
+}
 
 /** QLTS không có quyền sửa/xóa phiếu (Admin / GĐ vẫn có). */
 function hideReturnEditDeleteForQlts(): boolean {
@@ -83,12 +92,12 @@ const ReturnRequests = () => {
 
   useEffect(() => {
     if (!selected || dialogMode !== 'edit') return;
-    setEditReturnReason(selected.reason ?? '');
-  }, [selected?.id, dialogMode, selected?.reason]);
+    setEditReturnReason(returnRequestHeaderNote(selected));
+  }, [selected?.id, dialogMode, selected ? returnRequestHeaderNote(selected) : '']);
 
   /** Phiếu APPROVED: tự chọn hết dòng (bỏ checkbox) — backend vẫn cần selected=true khi hoàn tất. */
   useEffect(() => {
-    if (!selected?.id || selected.status !== 'APPROVED') return;
+    if (!selected?.id || returnStatusKey(selected.status) !== 'APPROVED') return;
     const lines = rawLinesQ.data;
     if (!lines?.length || rawLinesQ.isLoading) return;
     const need = lines.filter(l => l.selected !== true);
@@ -111,6 +120,11 @@ const ReturnRequests = () => {
       cancelled = true;
     };
   }, [selected?.id, selected?.status, rawLinesQ.data, rawLinesQ.isLoading]);
+
+  const pickFreshReturn = useCallback(
+    (r: ReturnRequest) => returnRequests.find(x => x.id === r.id) ?? r,
+    [returnRequests],
+  );
 
   const invalidate = () => {
     void qc.invalidateQueries({ queryKey: ['api', 'return-requests-view'] });
@@ -205,7 +219,7 @@ const ReturnRequests = () => {
       {
         key: 'item',
         label: 'Tài sản',
-        render: l => getItemName(String(l.assetItem?.id ?? ''), assetItems),
+        render: l => catalogItemNameOnly(String(l.assetItem?.id ?? ''), assetItems),
       },
       {
         key: 'equipment',
@@ -257,12 +271,19 @@ const ReturnRequests = () => {
     .filter(r => {
       if (filters.search) {
         const s = filters.search.toLowerCase();
-        if (
-          !r.code.toLowerCase().includes(s) &&
-          !getEmployeeName(r.requesterId, employees).toLowerCase().includes(s)
-        ) {
-          return false;
-        }
+        const blob = [
+          r.code,
+          formatBizCodeDisplay(r.code),
+          getEmployeeName(r.requesterId, employees),
+          getDepartmentName(r.departmentId, departments),
+          returnRequestHeaderNote(r),
+          getReturnListKindLabel(r),
+          formatReturnRequestAssetNamesSummary(r, assetItems),
+        ]
+          .filter(Boolean)
+          .join(' ')
+          .toLowerCase();
+        if (!blob.includes(s)) return false;
       }
       if (filters.status && r.status !== filters.status) return false;
       return true;
@@ -277,7 +298,25 @@ const ReturnRequests = () => {
     },
     { key: 'requester', label: 'Người yêu cầu', render: r => getEmployeeName(r.requesterId, employees) },
     { key: 'department', label: 'Phòng ban', render: r => getDepartmentName(r.departmentId, departments) },
-    { key: 'reason', label: 'Lý do', render: r => <span className="max-w-xs truncate block">{r.reason}</span> },
+    {
+      key: 'kind',
+      label: 'Loại',
+      render: r => getReturnListKindLabel(r),
+    },
+    {
+      key: 'assetNames',
+      label: 'Tên tài sản',
+      render: r => (
+        <span className="text-sm break-words max-w-[min(20rem,45vw)] inline-block align-top">
+          {formatReturnRequestAssetNamesSummary(r, assetItems)}
+        </span>
+      ),
+    },
+    {
+      key: 'note',
+      label: 'Ghi chú',
+      render: r => <span className="max-w-xs truncate block">{returnRequestHeaderNote(r) || '—'}</span>,
+    },
     { key: 'lines', label: 'Số dòng', render: r => r.lines.length },
     { key: 'status', label: 'Trạng thái', render: r => <StatusBadge status={r.status} label={returnStatusLabels[r.status]} /> },
     { key: 'createdAt', label: 'Ngày tạo', render: r => formatDate(r.createdAt) },
@@ -295,7 +334,7 @@ const ReturnRequests = () => {
             title="Xem"
             onClick={() => {
               setDialogMode('view');
-              setSelected(r);
+              setSelected(pickFreshReturn(r));
             }}
           >
             <Eye className="h-4 w-4" />
@@ -309,7 +348,7 @@ const ReturnRequests = () => {
               title="Sửa"
               onClick={() => {
                 setDialogMode('edit');
-                setSelected(r);
+                setSelected(pickFreshReturn(r));
               }}
             >
               <Pencil className="h-4 w-4" />
@@ -345,7 +384,7 @@ const ReturnRequests = () => {
         <>
       <FilterBar
         fields={[
-          { key: 'search', label: 'Tìm kiếm', type: 'text', placeholder: 'Mã YC, người yêu cầu...' },
+          { key: 'search', label: 'Tìm kiếm', type: 'text', placeholder: 'Mã YC, người yêu cầu, loại, tên tài sản, ghi chú…' },
           { key: 'status', label: 'Trạng thái', type: 'select', options: Object.entries(returnStatusLabels).map(([v, l]) => ({ value: v, label: l })) },
         ]}
         values={filters}
@@ -384,13 +423,18 @@ const ReturnRequests = () => {
                   { label: 'Ngày tạo', value: formatDate(selected.createdAt) },
                   {
                     label: 'Trạng thái',
-                    value: <StatusBadge status={selected.status} label={returnStatusLabels[selected.status]} />,
+                    value: (
+                      <StatusBadge
+                        status={selected.status}
+                        label={returnStatusLabels[selected.status] ?? returnStatusKey(selected.status)}
+                      />
+                    ),
                   },
                 ]}
               />
-              {dialogMode === 'edit' && !hideRowEditDelete && canEditReturnRequestFields(selected.status) ? (
+              {dialogMode === 'edit' && !hideRowEditDelete && canEditReturnRequestFields(returnStatusKey(selected.status)) ? (
                 <div className="space-y-2 border rounded-md p-3 bg-muted/20 text-sm">
-                  <Label>Lý do / ghi chú</Label>
+                  <Label>Ghi chú</Label>
                   <Textarea value={editReturnReason} onChange={e => setEditReturnReason(e.target.value)} rows={3} disabled={busy} />
                   <div className="flex flex-wrap gap-2 pt-1">
                     <Button type="button" size="sm" disabled={busy} onClick={() => void saveReturnNote()}>
@@ -403,13 +447,13 @@ const ReturnRequests = () => {
                 </div>
               ) : (
                 <div className="text-sm">
-                  <span className="text-muted-foreground">Lý do:</span> {selected.reason}
+                  <span className="text-muted-foreground">Ghi chú:</span> {returnRequestHeaderNote(selected) || '—'}
                 </div>
               )}
 
               <div className="space-y-2">
                 <p className="text-sm font-medium text-foreground">Thiết bị / vật tư thu hồi</p>
-                {selected.status === 'APPROVED' ? (
+                {returnStatusKey(selected.status) === 'APPROVED' ? (
                   <p className="text-sm text-muted-foreground">
                     Tất cả dòng được áp dụng khi hoàn tất. Hướng xử lý mặc định:{' '}
                     <span className="font-medium text-foreground">trả về kho</span>.
@@ -424,7 +468,7 @@ const ReturnRequests = () => {
                   data={sortedReturnLines}
                   emptyMessage="Không có dòng"
                 />
-                {selected.status === 'APPROVED' ? (
+                {returnStatusKey(selected.status) === 'APPROVED' ? (
                   <div className="flex flex-wrap gap-2 pt-2">
                     <Button type="button" disabled={busy} onClick={() => void completeReturn()}>
                       Hoàn tất thu hồi
@@ -433,7 +477,7 @@ const ReturnRequests = () => {
                 ) : null}
               </div>
 
-              {selected.status === 'PENDING' && (
+              {returnStatusKey(selected.status) === 'PENDING' && (
                 <ApprovalActionBar
                   disabled={busy}
                   onApprove={() => void patchReturnStatus('APPROVED')}

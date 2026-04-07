@@ -1,6 +1,7 @@
 import type { ConsumableAssignmentDto } from '@/api/types';
-import type { Equipment, RepairRequest } from '@/data/mockData';
+import type { Equipment, RepairRequest, ReturnRequest } from '@/data/mockData';
 import { equipmentStatusLabels } from '@/data/mockData';
+import { isReturnRequestOpen } from '@/utils/openAssetRequestBlocks';
 
 /** Cách thiết bị «thuộc» tài khoản NV theo bàn giao (cá nhân / PB / vị trí — chỉ khi phiếu không gán cá nhân). */
 export type MyAssetScope = 'personal' | 'department' | 'location';
@@ -87,6 +88,41 @@ export function resolveMyConsumableScope(
     return 'location';
   }
   return null;
+}
+
+/** Thiết bị (id) nằm trong phiếu thu hồi mở do người dùng gửi — để badge «Chờ thu hồi» / trừ khỏi «Đang sử dụng». */
+export function equipmentIdsOnOpenReturnForRequester(empId: string | null, returnRequests: ReturnRequest[]): Set<string> {
+  const ids = new Set<string>();
+  if (!empId) return ids;
+  for (const rr of returnRequests) {
+    if (String(rr.requesterId) !== empId || !isReturnRequestOpen(rr)) continue;
+    for (const line of rr.lines ?? []) {
+      if (String(line.lineType ?? 'DEVICE').toUpperCase() === 'CONSUMABLE') continue;
+      if (line.equipmentId) ids.add(String(line.equipmentId));
+    }
+  }
+  return ids;
+}
+
+/**
+ * Trạng thái hiển thị thiết bị trên «Tài sản của tôi»:
+ * ưu tiên mất/hỏng/thanh lý/sửa theo API; nếu đang IN_USE nhưng có YC thu hồi mở → Chờ thu hồi.
+ */
+export function getEquipmentDisplayStatusForMyAssets(
+  e: Equipment,
+  empId: string | null,
+  returnRequests: ReturnRequest[],
+): { status: string; label: string } {
+  const base = e.status;
+  const label = equipmentStatusLabels[base] ?? base;
+  if (base === 'LOST' || base === 'DISPOSED' || base === 'BROKEN' || base === 'UNDER_REPAIR' || base === 'PENDING_RETURN') {
+    return { status: base, label };
+  }
+  const onReturn = equipmentIdsOnOpenReturnForRequester(empId, returnRequests);
+  if (base === 'IN_USE' && onReturn.has(String(e.id))) {
+    return { status: 'PENDING_RETURN', label: equipmentStatusLabels.PENDING_RETURN };
+  }
+  return { status: base, label };
 }
 
 export function filterConsumableAssignmentsForMyAccount(

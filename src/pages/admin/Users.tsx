@@ -56,7 +56,19 @@ const tabCounts = (data: Employee[]) => ({
 type EmpForm = { name: string; departmentId: string; position: string; locationId: string };
 type EmpEditForm = EmpForm & { id: string; code: string; active: boolean };
 
-const emptyForm: EmpForm = { name: '', departmentId: '', position: '', locationId: '' };
+const POSITION_OPTIONS = ['Nhân viên', 'Quản lý phòng ban', 'Trưởng phòng', 'Phó phòng'] as const;
+const POSITION_CODE_PREFIX: Record<(typeof POSITION_OPTIONS)[number], string> = {
+  'Nhân viên': 'NV',
+  'Quản lý phòng ban': 'QLPB',
+  'Trưởng phòng': 'TP',
+  'Phó phòng': 'PP',
+};
+
+function normalizePosition(v?: string): (typeof POSITION_OPTIONS)[number] {
+  return POSITION_OPTIONS.find(x => x === v) ?? 'Nhân viên';
+}
+
+const emptyForm: EmpForm = { name: '', departmentId: '', position: 'Nhân viên', locationId: '' };
 const emptyEditForm = (): EmpEditForm => ({ id: '', code: '', name: '', departmentId: '', position: '', locationId: '', active: true });
 
 const authorityOptions = [
@@ -66,6 +78,9 @@ const authorityOptions = [
   { value: 'ROLE_GD', label: 'Giám đốc' },
   { value: 'ROLE_ADMIN', label: 'Quản trị' },
 ];
+
+const DEPT_ROLE = 'ROLE_DEPARTMENT_COORDINATOR';
+const DEPT_JOB_TITLE = 'Quản lý phòng ban';
 
 const UsersPage = () => {
   const qc = useQueryClient();
@@ -245,12 +260,12 @@ const UsersPage = () => {
   }, [data, tab, filters]);
 
   const filterFields: FilterField[] = [
-    { key: 'search', label: 'Tìm kiếm', type: 'text', placeholder: 'Mã NV, họ tên…' },
+    { key: 'search', label: 'Tìm kiếm', type: 'text', placeholder: 'Mã người dùng, họ tên…' },
     { key: 'department', label: 'Phòng ban', type: 'select', options: departments.map(d => ({ value: d.id, label: d.name })) },
   ];
 
   const handleExportCSV = () => {
-    const header = 'Mã NV,Họ tên,Phòng ban,Chức danh,Trạng thái';
+    const header = 'Mã người dùng,Họ tên,Phòng ban,Chức danh,Trạng thái';
     const rows = filtered.map(e => [
       e.code, e.name,
       departments.find(d => d.id === e.departmentId)?.name || '',
@@ -274,10 +289,11 @@ const UsersPage = () => {
     }
     setEmpBusy(true);
     try {
+      const normalizedPosition = normalizePosition(form.position);
       await apiPost<EmployeeDto>('/api/employees', {
-        code: makeBizCode('NV'),
+        code: makeBizCode(POSITION_CODE_PREFIX[normalizedPosition]),
         fullName: form.name.trim(),
-        jobTitle: form.position.trim() || undefined,
+        jobTitle: normalizedPosition,
         active: true,
         department: { id: Number(form.departmentId) },
         ...(form.locationId ? { location: { id: Number(form.locationId) } } : {}),
@@ -335,7 +351,7 @@ const UsersPage = () => {
         id: Number(editTarget.id),
         code: editForm.code.trim(),
         fullName: editForm.name.trim(),
-        jobTitle: editForm.position.trim() || undefined,
+        jobTitle: normalizePosition(editForm.position),
         active: editForm.active,
         department: { id: Number(editForm.departmentId) },
       };
@@ -353,7 +369,7 @@ const UsersPage = () => {
   };
 
   const columns: Column<Employee>[] = [
-    { key: 'code', label: 'Mã NV', render: r => <span className="font-mono text-sm font-medium">{r.code}</span> },
+    { key: 'code', label: 'Mã người dùng', render: r => <span className="font-mono text-sm font-medium">{r.code}</span> },
     { key: 'name', label: 'Họ tên' },
     { key: 'department', label: 'Phòng ban', render: r => departments.find(d => d.id === r.departmentId)?.name },
     {
@@ -393,6 +409,14 @@ const UsersPage = () => {
     return s;
   }, [adminUsers]);
 
+  const availableEmployeesForAccountAdd = useMemo(() => {
+    const base = (empQ.data ?? []).filter(e => e.id != null && !employeeIdsAlreadyLinked.has(e.id!));
+    if (accForm.authority === DEPT_ROLE) {
+      return base.filter(e => (e.jobTitle ?? '').trim() === DEPT_JOB_TITLE);
+    }
+    return base.filter(e => (e.jobTitle ?? '').trim() !== DEPT_JOB_TITLE);
+  }, [accForm.authority, empQ.data, employeeIdsAlreadyLinked]);
+
   return (
     <div className="page-container">
       <div className="page-header">
@@ -419,7 +443,7 @@ const UsersPage = () => {
       {canSysAdmin && (
         <Tabs value={section} onValueChange={v => setSection(v as 'employees' | 'accounts')} className="mb-4">
           <TabsList>
-            <TabsTrigger value="employees">Nhân viên (HRM)</TabsTrigger>
+            <TabsTrigger value="employees">Người dùng</TabsTrigger>
             <TabsTrigger value="accounts">Tài khoản đăng nhập</TabsTrigger>
           </TabsList>
         </Tabs>
@@ -612,7 +636,7 @@ const UsersPage = () => {
             </Select>
           </div>
           <div className="space-y-2 col-span-2">
-            <Label>Liên kết nhân viên HRM (tuỳ chọn)</Label>
+            <Label>Liên kết người dùng</Label>
             <Select
               value={accForm.employeeId ? accForm.employeeId : '_none_'}
               onValueChange={v => setAccForm(p => ({ ...p, employeeId: v === '_none_' ? '' : v }))}
@@ -622,9 +646,7 @@ const UsersPage = () => {
               </SelectTrigger>
               <SelectContent>
                 <SelectItem value="_none_">Không liên kết</SelectItem>
-                {(empQ.data ?? [])
-                  .filter(e => e.id != null && !employeeIdsAlreadyLinked.has(e.id))
-                  .map(e => (
+                {availableEmployeesForAccountAdd.map(e => (
                     <SelectItem key={e.id} value={String(e.id)}>
                       {e.code ?? e.id} — {e.fullName ?? ''}
                     </SelectItem>
@@ -632,7 +654,7 @@ const UsersPage = () => {
               </SelectContent>
             </Select>
             <p className="text-xs text-muted-foreground">
-              Chỉ hiện nhân viên chưa gán tài khoản (mỗi nhân viên một tài khoản). Cần liên kết để dùng «Yêu cầu của tôi» / «Tài sản của tôi».
+              Với vai trò Điều phối phòng ban: chỉ hiện người dùng có chức vụ Quản lý phòng ban. Vai trò khác: ẩn chức vụ này.
             </p>
           </div>
         </div>
@@ -662,7 +684,7 @@ const UsersPage = () => {
         size="lg"
       >
         <div className="space-y-4">
-          <p className="text-sm text-muted-foreground">Mã nhân viên tự sinh (NV + 6 chữ số).</p>
+          <p className="text-sm text-muted-foreground">Mã người dùng tự sinh theo chức danh (NV/QLPB/TP/PP + 6 chữ số).</p>
           <div className="grid grid-cols-2 gap-4">
             <div className="space-y-2 col-span-2">
               <Label>Họ tên <span className="text-destructive">*</span></Label>
@@ -679,7 +701,12 @@ const UsersPage = () => {
             </div>
             <div className="space-y-2">
               <Label>Chức danh</Label>
-              <Input value={form.position} onChange={e => setForm(p => ({ ...p, position: e.target.value }))} placeholder="Theo HR" />
+              <Select value={normalizePosition(form.position)} onValueChange={v => setForm(p => ({ ...p, position: v }))}>
+                <SelectTrigger><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  {POSITION_OPTIONS.map(p => <SelectItem key={p} value={p}>{p}</SelectItem>)}
+                </SelectContent>
+              </Select>
             </div>
             <div className="space-y-2 col-span-2">
               <Label>Vị trí (tuỳ chọn)</Label>
@@ -711,7 +738,7 @@ const UsersPage = () => {
       >
         <div className="grid grid-cols-2 gap-4">
           <div className="space-y-2">
-            <Label>Mã NV</Label>
+            <Label>Mã người dùng</Label>
             <Input value={editForm.code} readOnly className="bg-muted/50 font-mono text-sm" />
           </div>
           <div className="space-y-2 flex flex-col justify-end pb-2">
@@ -735,7 +762,12 @@ const UsersPage = () => {
           </div>
           <div className="space-y-2">
             <Label>Chức danh</Label>
-            <Input value={editForm.position} onChange={e => setEditForm(p => ({ ...p, position: e.target.value }))} />
+            <Select value={normalizePosition(editForm.position)} onValueChange={v => setEditForm(p => ({ ...p, position: v }))}>
+              <SelectTrigger><SelectValue /></SelectTrigger>
+              <SelectContent>
+                {POSITION_OPTIONS.map(p => <SelectItem key={p} value={p}>{p}</SelectItem>)}
+              </SelectContent>
+            </Select>
           </div>
           <div className="space-y-2 col-span-2">
             <Label>Vị trí (tuỳ chọn)</Label>

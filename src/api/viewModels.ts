@@ -363,6 +363,15 @@ export function mapRepairDto(r: RepairRequestDto): RepairRequest {
   };
 }
 
+const RETURN_REQUEST_STATUS_KEYS = ['PENDING', 'APPROVED', 'REJECTED', 'COMPLETED', 'CANCELLED'] as const;
+
+function normalizeReturnRequestStatus(status: string | undefined): ReturnRequest['status'] {
+  const u = String(status ?? 'PENDING').trim().toUpperCase();
+  return (RETURN_REQUEST_STATUS_KEYS as readonly string[]).includes(u)
+    ? (u as ReturnRequest['status'])
+    : 'PENDING';
+}
+
 export function buildReturnRequests(
   requests: ReturnRequestDto[],
   lines: ReturnRequestLineDto[],
@@ -385,7 +394,7 @@ export function buildReturnRequests(
       requesterId: String(req.requester?.id ?? ''),
       departmentId: String(req.requester?.department?.id ?? ''),
       reason: req.note ?? '',
-      status: (req.status ?? 'PENDING') as ReturnRequest['status'],
+      status: normalizeReturnRequestStatus(req.status),
       lines: mapped,
       createdAt: req.requestDate ? req.requestDate.slice(0, 10) : '',
     };

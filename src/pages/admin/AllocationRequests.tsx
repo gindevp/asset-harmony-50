@@ -45,7 +45,12 @@ import {
   useEmployees,
   useEnrichedEquipmentList,
 } from '@/hooks/useEntityApi';
-import { type AllocationDetailRow, buildAllocationDetailRows, sumAllocationLineQuantities } from '@/utils/allocationDisplayRows';
+import {
+  type AllocationDetailRow,
+  buildAllocationDetailRows,
+  formatAllocationRequestAssetNamesSummary,
+  getAllocationListKindLabel,
+} from '@/utils/allocationDisplayRows';
 import { canDeleteAllocationRequest, canEditAllocationRequestFields } from '@/utils/requestRecordActions';
 import { PageLoading } from '@/components/shared/page-loading';
 
@@ -150,7 +155,15 @@ const AllocationRequests = () => {
 
   const filtered = allocationRequests
     .filter(r => {
-      if (filters.search && !r.code.toLowerCase().includes(filters.search.toLowerCase())) return false;
+      if (filters.search) {
+        const s = filters.search.toLowerCase();
+        const codeHit = r.code.toLowerCase().includes(s);
+        const kindHit = getAllocationListKindLabel(r.lines).toLowerCase().includes(s);
+        const namesHit = formatAllocationRequestAssetNamesSummary(r.lines, assetItems, equipments)
+          .toLowerCase()
+          .includes(s);
+        if (!codeHit && !kindHit && !namesHit) return false;
+      }
       if (filters.status && r.status !== filters.status) return false;
       return true;
     })
@@ -164,7 +177,20 @@ const AllocationRequests = () => {
     },
     { key: 'requester', label: 'Người yêu cầu', render: r => getEmployeeName(r.requesterId, employees) },
     { key: 'department', label: 'Phòng ban', render: r => getDepartmentName(r.departmentId, departments) },
-    { key: 'reason', label: 'Lý do', render: r => <span className="max-w-xs truncate block">{r.reason}</span> },
+    {
+      key: 'assetKind',
+      label: 'Loại',
+      render: r => getAllocationListKindLabel(r.lines),
+    },
+    {
+      key: 'assetNames',
+      label: 'Tên tài sản',
+      render: r => (
+        <span className="max-w-md truncate block" title={formatAllocationRequestAssetNamesSummary(r.lines, assetItems, equipments)}>
+          {formatAllocationRequestAssetNamesSummary(r.lines, assetItems, equipments)}
+        </span>
+      ),
+    },
     {
       key: 'assignee',
       label: 'Đối tượng nhận',
@@ -180,7 +206,6 @@ const AllocationRequests = () => {
           <span className="text-muted-foreground">—</span>
         ),
     },
-    { key: 'lines', label: 'Số lượng', render: r => sumAllocationLineQuantities(r.lines) },
     { key: 'status', label: 'Trạng thái', render: r => <StatusBadge status={r.status} label={allocationStatusLabels[r.status]} /> },
     { key: 'createdAt', label: 'Ngày tạo', render: r => formatDate(r.createdAt) },
     {
@@ -235,7 +260,7 @@ const AllocationRequests = () => {
   ];
 
   const filterFields: FilterField[] = [
-    { key: 'search', label: 'Tìm kiếm', type: 'text', placeholder: 'Mã yêu cầu...' },
+    { key: 'search', label: 'Tìm kiếm', type: 'text', placeholder: 'Mã YC, loại, tên tài sản…' },
     { key: 'status', label: 'Trạng thái', type: 'select', options: Object.entries(allocationStatusLabels).map(([v, l]) => ({ value: v, label: l })) },
   ];
 

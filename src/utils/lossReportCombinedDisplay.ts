@@ -1,7 +1,37 @@
 import type { LossReportRequestDto } from '@/api/types';
 import type { AssetItem, Equipment } from '@/data/mockData';
-import { getItemName } from '@/data/mockData';
+import { getItemName, lossReportKindLabels } from '@/data/mockData';
 import { formatEquipmentCodeDisplay } from '@/utils/formatCodes';
+import { REQUEST_KIND_COMBINED_EMPLOYEE } from '@/utils/requestListKindLabels';
+
+/** lossKind API (EQUIPMENT | CONSUMABLE | COMBINED) — dùng form sửa / điều kiện hiển thị. */
+export function lossReportKindUpper(r: LossReportRequestDto): string {
+  return String(r.lossKind ?? '').toUpperCase();
+}
+
+/** Nhãn cột «Loại»: COMBINED + chỉ thiết bị → «Thiết bị»; chỉ vật tư → «Vật tư»; cả hai → gộp (khác nhau NV vs admin). */
+export function getLossReportKindDisplayLabel(r: LossReportRequestDto, forEmployeePortal = false): string {
+  const combinedLabel = forEmployeePortal ? REQUEST_KIND_COMBINED_EMPLOYEE : lossReportKindLabels.COMBINED;
+  const kind = String(r.lossKind ?? '').toUpperCase();
+  if (kind !== 'COMBINED') {
+    return lossReportKindLabels[kind] ?? r.lossKind ?? '—';
+  }
+  const entries = r.lossEntries ?? [];
+  if (entries.length === 0) {
+    return combinedLabel;
+  }
+  let hasEquipment = false;
+  let hasConsumable = false;
+  for (const e of entries) {
+    const t = String(e.lineType ?? '').toUpperCase();
+    if (t === 'EQUIPMENT') hasEquipment = true;
+    else if (t === 'CONSUMABLE') hasConsumable = true;
+  }
+  if (hasEquipment && !hasConsumable) return lossReportKindLabels.EQUIPMENT;
+  if (hasConsumable && !hasEquipment) return lossReportKindLabels.CONSUMABLE;
+  if (hasEquipment && hasConsumable) return combinedLabel;
+  return combinedLabel;
+}
 
 /** Chuỗi hiển thị / tìm kiếm cho phiếu báo mất gộp (COMBINED). */
 export function formatCombinedLossSummary(
