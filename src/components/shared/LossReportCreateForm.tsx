@@ -35,7 +35,12 @@ import {
   splitConsumableLossAcrossAssignments,
   totalHeldForConsumableGroup,
 } from '@/utils/myHoldingsAggregate';
-import { mapAssetItemIdToConsumablePending, mapEquipmentIdToOpenRequestHints } from '@/utils/openAssetRequestBlocks';
+import {
+  consumableRemainingForAssetItem,
+  mapAssetItemIdToConsumablePending,
+  mapEquipmentIdToOpenRequestEntries,
+  mapEquipmentIdToOpenRequestHints,
+} from '@/utils/openAssetRequestBlocks';
 import { lossOccurredAtFromDatetimeLocal, nowDatetimeLocalValue } from '@/utils/lossReportForm';
 import { PageLoading } from '@/components/shared/page-loading';
 import {
@@ -49,6 +54,8 @@ import { toast } from 'sonner';
 
 export interface LossReportCreateFormProps {
   backTo: string;
+  /** Mở dialog xác nhận trước khi thoát (do trang cha quản lý `AlertDialog`). */
+  onCancelClick?: () => void;
   onSuccess?: () => void;
   /** Từ «Tài sản của tôi» — chọn sẵn nếu dòng còn hợp lệ */
   initialKind?: 'EQUIPMENT' | 'CONSUMABLE';
@@ -61,6 +68,7 @@ export interface LossReportCreateFormProps {
  */
 export function LossReportCreateForm({
   backTo,
+  onCancelClick,
   onSuccess,
   initialKind,
   initialEquipmentId,
@@ -88,14 +96,26 @@ export function LossReportCreateForm({
     returnQ.isLoading ||
     lossQ.isLoading;
 
+  const retSnap = returnQ.data;
+  const returnRequests = retSnap?.requests ?? [];
+  const returnLineDtos = retSnap?.lineDtos;
+
   const equipmentOpenHints = useMemo(
-    () => mapEquipmentIdToOpenRequestHints(empId, repairQ.data ?? [], returnQ.data ?? [], lossQ.data ?? []),
-    [empId, repairQ.data, returnQ.data, lossQ.data],
+    () =>
+      mapEquipmentIdToOpenRequestHints(empId, repairQ.data ?? [], returnRequests, lossQ.data ?? [], returnLineDtos),
+    [empId, repairQ.data, returnRequests, lossQ.data, returnLineDtos],
+  );
+
+  const equipmentOpenEntries = useMemo(
+    () =>
+      mapEquipmentIdToOpenRequestEntries(empId, repairQ.data ?? [], returnRequests, lossQ.data ?? [], returnLineDtos),
+    [empId, repairQ.data, returnRequests, lossQ.data, returnLineDtos],
   );
 
   const consumablePendingByAssetItem = useMemo(
-    () => mapAssetItemIdToConsumablePending(empId, repairQ.data ?? [], returnQ.data ?? [], lossQ.data ?? []),
-    [empId, repairQ.data, returnQ.data, lossQ.data],
+    () =>
+      mapAssetItemIdToConsumablePending(empId, repairQ.data ?? [], returnRequests, lossQ.data ?? [], returnLineDtos),
+    [empId, repairQ.data, returnRequests, lossQ.data, returnLineDtos],
   );
   const myDeptId = useMemo(() => {
     if (!empId || !empQ.data) return null;
@@ -183,9 +203,10 @@ export function LossReportCreateForm({
       }
     } else if (k === 'CONSUMABLE' && aiId) {
       const g = consumableGroups.find(x => x.assetItemId === aiId);
+      const held = g ? totalHeldForConsumableGroup(g.assignments) : 0;
       const pend = consumablePendingByAssetItem.get(aiId);
-      const blocked = pend != null && pend.repairQty + pend.returnQty + pend.lossQty > 0;
-      if (g && !blocked) {
+      const remaining = consumableRemainingForAssetItem(held, pend);
+      if (g && remaining > 0) {
         setSelectedConsumables({ [aiId]: '1' });
       }
     }
@@ -275,17 +296,20 @@ export function LossReportCreateForm({
           setBusy(false);
           return;
         }
+        const h = totalHeldForConsumableGroup(grp.assignments);
         const pend = consumablePendingByAssetItem.get(assetItemId);
-        if (pend && pend.repairQty + pend.returnQty + pend.lossQty > 0) {
+        const remaining = consumableRemainingForAssetItem(h, pend);
+        const qtyStr = selectedConsumables[assetItemId] ?? '1';
+        const q = Math.min(Math.max(1, Number.parseInt(qtyStr, 10) || 1), Math.min(h, remaining));
+        if (q > remaining) {
           toast.error(
-            `Mặt hàng đang có SL trong phiếu sửa/thu hồi/báo mất chưa xử lý — không tạo trùng. (${pend.summary})`,
+            remaining <= 0
+              ? `Mặt hàng không còn SL khả dụng.${pend?.summary ? ` (${pend.summary})` : ''}`
+              : `Số lượng vượt phần còn khả dụng (tối đa ${remaining}).${pend?.summary ? ` ${pend.summary}` : ''}`,
           );
           setBusy(false);
           return;
         }
-        const h = totalHeldForConsumableGroup(grp.assignments);
-        const qtyStr = selectedConsumables[assetItemId] ?? '1';
-        const q = Math.min(Math.max(1, Number.parseInt(qtyStr, 10) || 1), h);
         if (q < 1 || q > h) {
           toast.error(`Số lượng từ 1 đến ${h}`);
           setBusy(false);
@@ -342,28 +366,17 @@ export function LossReportCreateForm({
         </p>
       ) : (
         <div className="space-y-4">
-          <p className="text-xs text-muted-foreground">
-            Chọn <span className="font-medium">một hoặc nhiều</span> thiết bị (từng serial) và/hoặc <span className="font-medium">mặt hàng vật tư</span> (gộp theo danh mục — một ô SL cho tổng đang giữ). Tài sản đã có yêu cầu sửa, thu hồi hoặc báo mất ở trạng thái chờ duyệt / đang xử lý không chọn được.
-          </p>
-
           <div className="space-y-1">
             <Label className="text-base font-semibold">
               Tài sản báo mất (thiết bị hoặc vật tư)
               <RequiredMark />
             </Label>
-            <p className="text-xs text-muted-foreground">Chọn ít nhất một dòng (ô vuông — có thể chọn nhiều).</p>
           </div>
 
           <AssetPickTwoColumnGrid>
             <AssetPickColumn
               icon={Monitor}
               title="Thiết bị"
-              description={
-                <>
-                  Chọn serial cần báo mất. Mỗi serial = <strong className="font-medium text-foreground">1</strong> chiếc
-                  (ô SL cố định). Dòng tô vàng là đã có phiếu liên quan.
-                </>
-              }
             >
               {equipmentRows.length > 0 ? (
                 equipmentRows.map(e => {
@@ -385,6 +398,7 @@ export function LossReportCreateForm({
                       serial={serial}
                       blocked={blocked}
                       hint={hint}
+                      openEntries={equipmentOpenEntries.get(eid)}
                       checked={checked}
                       onCheckedChange={next => {
                         setSelectedEquipmentIds(prev =>
@@ -402,7 +416,6 @@ export function LossReportCreateForm({
             <AssetPickColumn
               icon={Package}
               title="Vật tư (gộp theo mặt hàng)"
-              description={<>Theo mặt hàng đang giữ (có thể nhiều dòng bàn giao). Nhập SL không vượt quá tổng còn.</>}
             >
               {consumableGroups.length > 0 ? (
                 consumableGroups.map(g => {
@@ -410,13 +423,14 @@ export function LossReportCreateForm({
                   const held = totalHeldForConsumableGroup(g.assignments);
                   const label = itemId ? getItemName(itemId, assetItems) : '—';
                   const pend = itemId ? consumablePendingByAssetItem.get(itemId) : undefined;
-                  const blocked = pend != null && pend.repairQty + pend.returnQty + pend.lossQty > 0;
+                  const remaining = consumableRemainingForAssetItem(held, pend);
+                  const blocked = remaining <= 0;
                   const selCo = !blocked && itemId in selectedConsumables;
                   const meta =
-                    blocked && pend?.summary
-                      ? `(Còn: ${held.toLocaleString('vi-VN')} | Đã yêu cầu sửa/báo mất/thu hồi: ${pend.summary})`
-                      : `(Còn: ${held.toLocaleString('vi-VN')})`;
-                  const rowTitle = `${label} ${meta}${selCo ? ` — tối đa ${held}` : ''}`;
+                    pend?.summary && pend.summary.length > 0
+                      ? `(Đang giữ ${held.toLocaleString('vi-VN')} · Khả dụng ${remaining.toLocaleString('vi-VN')} | Đang có: ${pend.summary})`
+                      : `(Đang giữ ${held.toLocaleString('vi-VN')} · Khả dụng ${remaining.toLocaleString('vi-VN')})`;
+                  const rowTitle = `${label} ${meta}${selCo ? ` — tối đa ${Math.min(held, remaining)}` : ''}`;
                   return (
                     <AssetPickConsumableRow
                       key={itemId}
@@ -425,7 +439,9 @@ export function LossReportCreateForm({
                       itemLabel={label}
                       held={held}
                       blocked={blocked}
+                      availableQty={remaining}
                       pendingSummary={pend?.summary}
+                      pendingEntries={pend?.entries}
                       checked={selCo}
                       onCheckedChange={next => {
                         if (blocked) return;
@@ -443,10 +459,10 @@ export function LossReportCreateForm({
                             className="h-9 w-full font-sans tabular-nums"
                             type="number"
                             min={1}
-                            max={held}
+                            max={Math.max(1, Math.min(held, remaining))}
                             inputMode="numeric"
                             placeholder="SL"
-                            aria-label={`Nhập số lượng — tối đa ${held}`}
+                            aria-label={`Nhập số lượng — tối đa ${Math.min(held, remaining)}`}
                             value={selectedConsumables[itemId] ?? '1'}
                             onChange={e =>
                               setSelectedConsumables(prev => ({
@@ -525,9 +541,15 @@ export function LossReportCreateForm({
 
       {!loading && !noAssets ? (
         <div className="flex flex-wrap gap-2 justify-end pt-2">
-          <Button variant="outline" asChild disabled={busy}>
-            <Link to={backTo}>Hủy</Link>
-          </Button>
+          {onCancelClick ? (
+            <Button variant="outline" type="button" disabled={busy} onClick={onCancelClick}>
+              Hủy
+            </Button>
+          ) : (
+            <Button variant="outline" asChild disabled={busy}>
+              <Link to={backTo}>Hủy</Link>
+            </Button>
+          )}
           <Button
             type="button"
             disabled={busy || loading || noAssets || selectionCount === 0}

@@ -15,16 +15,20 @@ export function LossReportRequestNarrativeFields({ row }: { row: LossReportReque
   if (hasStructured) {
     return (
       <div className="space-y-3 rounded-md border bg-muted/30 p-3">
-        {occ ? (
-          <div>
-            <span className="text-muted-foreground">Thời gian (theo báo cáo):</span>
-            <p className="mt-1 whitespace-pre-wrap text-foreground">{formatLossOccurredAtForDisplay(occ)}</p>
-          </div>
-        ) : null}
-        {loc ? (
-          <div>
-            <span className="text-muted-foreground">Địa điểm:</span>
-            <p className="mt-1 whitespace-pre-wrap text-foreground">{loc}</p>
+        {(occ || loc) ? (
+          <div className="grid gap-3 sm:grid-cols-2">
+            {occ ? (
+              <div>
+                <span className="text-muted-foreground">Thời gian (theo báo cáo):</span>
+                <p className="mt-1 whitespace-pre-wrap text-foreground">{formatLossOccurredAtForDisplay(occ)}</p>
+              </div>
+            ) : <div />}
+            {loc ? (
+              <div>
+                <span className="text-muted-foreground">Địa điểm:</span>
+                <p className="mt-1 whitespace-pre-wrap text-foreground">{loc}</p>
+              </div>
+            ) : <div />}
           </div>
         ) : null}
         {reason ? (

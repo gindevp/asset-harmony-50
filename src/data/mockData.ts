@@ -118,6 +118,12 @@ export interface Equipment {
   assignedToName?: string;
   assignedDepartmentName?: string;
   assignedLocationName?: string;
+  /** Vị trí lấy trực tiếp từ phiếu gán (không suy diễn qua employee.location). */
+  locationAssignedDirectly?: boolean;
+  /** Ghi chú bàn giao có «scoped=DEPT» — cấp phát cho phòng ban (kể cả có NV nhận) → cả PB xem «Tài sản của tôi». */
+  departmentPoolFromAllocation?: boolean;
+  /** Ghi chú bàn giao có «scoped=LOC» — cấp phát cho công ty theo vị trí → cả vị trí thấy trong «Tài sản của tôi». */
+  locationPoolFromAllocation?: boolean;
   supplierId: string;
   stockInCode: string;
   notes: string;
@@ -345,11 +351,31 @@ export interface SystemLog {
 // ==================== LOOKUP HELPERS (truyền list từ API) ====================
 export function employeeName(
   id: string,
-  employees: { id?: number; fullName?: string; code?: string }[],
+  employees: { id?: number; fullName?: string; code?: string; jobTitle?: string }[],
 ): string {
   if (!Array.isArray(employees)) return id;
   const e = employees.find(x => String(x.id) === id);
   return e?.fullName ?? id;
+}
+
+/**
+ * Nhãn người yêu cầu/báo theo chức danh (giống cách ghi cột «Đối tượng nhận»):
+ * - Nhân viên            -> "Nhân viên: <tên>"
+ * - Quản lý phòng ban    -> "Phòng ban: <tên>"
+ */
+export function requesterDisplayByJobTitle(
+  id: string,
+  employees: { id?: number; fullName?: string; code?: string; jobTitle?: string }[],
+): string {
+  if (!Array.isArray(employees)) return id;
+  const e = employees.find(x => String(x.id) === id);
+  const name = e?.fullName ?? id;
+  const jt = String(e?.jobTitle ?? '').trim().toLowerCase();
+  const prefix =
+    jt.includes('quản lý phòng ban') || jt.includes('department coordinator')
+      ? 'Phòng ban'
+      : 'Nhân viên';
+  return `${prefix}: ${name}`;
 }
 
 export function departmentName(
@@ -414,6 +440,7 @@ export function supplierName(
 
 // Aliases tương thích import cũ
 export const getEmployeeName = employeeName;
+export const getRequesterDisplayByJobTitle = requesterDisplayByJobTitle;
 export const getDepartmentName = departmentName;
 export const getLocationName = locationName;
 export const getItemName = itemName;
@@ -485,7 +512,7 @@ export const lossReportStatusLabels: Record<string, string> = {
 export const lossReportKindLabels: Record<string, string> = {
   EQUIPMENT: 'Thiết bị',
   CONSUMABLE: 'Vật tư',
-  COMBINED: 'Gộp (nhiều tài sản)',
+  COMBINED: 'Vật tư và thiết bị',
 };
 
 /** Khớp enum backend ReturnDisposition */
@@ -507,7 +534,7 @@ export const stockInSourceLabels: Record<string, string> = {
 
 export const stockInStatusLabels: Record<string, string> = {
   DRAFT: 'Nháp',
-  CONFIRMED: 'Đã xác nhận',
+  CONFIRMED: 'Đã nhập kho',
   CANCELLED: 'Đã hủy',
 };
 

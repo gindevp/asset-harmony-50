@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 import {
   AlertDialog,
   AlertDialogAction,
@@ -23,11 +24,10 @@ import { Eye, Pencil, Trash2 } from 'lucide-react';
 import type { AllocationRequest, AllocationRequestLine, AssetItem, Equipment } from '@/data/mockData';
 import {
   allocationStatusLabels,
-  getEmployeeName,
+  getRequesterDisplayByJobTitle,
   getDepartmentName,
   getItemName,
   getItemCode,
-  getAssetLineDisplay,
   formatDate,
 } from '@/data/mockData';
 import { toast } from 'sonner';
@@ -47,6 +47,11 @@ import {
 } from '@/hooks/useEntityApi';
 import {
   type AllocationDetailRow,
+  allocationDetailAssetName,
+  allocationDetailCatalogCode,
+  allocationDetailKindLabel,
+  allocationDetailQuantity,
+  allocationDetailSerial,
   buildAllocationDetailRows,
   formatAllocationRequestAssetNamesSummary,
   getAllocationListKindLabel,
@@ -118,6 +123,7 @@ function pickEquipmentsForCatalogGroup(
 }
 
 const AllocationRequests = () => {
+  const navigate = useNavigate();
   const qc = useQueryClient();
   const hideRowEditDelete = hideAllocationEditDeleteForQlts();
   const arQ = useAllocationRequestsView();
@@ -175,21 +181,12 @@ const AllocationRequests = () => {
       label: 'Mã YC',
       render: r => <span className="font-mono text-sm font-medium">{formatBizCodeDisplay(r.code)}</span>,
     },
-    { key: 'requester', label: 'Người yêu cầu', render: r => getEmployeeName(r.requesterId, employees) },
+    { key: 'requester', label: 'Người yêu cầu', render: r => getRequesterDisplayByJobTitle(r.requesterId, employees) },
     { key: 'department', label: 'Phòng ban', render: r => getDepartmentName(r.departmentId, departments) },
     {
       key: 'assetKind',
       label: 'Loại',
       render: r => getAllocationListKindLabel(r.lines),
-    },
-    {
-      key: 'assetNames',
-      label: 'Tên tài sản',
-      render: r => (
-        <span className="max-w-md truncate block" title={formatAllocationRequestAssetNamesSummary(r.lines, assetItems, equipments)}>
-          {formatAllocationRequestAssetNamesSummary(r.lines, assetItems, equipments)}
-        </span>
-      ),
     },
     {
       key: 'assignee',
@@ -235,8 +232,7 @@ const AllocationRequests = () => {
               className="h-8 w-8"
               title="Sửa"
               onClick={() => {
-                setDialogMode('edit');
-                setSelected(r);
+                navigate(`/admin/request-new?editId=${encodeURIComponent(String(r.id))}`);
               }}
             >
               <Pencil className="h-4 w-4" />
@@ -473,94 +469,30 @@ const AllocationRequests = () => {
     if (!selected) return [];
     return [
       {
-        key: 'assetLineCol',
-        label: 'Dòng tài sản',
-        render: (row: AllocationDetailRow) => {
-          if (row.kind === 'device_group') {
-            const al = assetLinesApi.find(l => String(l.id) === row.assetLineId);
-            return al?.name?.trim() || getAssetLineDisplay(row.assetLineId, assetLinesApi);
-          }
-          const r = row.line;
-          const lt = (r.lineType ?? '').toUpperCase();
-          if (lt === 'CONSUMABLE') {
-            if (r.assetLineId) {
-              const al = assetLinesApi.find(l => String(l.id) === r.assetLineId);
-              return al?.name?.trim() || getAssetLineDisplay(r.assetLineId, assetLinesApi);
-            }
-            const item = assetItems.find(i => String(i.id) === String(r.itemId));
-            const lid = item?.lineId;
-            if (lid) {
-              const al = assetLinesApi.find(l => String(l.id) === lid);
-              return al?.name?.trim() || getAssetLineDisplay(lid, assetLinesApi);
-            }
-            return '—';
-          }
-          if (r.assetLineId) {
-            const al = assetLinesApi.find(l => String(l.id) === r.assetLineId);
-            return al?.name?.trim() || getAssetLineDisplay(r.assetLineId, assetLinesApi);
-          }
-          return '—';
-        },
+        key: 'kind',
+        label: 'Loại',
+        render: (row: AllocationDetailRow) => allocationDetailKindLabel(row),
       },
       {
         key: 'item',
-        label: 'Tên tài sản',
-        render: (row: AllocationDetailRow) => {
-          if (row.kind === 'device_group') {
-            const itemIds = row.lines.map(l => {
-              const eq = l.equipmentId ? equipments.find(e => String(e.id) === String(l.equipmentId)) : undefined;
-              return eq?.itemId;
-            });
-            const first = itemIds.find(Boolean);
-            if (first && itemIds.every(id => id && id === first)) {
-              return getItemName(first, assetItems);
-            }
-            return '—';
-          }
-          const r = row.line;
-          const lt = (r.lineType ?? '').toUpperCase();
-          if (lt === 'CONSUMABLE') {
-            if (!r.itemId || !String(r.itemId).trim()) return '—';
-            return getItemName(r.itemId, assetItems);
-          }
-          const eq = r.equipmentId ? equipments.find(e => String(e.id) === String(r.equipmentId)) : undefined;
-          if (eq) return getItemName(eq.itemId, assetItems);
-          return '—';
-        },
+        label: 'Tài sản',
+        render: (row: AllocationDetailRow) => allocationDetailAssetName(row, assetItems, equipments, assetLinesApi),
       },
       {
         key: 'assetCode',
         label: 'Mã tài sản',
-        render: (row: AllocationDetailRow) => {
-          if (row.kind === 'device_group') {
-            const itemIds = row.lines.map(l => {
-              const eq = l.equipmentId ? equipments.find(e => String(e.id) === String(l.equipmentId)) : undefined;
-              return eq?.itemId;
-            });
-            const first = itemIds.find(Boolean);
-            if (first && itemIds.every(id => id && id === first)) {
-              const fromCatalog = assetItems.find(i => String(i.id) === String(first))?.code?.trim() ?? '';
-              return fromCatalog ? formatBizCodeDisplay(fromCatalog) : '—';
-            }
-            return '—';
-          }
-          const r = row.line;
-          const lt = (r.lineType ?? '').toUpperCase();
-          if (lt === 'CONSUMABLE') {
-            if (!r.itemId || !String(r.itemId).trim()) return '—';
-            const fromCatalog = assetItems.find(i => String(i.id) === String(r.itemId))?.code?.trim() ?? '';
-            const code = fromCatalog || r.itemCode?.trim() || (r.itemId ? getItemCode(r.itemId, assetItems) : '');
-            return code ? formatBizCodeDisplay(code) : '—';
-          }
-          const eq = r.equipmentId ? equipments.find(e => String(e.id) === String(r.equipmentId)) : undefined;
-          return eq ? formatEquipmentCodeDisplay(eq.equipmentCode) : '—';
-        },
+        render: (row: AllocationDetailRow) => allocationDetailCatalogCode(row, assetItems, equipments),
+      },
+      {
+        key: 'serial',
+        label: 'Serial',
+        render: (row: AllocationDetailRow) => allocationDetailSerial(row, equipments),
       },
       {
         key: 'quantity',
-        label: 'Số lượng',
+        label: 'SL',
         className: 'text-right',
-        render: (row: AllocationDetailRow) => (row.kind === 'device_group' ? row.lines.length : row.line.quantity),
+        render: (row: AllocationDetailRow) => allocationDetailQuantity(row),
       },
       {
         key: 'pick',
@@ -760,9 +692,11 @@ const AllocationRequests = () => {
                 <div className="space-y-2 text-sm">
                   <div><span className="text-muted-foreground">Lý do:</span> {selected.reason}</div>
                   {selected.attachmentNote ? (
-                    <div className="space-y-1">
-                      <div className="text-muted-foreground">Đính kèm</div>
-                      <AttachmentNoteView text={selected.attachmentNote} showCaption={false} />
+                    <div className="flex flex-wrap items-start gap-x-2 gap-y-1">
+                      <span className="text-muted-foreground shrink-0">Đính kèm:</span>
+                      <div className="min-w-0 flex-1">
+                        <AttachmentNoteView text={selected.attachmentNote} showCaption={false} />
+                      </div>
                     </div>
                   ) : null}
                 </div>
@@ -774,11 +708,17 @@ const AllocationRequests = () => {
                 </div>
               ) : null}
 
-              <DataTable
-                columns={detailColumns}
-                data={allocationDetailRows}
-                pageSize={Math.max(1, allocationDetailRows.length)}
-              />
+              <div className="space-y-3 text-sm">
+                <div className="space-y-2">
+                  <p className="text-sm font-medium text-foreground">Bảng thiết bị / vật tư</p>
+                  <DataTable
+                    columns={detailColumns}
+                    data={allocationDetailRows}
+                    pageSize={Math.max(1, allocationDetailRows.length)}
+                    emptyMessage="Không có dòng"
+                  />
+                </div>
+              </div>
               {selected.status === 'PENDING' && (
                 <ApprovalActionBar
                   disabled={busy}

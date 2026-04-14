@@ -6,5 +6,6 @@
     "env": {
       "NODE_OPTIONS": "--max-old-space-size=7168"
     }
-  }
+  },
+  "rewrites": [{ "source": "/(.*)", "destination": "/index.html" }]
 }

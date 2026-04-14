@@ -1,5 +1,7 @@
 import type { AllocationRequestLine, AssetItem, Equipment } from '@/data/mockData';
 import { catalogItemNameOnly } from '@/utils/catalogItemDisplay';
+import { getItemName, getItemCode, getAssetLineDisplay } from '@/data/mockData';
+import { formatBizCodeDisplay, formatEquipmentCodeDisplay } from '@/utils/formatCodes';
 import { REQUEST_KIND_COMBINED_ADMIN, REQUEST_KIND_COMBINED_EMPLOYEE } from '@/utils/requestListKindLabels';
 
 /** Cột «Loại» trên danh sách YC cấp phát — cùng cách gọi như báo mất khi có cả TB + VT. */
@@ -88,5 +90,93 @@ export function sumAllocationLineQuantities(lines: AllocationRequestLine[]): num
     const q = line.quantity;
     return acc + (typeof q === 'number' && !Number.isNaN(q) ? q : 0);
   }, 0);
+}
+
+/** Cột chi tiết YC cấp phát — cùng trật tự / ý nghĩa với bảng dòng phiếu sửa chữa (Loại, Tài sản, Mã, Serial, SL). */
+export type AssetLineLite = { id?: number | string; name?: string | null };
+
+export function allocationDetailKindLabel(row: AllocationDetailRow): 'Vật tư' | 'Thiết bị' {
+  if (row.kind === 'device_group') return 'Thiết bị';
+  return String(row.line.lineType ?? '').toUpperCase() === 'CONSUMABLE' ? 'Vật tư' : 'Thiết bị';
+}
+
+export function allocationDetailAssetName(
+  row: AllocationDetailRow,
+  assetItems: AssetItem[],
+  equipments: Equipment[],
+  assetLinesApi: AssetLineLite[],
+): string {
+  if (row.kind === 'device_group') {
+    const itemIds = row.lines.map(l => {
+      const eq = l.equipmentId ? equipments.find(e => String(e.id) === String(l.equipmentId)) : undefined;
+      return eq?.itemId;
+    });
+    const first = itemIds.find(Boolean);
+    if (first && itemIds.every(id => id && id === first)) {
+      return getItemName(first, assetItems);
+    }
+    const al = assetLinesApi.find(l => String(l.id) === row.assetLineId);
+    return al?.name?.trim() || getAssetLineDisplay(row.assetLineId, assetLinesApi);
+  }
+  const r = row.line;
+  const lt = (r.lineType ?? '').toUpperCase();
+  if (lt === 'CONSUMABLE') {
+    if (!r.itemId || !String(r.itemId).trim()) return '—';
+    return getItemName(r.itemId, assetItems);
+  }
+  const eq = r.equipmentId ? equipments.find(e => String(e.id) === String(r.equipmentId)) : undefined;
+  if (eq) return getItemName(eq.itemId, assetItems);
+  return '—';
+}
+
+export function allocationDetailCatalogCode(
+  row: AllocationDetailRow,
+  assetItems: AssetItem[],
+  equipments: Equipment[],
+): string {
+  if (row.kind === 'device_group') {
+    const itemIds = row.lines.map(l => {
+      const eq = l.equipmentId ? equipments.find(e => String(e.id) === String(l.equipmentId)) : undefined;
+      return eq?.itemId;
+    });
+    const first = itemIds.find(Boolean);
+    if (first && itemIds.every(id => id && id === first)) {
+      const fromCatalog = assetItems.find(i => String(i.id) === String(first))?.code?.trim() ?? '';
+      return fromCatalog ? formatBizCodeDisplay(fromCatalog) : '—';
+    }
+    return '—';
+  }
+  const r = row.line;
+  const lt = (r.lineType ?? '').toUpperCase();
+  if (lt === 'CONSUMABLE') {
+    if (!r.itemId || !String(r.itemId).trim()) return '—';
+    const fromCatalog = assetItems.find(i => String(i.id) === String(r.itemId))?.code?.trim() ?? '';
+    const code = fromCatalog || r.itemCode?.trim() || (r.itemId ? getItemCode(r.itemId, assetItems) : '');
+    return code ? formatBizCodeDisplay(code) : '—';
+  }
+  const eq = r.equipmentId ? equipments.find(e => String(e.id) === String(r.equipmentId)) : undefined;
+  return eq ? formatEquipmentCodeDisplay(eq.equipmentCode) : '—';
+}
+
+export function allocationDetailSerial(row: AllocationDetailRow, equipments: Equipment[]): string {
+  if (row.kind === 'device_group') {
+    const parts = row.lines
+      .map(l => {
+        const eq = l.equipmentId ? equipments.find(e => String(e.id) === String(l.equipmentId)) : undefined;
+        return (eq?.serial ?? '').trim();
+      })
+      .filter(Boolean);
+    if (parts.length === 0) return '—';
+    return [...new Set(parts)].join(', ');
+  }
+  const r = row.line;
+  if ((r.lineType ?? '').toUpperCase() === 'CONSUMABLE') return '—';
+  const eq = r.equipmentId ? equipments.find(e => String(e.id) === String(r.equipmentId)) : undefined;
+  const s = (eq?.serial ?? '').trim();
+  return s.length > 0 ? s : '—';
+}
+
+export function allocationDetailQuantity(row: AllocationDetailRow): number {
+  return row.kind === 'device_group' ? row.lines.length : row.line.quantity;
 }
 

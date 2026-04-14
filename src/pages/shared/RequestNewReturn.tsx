@@ -1,5 +1,5 @@
-import { useMemo, useState } from 'react';
-import { Link, useLocation, useNavigate } from 'react-router-dom';
+import { useEffect, useMemo, useState } from 'react';
+import { useLocation, useNavigate, useSearchParams } from 'react-router-dom';
 import { useQueryClient } from '@tanstack/react-query';
 import { ArrowLeft, Monitor, Package } from 'lucide-react';
 import { toast } from 'sonner';
@@ -12,20 +12,39 @@ import {
   AssetPickTwoColumnGrid,
 } from '@/components/shared/RequestAssetPickRows';
 import { Button } from '@/components/ui/button';
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from '@/components/ui/alert-dialog';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
 
 import { resolveEmployeeIdForRequests, resolveEmployeeLocationIdForRequests } from '@/api/account';
-import { apiPost, getApiErrorMessage } from '@/api/http';
+import { mergeReturnRequestsFullViewAfterCreate, type ReturnRequestsViewSnapshot } from '@/api/viewModels';
+import { apiDelete, apiGet, apiPatch, apiPost, getApiErrorMessage, getStoredToken, PAGE_ALL } from '@/api/http';
+import type { ConsumableAssignmentDto, ReturnRequestDto, ReturnRequestLineDto } from '@/api/types';
 import { makeBizCode } from '@/api/businessCode';
+import { hasAnyAuthority } from '@/auth/jwt';
 import type { Equipment } from '@/data/mockData';
 import { getItemName } from '@/data/mockData';
 import { consumableQuantityHeld, filterConsumableAssignmentsForMyAccount, filterEquipmentForMyAccount } from '@/utils/myEquipment';
 import { groupConsumableAssignmentsByAssetItem, sortEquipmentForDisplay, totalHeldForConsumableGroup } from '@/utils/myHoldingsAggregate';
 import { hasBackendOpenEquipmentAssignment } from '@/utils/equipmentJoin';
-import { mapAssetItemIdToConsumablePending, mapEquipmentIdToOpenRequestHints } from '@/utils/openAssetRequestBlocks';
+import {
+  consumableRemainingForAssetItem,
+  mapAssetItemIdToConsumablePending,
+  mapEquipmentIdToOpenRequestEntries,
+  mapEquipmentIdToOpenRequestHints,
+  type OpenRequestAggregationOptions,
+} from '@/utils/openAssetRequestBlocks';
 import {
   mapAssetItemDto,
   useAssetItems,
@@ -39,7 +58,6 @@ import {
 } from '@/hooks/useEntityApi';
 import { requestsListPath } from './requestNewPaths';
 import { PageLoading } from '@/components/shared/page-loading';
-import type { ConsumableAssignmentDto } from '@/api/types';
 
 function requireEmployeeId(): number | null {
   const id = resolveEmployeeIdForRequests();
@@ -54,9 +72,13 @@ function requireEmployeeId(): number | null {
 export default function RequestNewReturn() {
   const navigate = useNavigate();
   const location = useLocation();
+  const [searchParams] = useSearchParams();
   const qc = useQueryClient();
   const isAdminArea = location.pathname.startsWith('/admin');
   const backTo = requestsListPath('return', isAdminArea);
+  const canFullEditRequest = hasAnyAuthority(getStoredToken(), ['ROLE_ADMIN', 'ROLE_ASSET_MANAGER', 'ROLE_GD']);
+  const editId = searchParams.get('editId')?.trim() || '';
+  const isEditMode = editId.length > 0;
 
   const eqQ = useEnrichedEquipmentList();
   const eqAssignQ = useEquipmentAssignments();
@@ -95,14 +117,53 @@ export default function RequestNewReturn() {
   );
   const equipmentRows = useMemo(() => sortEquipmentForDisplay(myEquipment), [myEquipment]);
 
+  const retSnapshot = returnQ.data;
+  const returnRequests = retSnapshot?.requests ?? [];
+  const returnLineDtos = retSnapshot?.lineDtos;
+
+  const aggregationOpts = useMemo<OpenRequestAggregationOptions | undefined>(() => {
+    if (!isEditMode) return undefined;
+    const n = Number(editId);
+    return Number.isFinite(n) ? { excludeReturnRequestId: n } : undefined;
+  }, [isEditMode, editId]);
+
   const equipmentOpenHints = useMemo(
-    () => mapEquipmentIdToOpenRequestHints(myEmpIdStr, repairQ.data ?? [], returnQ.data ?? [], lossQ.data ?? []),
-    [myEmpIdStr, repairQ.data, returnQ.data, lossQ.data],
+    () =>
+      mapEquipmentIdToOpenRequestHints(
+        myEmpIdStr,
+        repairQ.data ?? [],
+        returnRequests,
+        lossQ.data ?? [],
+        returnLineDtos,
+        aggregationOpts,
+      ),
+    [myEmpIdStr, repairQ.data, returnRequests, lossQ.data, returnLineDtos, aggregationOpts],
+  );
+
+  const equipmentOpenEntries = useMemo(
+    () =>
+      mapEquipmentIdToOpenRequestEntries(
+        myEmpIdStr,
+        repairQ.data ?? [],
+        returnRequests,
+        lossQ.data ?? [],
+        returnLineDtos,
+        aggregationOpts,
+      ),
+    [myEmpIdStr, repairQ.data, returnRequests, lossQ.data, returnLineDtos, aggregationOpts],
   );
 
   const consumablePendingByAssetItem = useMemo(
-    () => mapAssetItemIdToConsumablePending(myEmpIdStr, repairQ.data ?? [], returnQ.data ?? [], lossQ.data ?? []),
-    [myEmpIdStr, repairQ.data, returnQ.data, lossQ.data],
+    () =>
+      mapAssetItemIdToConsumablePending(
+        myEmpIdStr,
+        repairQ.data ?? [],
+        returnRequests,
+        lossQ.data ?? [],
+        returnLineDtos,
+        aggregationOpts,
+      ),
+    [myEmpIdStr, repairQ.data, returnRequests, lossQ.data, returnLineDtos, aggregationOpts],
   );
 
   const [retNote, setRetNote] = useState('');
@@ -110,6 +171,8 @@ export default function RequestNewReturn() {
   const [retConsumableSelected, setRetConsumableSelected] = useState<Record<string, boolean>>({});
   const [retConsumableQty, setRetConsumableQty] = useState<Record<string, string>>({});
   const [retBusy, setRetBusy] = useState(false);
+  const [cancelConfirmOpen, setCancelConfirmOpen] = useState(false);
+  const [editBootstrapLoading, setEditBootstrapLoading] = useState(false);
   const toggleRet = (id: string) => setRetSelected(p => ({ ...p, [id]: !p[id] }));
   const toggleRetConsumable = (assetItemId: string) => {
     setRetConsumableSelected(p => {
@@ -120,24 +183,124 @@ export default function RequestNewReturn() {
       return next;
     });
   };
+  const displayEquipmentRows = useMemo(() => {
+    const rows = [...equipmentRows];
+    if (!isEditMode) return rows;
+    const seen = new Set(rows.map(r => String(r.id)));
+    for (const [eqId, selected] of Object.entries(retSelected)) {
+      if (!selected || seen.has(eqId)) continue;
+      const eq = equipments.find(e => String(e.id) === eqId);
+      if (!eq) continue;
+      rows.push(eq);
+      seen.add(eqId);
+    }
+    return sortEquipmentForDisplay(rows);
+  }, [equipmentRows, isEditMode, retSelected, equipments]);
+
+  useEffect(() => {
+    if (!isEditMode) return;
+    let cancelled = false;
+    (async () => {
+      setEditBootstrapLoading(true);
+      try {
+        const [req, allLines] = await Promise.all([
+          apiGet<any>(`/api/return-requests/${editId}`),
+          apiGet<any[]>(`/api/return-request-lines?${PAGE_ALL}`),
+        ]);
+        if (cancelled) return;
+        setRetNote(req?.note ?? '');
+        const lines = ((req?.lines ?? []) as any[]).length
+          ? ((req?.lines ?? []) as any[])
+          : (allLines ?? []).filter(l => String(l?.request?.id ?? '') === String(editId));
+        const nextEq: Record<string, boolean> = {};
+        const nextConsSel: Record<string, boolean> = {};
+        const nextConsQty: Record<string, string> = {};
+        for (const line of lines) {
+          const lt = String(line?.lineType ?? 'DEVICE').toUpperCase();
+          if (lt === 'CONSUMABLE') {
+            const aid =
+              line?.assetItem?.id != null
+                ? String(line.assetItem.id)
+                : line?.assetItemId != null
+                  ? String(line.assetItemId)
+                  : line?.itemId != null
+                    ? String(line.itemId)
+                    : '';
+            if (!aid) continue;
+            nextConsSel[aid] = true;
+            nextConsQty[aid] = String(Number(line?.quantity ?? 1));
+          } else {
+            const eid = line?.equipment?.id != null ? String(line.equipment.id) : '';
+            if (!eid) continue;
+            nextEq[eid] = true;
+          }
+        }
+        setRetSelected(nextEq);
+        setRetConsumableSelected(nextConsSel);
+        setRetConsumableQty(nextConsQty);
+      } catch (e) {
+        if (!cancelled) toast.error(e instanceof Error ? e.message : 'Không tải được dữ liệu yêu cầu để sửa');
+      } finally {
+        if (!cancelled) setEditBootstrapLoading(false);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [isEditMode, editId]);
+
+  const displayConsumableItems = useMemo(() => {
+    const rows = consumableGroups.map(g => ({
+      itemId: g.assetItemId,
+      held: totalHeldForConsumableGroup(g.assignments),
+    }));
+    if (!isEditMode) return rows;
+    const seen = new Set(rows.map(r => r.itemId));
+    for (const [itemId, selected] of Object.entries(retConsumableSelected)) {
+      if (!selected || seen.has(itemId)) continue;
+      const seededQty = Number.parseInt((retConsumableQty[itemId] ?? '1').trim(), 10);
+      rows.push({
+        itemId,
+        // Preserve edit visibility even when current "my holdings" no longer returns this item.
+        held: Number.isFinite(seededQty) && seededQty > 0 ? seededQty : 1,
+      });
+      seen.add(itemId);
+    }
+    return rows;
+  }, [consumableGroups, isEditMode, retConsumableSelected, retConsumableQty]);
 
   const submitReturn = async () => {
+    const noteTrim = retNote.trim();
+    if (!noteTrim) {
+      toast.error('Vui lòng nhập ghi chú');
+      return;
+    }
     const eqIds = Object.entries(retSelected).filter(([, v]) => v).map(([k]) => k);
     const mergedReturnQty = new Map<number, number>();
-    for (const g of consumableGroups) {
-      const assetItemIdStr = g.assetItemId;
-      if (!retConsumableSelected[assetItemIdStr]) continue;
+    for (const [assetItemIdStr, selected] of Object.entries(retConsumableSelected)) {
+      if (!selected) continue;
       const itemId = Number(assetItemIdStr);
       if (!Number.isFinite(itemId)) continue;
-      const max = totalHeldForConsumableGroup(g.assignments);
+      const g = consumableGroups.find(x => x.assetItemId === assetItemIdStr);
+      const max = g ? totalHeldForConsumableGroup(g.assignments) : 0;
       const raw = (retConsumableQty[assetItemIdStr] ?? '1').trim();
       const qty = Number.parseInt(raw, 10);
       if (!Number.isFinite(qty) || qty < 1) {
         toast.error('Số lượng vật tư phải là số nguyên ≥ 1');
         return;
       }
-      if (qty > max) {
-        toast.error(`Số lượng không vượt quá tổng SL đang giữ của mặt hàng (${max})`);
+      const pend = consumablePendingByAssetItem.get(String(itemId));
+      const remaining = consumableRemainingForAssetItem(max, pend);
+      if (qty > remaining) {
+        toast.error(
+          remaining <= 0
+            ? `Mặt hàng không còn SL khả dụng (đã nằm trong phiếu sửa/thu hồi/báo mất chưa xử lý).${pend?.summary ? ` (${pend.summary})` : ''}`
+            : `Số lượng vượt phần còn khả dụng (tối đa ${remaining}).${pend?.summary ? ` Đang có: ${pend.summary}.` : ''}`,
+        );
+        return;
+      }
+      if (!isEditMode && max <= 0) {
+        toast.error('Vật tư đã chọn không còn trong danh sách đang giữ');
         return;
       }
       mergedReturnQty.set(itemId, qty);
@@ -146,60 +309,75 @@ export default function RequestNewReturn() {
     for (const id of eqIds) {
       const hint = equipmentOpenHints.get(id);
       if (hint) {
-        toast.error(`Thiết bị đang có yêu cầu sửa/thu hồi/báo mất chưa xử lý — không tạo phiếu mới trùng. (${hint})`);
+        toast.error(`Thiết bị đang có yêu cầu sửa/thu hồi/báo mất chưa xử lý — không chọn trùng. (${hint})`);
         return;
       }
     }
-    for (const [assetItemId] of mergedReturnQty) {
-      const pend = consumablePendingByAssetItem.get(String(assetItemId));
-      const blocked = pend && pend.repairQty + pend.returnQty + pend.lossQty > 0;
-      if (blocked) {
-        toast.error(
-          `Mặt hàng vật tư đang có SL trong phiếu sửa/thu hồi/báo mất chưa xử lý — không chọn trùng. (${pend!.summary})`,
-        );
-        return;
-      }
-    }
-    const retEid = requireEmployeeId();
-    if (retEid == null) return;
+    const retEid = isEditMode ? Number.NaN : requireEmployeeId();
+    if (!isEditMode && retEid == null) return;
     setRetBusy(true);
     try {
-      const created = await apiPost<{ id: number }>('/api/return-requests', {
-        code: makeBizCode('RT'),
-        requestDate: new Date().toISOString(),
-        note: retNote.trim() || undefined,
-        status: 'PENDING',
-        requester: { id: retEid },
-      });
+      let requestId: number;
+      let createdForCache: ReturnRequestDto | null = null;
+      const createdLineBodies: ReturnRequestLineDto[] = [];
+      if (isEditMode) {
+        requestId = Number(editId);
+        await apiPatch(`/api/return-requests/${requestId}`, {
+          id: requestId,
+          note: noteTrim,
+        });
+        const oldLines = await apiGet<any[]>(`/api/return-request-lines?${PAGE_ALL}`);
+        const mine = oldLines.filter(l => String(l.request?.id ?? '') === String(requestId));
+        for (const l of mine) {
+          if (l.id != null) await apiDelete(`/api/return-request-lines/${l.id}`);
+        }
+      } else {
+        const created = await apiPost<ReturnRequestDto>('/api/return-requests', {
+          code: makeBizCode('RT'),
+          requestDate: new Date().toISOString(),
+          note: noteTrim,
+          status: 'PENDING',
+          requester: { id: retEid },
+        });
+        requestId = Number(created.id);
+        createdForCache = created;
+      }
       let lineNo = 1;
       for (const eqId of eqIds) {
         const eq = myEquipment.find(e => e.id === eqId);
         if (!eq) continue;
-        await apiPost('/api/return-request-lines', {
+        const lineRes = await apiPost<ReturnRequestLineDto>('/api/return-request-lines', {
           lineNo: lineNo++,
           lineType: 'DEVICE',
           quantity: 1,
           selected: true,
-          request: { id: created.id },
+          request: { id: requestId },
           equipment: { id: Number(eqId) },
           assetItem: { id: Number(eq.itemId) },
         });
+        createdLineBodies.push(lineRes);
       }
       for (const [assetItemId, qty] of mergedReturnQty) {
-        await apiPost('/api/return-request-lines', {
+        const lineRes = await apiPost<ReturnRequestLineDto>('/api/return-request-lines', {
           lineNo: lineNo++,
           lineType: 'CONSUMABLE',
           quantity: qty,
           selected: true,
-          request: { id: created.id },
+          request: { id: requestId },
           assetItem: { id: assetItemId },
         });
+        createdLineBodies.push(lineRes);
       }
-      toast.success('Đã gửi yêu cầu thu hồi');
+      toast.success(isEditMode ? 'Đã cập nhật yêu cầu thu hồi' : 'Đã gửi yêu cầu thu hồi');
       await qc.invalidateQueries({ queryKey: ['api', 'allocation-requests-view'] });
       await qc.invalidateQueries({ queryKey: ['api', 'repair-requests-view'] });
-      await qc.invalidateQueries({ queryKey: ['api', 'return-requests-view'] });
       await qc.invalidateQueries({ queryKey: ['api', 'loss-report-requests'] });
+      await qc.refetchQueries({ queryKey: ['api', 'return-requests-view'] });
+      if (!isEditMode && createdForCache) {
+        qc.setQueryData<ReturnRequestsViewSnapshot>(['api', 'return-requests-view'], prev =>
+          mergeReturnRequestsFullViewAfterCreate(prev, createdForCache!, createdLineBodies),
+        );
+      }
       navigate(backTo);
     } catch (e) {
       toast.error(getApiErrorMessage(e));
@@ -210,19 +388,23 @@ export default function RequestNewReturn() {
 
   const hasAnyAsset = myEquipment.length > 0 || myConsumables.length > 0;
   const loadingAssets =
-    eqQ.isLoading || caQ.isLoading || repairQ.isLoading || returnQ.isLoading || lossQ.isLoading;
+    eqQ.isLoading || caQ.isLoading || repairQ.isLoading || returnQ.isLoading || lossQ.isLoading || editBootstrapLoading;
 
   return (
     <div className="page-container max-w-none w-full pb-8">
       <header className="flex flex-col gap-4 border-b border-border pb-6">
         <div className="space-y-2 min-w-0">
-          <Button variant="ghost" size="sm" className="-ml-2 w-fit" asChild>
-            <Link to={backTo}>
-              <ArrowLeft className="h-4 w-4 mr-1" />
-              Quay lại danh sách
-            </Link>
+          <Button
+            variant="ghost"
+            size="sm"
+            className="-ml-2 w-fit"
+            type="button"
+            onClick={() => setCancelConfirmOpen(true)}
+          >
+            <ArrowLeft className="h-4 w-4 mr-1" />
+            Quay lại danh sách
           </Button>
-          <h1 className="page-title">Tạo yêu cầu thu hồi</h1>
+          <h1 className="page-title">{isEditMode ? 'Sửa yêu cầu thu hồi' : 'Tạo yêu cầu thu hồi'}</h1>
         </div>
       </header>
 
@@ -233,7 +415,7 @@ export default function RequestNewReturn() {
         <CardContent className="space-y-4">
           {loadingAssets ? (
             <PageLoading label="Đang tải tài sản…" minHeight="min-h-[28vh]" />
-          ) : !hasAnyAsset ? (
+          ) : !hasAnyAsset && !isEditMode ? (
             <p className="text-sm text-muted-foreground">Bạn không có thiết bị hoặc vật tư đang giữ.</p>
           ) : (
             <>
@@ -242,24 +424,20 @@ export default function RequestNewReturn() {
                   Tài sản cần thu hồi (thiết bị và/hoặc vật tư)
                   <RequiredMark />
                 </Label>
-                <p className="text-xs text-muted-foreground">
-                  Bắt buộc chọn ít nhất một thiết bị hoặc một vật tư. Mỗi thiết bị / mặt hàng chỉ một yêu cầu sửa, thu hồi hoặc
-                  báo mất ở trạng thái chờ duyệt / đang xử lý — dòng gạch mờ là đã có phiếu như vậy.
-                </p>
               </div>
               <AssetPickTwoColumnGrid>
                 <AssetPickColumn
                   icon={Monitor}
                   title="Thiết bị"
-                  description={<>Mỗi serial = 1 chiếc khi thu hồi. Dòng tô vàng là đã có phiếu chờ xử lý.</>}
                 >
-                  {myEquipment.length > 0 ? (
-                    equipmentRows.map(e => {
+                  {displayEquipmentRows.length > 0 ? (
+                    displayEquipmentRows.map(e => {
                       const deviceName = e.itemId ? getItemName(e.itemId, assetItems) : '—';
                       const serial = (e.serial ?? '').trim() || '—';
                       const hint = equipmentOpenHints.get(e.id);
-                      const blocked = Boolean(hint);
-                      const checked = !blocked && !!retSelected[e.id];
+                      const lockedByOtherRequest = Boolean(hint);
+                      const checked = !!retSelected[e.id];
+                      const blocked = lockedByOtherRequest && !(isEditMode && checked);
                       const lineText = blocked
                         ? `${deviceName} (Đã có yêu cầu sửa/báo mất/thu hồi${hint ? `: ${hint}` : ''})`
                         : `${deviceName} (Serial: ${serial})`;
@@ -272,6 +450,7 @@ export default function RequestNewReturn() {
                           serial={serial}
                           blocked={blocked}
                           hint={hint}
+                          openEntries={equipmentOpenEntries.get(String(e.id))}
                           checked={checked}
                           onCheckedChange={next => {
                             if (blocked) return;
@@ -289,16 +468,17 @@ export default function RequestNewReturn() {
                 <AssetPickColumn
                   icon={Package}
                   title="Vật tư (số lượng thu hồi, gộp theo mặt hàng)"
-                  description={<>Theo mặt hàng đang giữ — SL thu hồi không vượt quá tổng còn.</>}
                 >
-                  {consumableGroups.length > 0 ? (
-                    consumableGroups.map(g => {
-                      const itemId = g.assetItemId;
-                      const held = totalHeldForConsumableGroup(g.assignments);
+                  {displayConsumableItems.length > 0 ? (
+                    displayConsumableItems.map(g => {
+                      const itemId = g.itemId;
+                      const held = g.held;
                       const label = itemId ? getItemName(itemId, assetItems) : '—';
                       const pend = itemId ? consumablePendingByAssetItem.get(itemId) : undefined;
-                      const blocked = pend != null && pend.repairQty + pend.returnQty + pend.lossQty > 0;
-                      const rowTitle = `${label} · Còn ${held.toLocaleString('vi-VN')}`;
+                      const remaining = consumableRemainingForAssetItem(held, pend);
+                      const checked = !!retConsumableSelected[itemId];
+                      const blocked = remaining <= 0 && !(isEditMode && checked);
+                      const rowTitle = `${label} · Đang giữ ${held.toLocaleString('vi-VN')} · Khả dụng ${remaining.toLocaleString('vi-VN')}`;
                       return (
                         <AssetPickConsumableRow
                           key={itemId}
@@ -307,8 +487,10 @@ export default function RequestNewReturn() {
                           itemLabel={label}
                           held={held}
                           blocked={blocked}
+                          availableQty={remaining}
                           pendingSummary={pend?.summary}
-                          checked={blocked ? false : !!retConsumableSelected[itemId]}
+                          pendingEntries={pend?.entries}
+                          checked={checked}
                           onCheckedChange={next => {
                             if (blocked) return;
                             if (next !== !!retConsumableSelected[itemId]) toggleRetConsumable(itemId);
@@ -319,7 +501,7 @@ export default function RequestNewReturn() {
                                 className="h-9 w-full font-sans tabular-nums"
                                 type="number"
                                 min={1}
-                                max={held}
+                                max={Math.max(1, Math.min(held, remaining))}
                                 placeholder="SL"
                                 value={retConsumableQty[itemId] ?? '1'}
                                 onChange={e => setRetConsumableQty(q => ({ ...q, [itemId]: e.target.value }))}
@@ -335,17 +517,34 @@ export default function RequestNewReturn() {
                 </AssetPickColumn>
               </AssetPickTwoColumnGrid>
               <div className="space-y-2">
-                <Label>Ghi chú</Label>
+                <Label>
+                  Ghi chú
+                  <RequiredMark />
+                </Label>
                 <Textarea value={retNote} onChange={e => setRetNote(e.target.value)} rows={2} />
               </div>
               <div className="flex flex-wrap gap-2 justify-end pt-2">
-                <Button variant="outline" asChild disabled={retBusy}>
-                  <Link to={backTo}>Hủy</Link>
+                <Button variant="outline" type="button" onClick={() => setCancelConfirmOpen(true)} disabled={retBusy}>
+                  Hủy
                 </Button>
-                <Button onClick={() => void submitReturn()} disabled={retBusy || !hasAnyAsset}>
-                  {retBusy ? 'Đang gửi…' : 'Gửi'}
+                <Button onClick={() => void submitReturn()} disabled={retBusy || (!hasAnyAsset && !isEditMode)}>
+                  {retBusy ? 'Đang lưu…' : isEditMode ? 'Lưu thay đổi' : 'Gửi'}
                 </Button>
               </div>
+              <AlertDialog open={cancelConfirmOpen} onOpenChange={setCancelConfirmOpen}>
+                <AlertDialogContent>
+                  <AlertDialogHeader>
+                    <AlertDialogTitle>Hủy yêu cầu thu hồi?</AlertDialogTitle>
+                    <AlertDialogDescription>
+                      Dữ liệu đang nhập chưa được lưu. Bạn có chắc muốn quay lại danh sách?
+                    </AlertDialogDescription>
+                  </AlertDialogHeader>
+                  <AlertDialogFooter>
+                    <AlertDialogCancel>Ở lại</AlertDialogCancel>
+                    <AlertDialogAction onClick={() => navigate(backTo)}>Thoát</AlertDialogAction>
+                  </AlertDialogFooter>
+                </AlertDialogContent>
+              </AlertDialog>
             </>
           )}
         </CardContent>

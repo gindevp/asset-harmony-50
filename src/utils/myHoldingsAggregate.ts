@@ -93,36 +93,6 @@ export function aggregateConsumableDisplayStatus(
 /** SL đang trong phiếu sửa / thu hồi / báo mất (theo assetItem) — từ mapAssetItemIdToConsumablePending. */
 export type ConsumablePendingByAssetItem = { repairQty: number; returnQty: number; lossQty: number };
 
-/**
- * Trạng thái gộp theo mặt hàng — «Tài sản của tôi».
- * Thứ tự: hết SL → Mất / Tồn kho; còn SL → Sửa chữa → Thu hồi → theo từng dòng → Đang sử dụng.
- */
-export function getConsumableGroupDisplayStatusForMyAssets(
-  g: GroupedConsumableRow,
-  repairRequests: RepairRequest[],
-  pending: Map<string, ConsumablePendingByAssetItem>,
-  approvedLossSet: Set<string>,
-): { status: string; label: string } {
-  const held = totalHeldForConsumableGroup(g.assignments);
-  const pend = pending.get(g.assetItemId);
-  if (held <= 0) {
-    const anyLost = g.assignments.some(a => approvedLossSet.has(String(a.id ?? '')));
-    if (anyLost) return { status: 'LOST', label: equipmentStatusLabels.LOST };
-    return { status: 'IN_STOCK', label: equipmentStatusLabels.IN_STOCK };
-  }
-  if ((pend?.repairQty ?? 0) > 0) {
-    return { status: 'UNDER_REPAIR', label: equipmentStatusLabels.UNDER_REPAIR };
-  }
-  if ((pend?.returnQty ?? 0) > 0) {
-    return { status: 'PENDING_RETURN', label: equipmentStatusLabels.PENDING_RETURN };
-  }
-  for (const a of g.assignments) {
-    const st = getConsumableAssignmentDisplayStatus(a, repairRequests, approvedLossSet);
-    if (st.status === 'UNDER_REPAIR') return st;
-  }
-  return { status: 'IN_USE', label: equipmentStatusLabels.IN_USE };
-}
-
 /** Chia SL báo mất theo FIFO trên các dòng bàn giao (id tăng dần). */
 export function splitConsumableLossAcrossAssignments(
   assignments: ConsumableAssignmentDto[],

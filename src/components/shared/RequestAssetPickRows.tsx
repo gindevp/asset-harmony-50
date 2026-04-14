@@ -3,6 +3,8 @@ import type { LucideIcon } from 'lucide-react';
 import { Label } from '@/components/ui/label';
 import { Checkbox } from '@/components/ui/checkbox';
 import { cn } from '@/lib/utils';
+import { formatBizCodeDisplay } from '@/utils/formatCodes';
+import type { ConsumableOpenRequestEntry, EquipmentOpenRequestEntry } from '@/utils/openAssetRequestBlocks';
 
 /** Hai cột Thiết bị | Vật tư — dùng chung phiếu sửa / thu hồi / báo mất */
 export function AssetPickTwoColumnGrid({ children }: { children: ReactNode }) {
@@ -70,6 +72,7 @@ export function AssetPickEquipmentRow({
   serial,
   blocked,
   hint,
+  openEntries,
   checked,
   onCheckedChange,
   quantitySlot,
@@ -81,6 +84,8 @@ export function AssetPickEquipmentRow({
   serial: string;
   blocked: boolean;
   hint?: string;
+  /** Phiếu đang chiếm thiết bị (mã + loại) — ưu tiên hiển thị thay cho chuỗi `hint` dài. */
+  openEntries?: EquipmentOpenRequestEntry[];
   checked: boolean;
   onCheckedChange: (next: boolean) => void;
   /** Thiết bị thường không cần ô SL (mỗi serial = 1) — bỏ qua để ẩn cột số lượng. */
@@ -114,9 +119,22 @@ export function AssetPickEquipmentRow({
               </span>
             </p>
             {blocked ? (
-              <p className="text-xs leading-snug text-amber-800 dark:text-amber-400">
-                Không chọn được — đã có yêu cầu sửa / báo mất / thu hồi{hint ? ` · ${hint}` : ''}
-              </p>
+              <div className="space-y-1 text-xs leading-snug text-amber-800 dark:text-amber-400">
+                <p>Không chọn được — thiết bị đã nằm trong yêu cầu khác (chưa xử lý xong).</p>
+                {openEntries && openEntries.length > 0 ? (
+                  <ul className="space-y-0.5 border-l-2 border-amber-500/40 pl-2 text-[11px]">
+                    {openEntries.map((e, i) => (
+                      <li key={`${e.requestCode}-${e.kind}-${i}`}>
+                        <span className="font-mono text-foreground/90">{formatBizCodeDisplay(e.requestCode)}</span>
+                        {' — '}
+                        {e.label}
+                      </li>
+                    ))}
+                  </ul>
+                ) : hint ? (
+                  <p className="text-[11px] opacity-90">{hint}</p>
+                ) : null}
+              </div>
             ) : null}
           </div>
         </label>
@@ -139,7 +157,9 @@ export function AssetPickConsumableRow({
   itemLabel,
   held,
   blocked,
+  availableQty,
   pendingSummary,
+  pendingEntries,
   checked,
   onCheckedChange,
   quantitySlot,
@@ -149,13 +169,17 @@ export function AssetPickConsumableRow({
   itemLabel: string;
   held: number;
   blocked: boolean;
+  /** SL còn kê vào phiếu này (đã trừ phiếu khác). */
+  availableQty?: number;
   pendingSummary?: string;
+  pendingEntries?: ConsumableOpenRequestEntry[];
   checked: boolean;
   onCheckedChange: (next: boolean) => void;
   quantitySlot: ReactNode;
 }) {
   const boxId = `asset-pick-co-${rowId}`;
   const heldStr = held.toLocaleString('vi-VN');
+  const availStr = availableQty !== undefined ? availableQty.toLocaleString('vi-VN') : null;
 
   return (
     <div className={rowShellClass(blocked, !blocked && checked)} title={nativeTitle}>
@@ -177,7 +201,18 @@ export function AssetPickConsumableRow({
         >
           <div className="space-y-1">
             <p className="text-sm font-medium leading-snug text-foreground">{itemLabel}</p>
-            {blocked && pendingSummary ? (
+            {availStr != null ? (
+              <p className="text-xs text-muted-foreground">
+                Đang giữ{' '}
+                <span className="font-medium tabular-nums text-foreground/90">{heldStr}</span>
+                {' · '}
+                Khả dụng cho phiếu này{' '}
+                <span className="font-medium tabular-nums text-foreground">{availStr}</span>
+                {blocked ? (
+                  <span className="text-amber-800 dark:text-amber-400"> — hết khả dụng</span>
+                ) : null}
+              </p>
+            ) : blocked && pendingSummary ? (
               <p className="text-xs leading-snug text-amber-800 dark:text-amber-400">
                 Còn {heldStr} · đã có yêu cầu: {pendingSummary}
               </p>
@@ -188,6 +223,18 @@ export function AssetPickConsumableRow({
                 <span className="text-muted-foreground/80"> · không vượt quá khi nhập SL</span>
               </p>
             )}
+            {pendingEntries && pendingEntries.length > 0 ? (
+              <ul className="mt-1.5 space-y-0.5 border-l-2 border-muted pl-2 text-[11px] leading-snug text-muted-foreground">
+                {pendingEntries.map((e, i) => (
+                  <li key={`${e.requestCode}-${e.kind}-${i}`}>
+                    <span className="font-mono text-foreground/85">{formatBizCodeDisplay(e.requestCode)}</span>
+                    {' — '}
+                    {e.label} ·{' '}
+                    <span className="tabular-nums font-medium text-foreground/90">{e.qty.toLocaleString('vi-VN')} SL</span>
+                  </li>
+                ))}
+              </ul>
+            ) : null}
           </div>
         </label>
       </div>

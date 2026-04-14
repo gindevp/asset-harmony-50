@@ -15,6 +15,7 @@ import { EmployeeLayout } from "./components/layout/EmployeeLayout";
 import Dashboard from "./pages/admin/Dashboard";
 import AssetCategories from "./pages/admin/AssetCategories";
 import AssetList from "./pages/admin/AssetList";
+import AssetCatalogDevicesPage from "./pages/admin/AssetCatalogDevicesPage";
 import Suppliers from "./pages/admin/Suppliers";
 import Locations from "./pages/admin/Locations";
 import StockIn from "./pages/admin/StockIn";
@@ -69,6 +70,12 @@ const RequestRealtimeBridge = () => {
   return null;
 };
 
+/** Khi deploy trong thư mục con, đặt `base` trong vite.config — trùng với BrowserRouter.basename (Vite cấp BASE_URL). */
+function routerBasename(): string | undefined {
+  const raw = (import.meta.env.BASE_URL ?? '/').replace(/\/$/, '');
+  return raw === '' ? undefined : raw;
+}
+
 const App = () => {
   useEffect(() => {
     if (getStoredToken()) {
@@ -82,7 +89,7 @@ const App = () => {
     <TooltipProvider>
       <Toaster />
       <Sonner />
-      <BrowserRouter>
+      <BrowserRouter basename={routerBasename()}>
         <Routes>
           <Route path="/" element={<Navigate to="/login" replace />} />
           <Route path="/login" element={<Login />} />
@@ -98,6 +105,7 @@ const App = () => {
           >
             <Route index element={<Dashboard />} />
             <Route path="asset-categories" element={<AssetCategories />} />
+            <Route path="assets/catalog/:itemId" element={<AssetCatalogDevicesPage />} />
             <Route path="assets" element={<AssetList />} />
             <Route path="suppliers" element={<Suppliers />} />
             <Route path="locations" element={<Locations />} />

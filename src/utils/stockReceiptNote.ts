@@ -1,7 +1,12 @@
-/** Ghi chú phiếu nhập: dòng `supplierRef:<id>` + ghi chú người dùng (đồng bộ với viewModels). */
-export function buildReceiptNote(userNotes: string, supplierId: string): string {
+type BuildReceiptNoteOptions = {
+  returnRequestRefId?: string;
+};
+
+/** Ghi chú phiếu nhập: metadata + ghi chú người dùng (đồng bộ với viewModels). */
+export function buildReceiptNote(userNotes: string, supplierId: string, options?: BuildReceiptNoteOptions): string {
   const parts: string[] = [];
   if (supplierId) parts.push(`supplierRef:${supplierId}`);
+  if (options?.returnRequestRefId) parts.push(`returnRequestRef:${options.returnRequestRefId}`);
   if (userNotes.trim()) parts.push(userNotes.trim());
   return parts.join('\n');
 }

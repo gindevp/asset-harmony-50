@@ -40,3 +40,18 @@ export function formatRepairRequestAssetNamesSummary(
   if (ordered.length === 0) return '—';
   return ordered.join(' · ');
 }
+
+/**
+ * Cột «Loại yêu cầu»:
+ * - Công ty: có ít nhất 1 thiết bị trên phiếu thuộc cấp phát theo vị trí/công ty.
+ * - Cá nhân/Phòng ban: còn lại.
+ */
+export function getRepairRequestTypeLabel(r: RepairRequest, equipments: Equipment[]): string {
+  const eqIds = repairRequestEquipmentIds(r);
+  const hasCompanyEquipment = eqIds.some(id => {
+    const eq = equipments.find(e => e.id === id);
+    if (!eq) return false;
+    return Boolean(eq.locationAssignedDirectly || eq.locationPoolFromAllocation);
+  });
+  return hasCompanyEquipment ? 'Công ty' : 'Cá nhân/Phòng ban';
+}

@@ -60,6 +60,9 @@ export function useRequestRealtime() {
             if (/event:\s*request-change/m.test(chunk)) {
               invalidateAll();
             }
+            if (/event:\s*notification-change/m.test(chunk)) {
+              window.dispatchEvent(new CustomEvent('asset-app:in-app-notifications-updated'));
+            }
             split = buf.search(/\r?\n\r?\n/);
           }
         }

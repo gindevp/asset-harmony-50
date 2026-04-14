@@ -14,10 +14,10 @@ interface EntityFormModalProps {
 }
 
 const sizeClasses = {
-  sm: 'max-w-md',
-  md: 'max-w-lg',
-  lg: 'max-w-2xl',
-  xl: 'max-w-4xl',
+  sm: 'w-[min(100%,28rem)] max-w-md',
+  md: 'w-[min(100%,42rem)] max-w-2xl',
+  lg: 'w-[min(100%,56rem)] max-w-4xl',
+  xl: 'w-[min(100%,72rem)] max-w-6xl',
 };
 
 export const EntityFormModal = ({
@@ -28,7 +28,7 @@ export const EntityFormModal = ({
       <DialogHeader>
         <DialogTitle>{title}</DialogTitle>
       </DialogHeader>
-      <div className="py-4 space-y-4 max-h-[70vh] overflow-y-auto">
+      <div className="max-h-[70vh] overflow-y-auto px-4 py-4 space-y-4">
         {children}
       </div>
       <DialogFooter>

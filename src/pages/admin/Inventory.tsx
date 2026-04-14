@@ -4,7 +4,6 @@ import { DataTable, Column } from '@/components/shared/DataTable';
 import { Button } from '@/components/ui/button';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Download, X, ChevronDown, ChevronUp } from 'lucide-react';
-import { formatCurrency } from '@/data/mockData';
 import {
   mapAssetItemDto,
   useAssetGroups,
@@ -16,7 +15,7 @@ import {
 import { apiGet, PAGE_ALL } from '@/api/http';
 import type { StockReceiptDto, StockReceiptLineDto } from '@/api/types';
 
-/** Đơn giá BQGQ từ phiếu nhập đã xác nhận (dòng vật tư, không gắn thiết bị). */
+/** Đơn giá BQGQ từ phiếu nhập đã nhập kho (dòng vật tư, không gắn thiết bị). */
 function buildConsumableAvgUnitPriceByItemId(
   receipts: StockReceiptDto[],
   lines: StockReceiptLineDto[],
@@ -54,14 +53,27 @@ interface InventoryRow {
   code: string;
   name: string;
   managementType: 'DEVICE' | 'CONSUMABLE';
+  lineName: string;
   groupName: string;
   unit: string;
   inStock: number;
   inUse: number;
   broken: number;
   total: number;
-  totalValue: number;
+  stockStatus: 'IN_STOCK' | 'LOW_STOCK' | 'OUT_OF_STOCK';
 }
+
+function stockStatusFromOnHand(inStock: number): InventoryRow['stockStatus'] {
+  if (inStock <= 0) return 'OUT_OF_STOCK';
+  if (inStock <= 5) return 'LOW_STOCK';
+  return 'IN_STOCK';
+}
+
+const stockStatusLabel: Record<InventoryRow['stockStatus'], string> = {
+  IN_STOCK: 'Còn hàng',
+  LOW_STOCK: 'Sắp hết hàng',
+  OUT_OF_STOCK: 'Hết hàng',
+};
 
 export default function Inventory() {
   const gQ = useAssetGroups();
@@ -123,33 +135,31 @@ export default function Inventory() {
         const inUse = eqs.filter(e => e.status === 'IN_USE' || e.status === 'PENDING_ISSUE').length;
         const broken = eqs.filter(e => e.status === 'BROKEN' || e.status === 'UNDER_REPAIR').length;
         const total = eqs.length;
-        const totalValue = eqs.reduce((s, e) => s + e.originalCost, 0);
+        const line = assetLines.find(l => l.id === item.lineId);
         const group = assetGroups.find(g => g.id === item.groupId);
         return {
           id: item.id, code: item.code, name: item.name, managementType: item.managementType,
-          groupName: group?.name || '', unit: item.unit,
-          inStock, inUse, broken, total, totalValue,
+          lineName: line?.name || '', groupName: group?.name || '', unit: item.unit,
+          inStock, inUse, broken, total,
+          stockStatus: stockStatusFromOnHand(inStock),
         };
       } else {
         const cs = consumableStocks.find(c => c.itemId === item.id);
+        const line = assetLines.find(l => l.id === item.lineId);
         const group = assetGroups.find(g => g.id === item.groupId);
         const onHand = cs?.inStockQuantity ?? 0;
-        const itemNum = Number(item.id);
-        const avg =
-          Number.isFinite(itemNum) && itemNum > 0 ? consumableAvgUnitByItemId.get(itemNum) ?? 0 : 0;
-        const totalValue = onHand * avg;
         return {
           id: item.id, code: item.code, name: item.name, managementType: item.managementType,
-          groupName: group?.name || '', unit: item.unit,
+          lineName: line?.name || '', groupName: group?.name || '', unit: item.unit,
           inStock: onHand,
           inUse: cs?.issuedQuantity || 0,
           broken: cs?.brokenQuantity || 0,
           total: cs?.totalQuantity || 0,
-          totalValue,
+          stockStatus: stockStatusFromOnHand(onHand),
         };
       }
     });
-  }, [assetItems, equipments, consumableStocks, assetGroups, consumableAvgUnitByItemId]);
+  }, [assetItems, equipments, consumableStocks, assetGroups, assetLines, consumableAvgUnitByItemId]);
 
   const filtered = useMemo(() => {
     return inventoryData.filter(row => {
@@ -167,6 +177,9 @@ export default function Inventory() {
       }
       if (filters.managementType) {
         if (row.managementType !== filters.managementType) return false;
+      }
+      if (filters.stockStatus) {
+        if (row.stockStatus !== filters.stockStatus) return false;
       }
       return true;
     });
@@ -187,18 +200,22 @@ export default function Inventory() {
   const columns: Column<InventoryRow>[] = [
     { key: 'code', label: 'Mã hàng', render: r => <span className="font-mono text-sm">{r.code}</span> },
     { key: 'name', label: 'Tên hàng', render: r => <span className="font-medium">{r.name}</span> },
+    { key: 'lineName', label: 'Dòng tài sản', render: r => r.lineName || '—' },
+    { key: 'groupName', label: 'Nhóm tài sản', render: r => r.groupName || '—' },
     { key: 'unit', label: 'ĐVT', className: 'text-center' },
     { key: 'inStock', label: 'SL còn trong kho', className: 'text-center', render: r => <span className="font-semibold text-green-700">{r.inStock}</span> },
-    { key: 'broken', label: 'SL hỏng', className: 'text-center', render: r => <span className={r.broken > 0 ? 'font-semibold text-red-600' : ''}>{r.broken}</span> },
-    { key: 'total', label: 'SL tốt', className: 'text-center', render: r => <span>{r.total - r.broken}</span> },
-    { key: 'totalValue', label: 'Thành tiền', className: 'text-right', render: r => r.totalValue > 0 ? formatCurrency(r.totalValue) : '—' },
+    {
+      key: 'stockStatus',
+      label: 'Tình trạng tài sản',
+      className: 'text-center',
+      render: r => stockStatusLabel[r.stockStatus],
+    },
   ];
 
   const handleExport = () => {
-    const headers = ['STT', 'Tên hàng', 'Mã hàng', 'ĐVT', 'SL còn trong kho', 'SL hỏng', 'SL tốt', 'Thành tiền'];
+    const headers = ['STT', 'Tên hàng', 'Mã hàng', 'Dòng tài sản', 'Nhóm tài sản', 'ĐVT', 'SL còn trong kho', 'Tình trạng tài sản'];
     const rows = filtered.map((r, i) => [
-      i + 1, r.name, r.code, r.unit, r.inStock, r.broken, r.total - r.broken,
-      r.totalValue > 0 ? r.totalValue : '',
+      i + 1, r.name, r.code, r.lineName || '', r.groupName || '', r.unit, r.inStock, stockStatusLabel[r.stockStatus],
     ]);
     const csv = [headers.join(','), ...rows.map(r => r.join(','))].join('\n');
     const blob = new Blob(['\uFEFF' + csv], { type: 'text/csv;charset=utf-8;' });
@@ -243,35 +260,23 @@ export default function Inventory() {
             </Select>
           </div>
 
+          {/* Dòng tài sản */}
+          <div className="space-y-1">
+            <label className="text-sm text-muted-foreground">Dòng tài sản:</label>
+            <Select value={filters.line || 'all'} onValueChange={v => setFilters(p => ({ ...p, line: v === 'all' ? '' : v }))}>
+              <SelectTrigger className="h-9"><SelectValue placeholder="Tất cả" /></SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">Tất cả</SelectItem>
+                {lineOptions.map(l => <SelectItem key={l.id} value={l.id}>{l.name}</SelectItem>)}
+              </SelectContent>
+            </Select>
+          </div>
+
           {/* Loại tài sản */}
           {/* (Đã bỏ lọc Loại tài sản theo yêu cầu) */}
 
           {showAdvanced && (
             <>
-              {/* Nhóm tài sản (same as group but hierarchical context) */}
-              <div className="space-y-1">
-                <label className="text-sm text-muted-foreground">Nhóm tài sản:</label>
-                <Select value={filters.group || 'all'} onValueChange={v => setFilters(p => ({ ...p, group: v === 'all' ? '' : v, line: '' }))}>
-                  <SelectTrigger className="h-9"><SelectValue placeholder="Tất cả" /></SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="all">Tất cả</SelectItem>
-                    {groupOptions.map(g => <SelectItem key={g.id} value={g.id}>{g.name}</SelectItem>)}
-                  </SelectContent>
-                </Select>
-              </div>
-
-              {/* Dòng tài sản */}
-              <div className="space-y-1">
-                <label className="text-sm text-muted-foreground">Dòng tài sản:</label>
-                <Select value={filters.line || 'all'} onValueChange={v => setFilters(p => ({ ...p, line: v === 'all' ? '' : v }))}>
-                  <SelectTrigger className="h-9"><SelectValue placeholder="Tất cả" /></SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="all">Tất cả</SelectItem>
-                    {lineOptions.map(l => <SelectItem key={l.id} value={l.id}>{l.name}</SelectItem>)}
-                  </SelectContent>
-                </Select>
-              </div>
-
               {/* Loại quản lý */}
               <div className="space-y-1">
                 <label className="text-sm text-muted-foreground">Phân loại:</label>
@@ -281,6 +286,19 @@ export default function Inventory() {
                     <SelectItem value="all">Tất cả</SelectItem>
                     <SelectItem value="DEVICE">Thiết bị</SelectItem>
                     <SelectItem value="CONSUMABLE">Vật tư</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+
+              <div className="space-y-1">
+                <label className="text-sm text-muted-foreground">Tình trạng tài sản:</label>
+                <Select value={filters.stockStatus || 'all'} onValueChange={v => setFilters(p => ({ ...p, stockStatus: v === 'all' ? '' : v }))}>
+                  <SelectTrigger className="h-9"><SelectValue placeholder="Tất cả" /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="all">Tất cả</SelectItem>
+                    <SelectItem value="IN_STOCK">Còn hàng</SelectItem>
+                    <SelectItem value="LOW_STOCK">Sắp hết hàng</SelectItem>
+                    <SelectItem value="OUT_OF_STOCK">Hết hàng</SelectItem>
                   </SelectContent>
                 </Select>
               </div>

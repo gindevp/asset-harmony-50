@@ -9,6 +9,7 @@ function lossKindUpper(r: LossReportRequestDto): string {
 export type LossAssetRow = {
   type: string;
   asset: string;
+  serial: string;
   quantity: string;
 };
 
@@ -21,6 +22,7 @@ export function buildLossAssetRows(row: LossReportRequestDto, assetItems: AssetI
       {
         type: 'Thiết bị',
         asset: catalogItemNameOnly(itemId, assetItems),
+        serial: (row.equipment.serial ?? '').trim() || '—',
         quantity: '1',
       },
     ];
@@ -31,6 +33,7 @@ export function buildLossAssetRows(row: LossReportRequestDto, assetItems: AssetI
       {
         type: 'Vật tư',
         asset: catalogItemNameOnly(id, assetItems),
+        serial: '—',
         quantity: String(row.quantity ?? '—'),
       },
     ];
@@ -44,6 +47,7 @@ export function buildLossAssetRows(row: LossReportRequestDto, assetItems: AssetI
         return {
           type: 'Thiết bị',
           asset: catalogItemNameOnly(itemId, assetItems),
+          serial: (eq?.serial ?? '').trim() || '—',
           quantity: '1',
         };
       }
@@ -51,6 +55,7 @@ export function buildLossAssetRows(row: LossReportRequestDto, assetItems: AssetI
       return {
         type: 'Vật tư',
         asset: catalogItemNameOnly(itemId, assetItems),
+        serial: '—',
         quantity: String(e.quantity ?? '—'),
       };
     });

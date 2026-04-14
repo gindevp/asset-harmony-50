@@ -1,5 +1,5 @@
-import { useMemo, useState } from 'react';
-import { Link, useLocation, useNavigate } from 'react-router-dom';
+import { useEffect, useMemo, useState } from 'react';
+import { useLocation, useNavigate, useSearchParams } from 'react-router-dom';
 import { useQueryClient } from '@tanstack/react-query';
 import { ArrowLeft, Monitor, Package } from 'lucide-react';
 import { toast } from 'sonner';
@@ -12,20 +12,43 @@ import {
   AssetPickTwoColumnGrid,
 } from '@/components/shared/RequestAssetPickRows';
 import { Button } from '@/components/ui/button';
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from '@/components/ui/alert-dialog';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
+import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Textarea } from '@/components/ui/textarea';
 
 import { resolveEmployeeIdForRequests, resolveEmployeeLocationIdForRequests } from '@/api/account';
-import { apiPost, apiPostMultipart, getApiErrorMessage } from '@/api/http';
+import { apiGet, apiPatch, apiPost, apiPostMultipart, getApiErrorMessage } from '@/api/http';
 import { makeBizCode } from '@/api/businessCode';
 import type { Equipment } from '@/data/mockData';
 import { getItemName } from '@/data/mockData';
-import { consumableQuantityHeld, filterConsumableAssignmentsForMyAccount, filterEquipmentForMyAccount } from '@/utils/myEquipment';
+import {
+  consumableQuantityHeld,
+  filterConsumableAssignmentsForMyAccount,
+  filterEquipmentForMyAccount,
+  resolveMyAssetScope,
+  resolveMyConsumableScope,
+} from '@/utils/myEquipment';
 import { groupConsumableAssignmentsByAssetItem, sortEquipmentForDisplay, totalHeldForConsumableGroup } from '@/utils/myHoldingsAggregate';
 import { hasBackendOpenEquipmentAssignment } from '@/utils/equipmentJoin';
-import { mapEquipmentIdToOpenRequestHints, mapAssetItemIdToConsumablePending } from '@/utils/openAssetRequestBlocks';
+import {
+  consumableRemainingForAssetItem,
+  mapAssetItemIdToConsumablePending,
+  mapEquipmentIdToOpenRequestEntries,
+  mapEquipmentIdToOpenRequestHints,
+  type OpenRequestAggregationOptions,
+} from '@/utils/openAssetRequestBlocks';
 import {
   mapAssetItemDto,
   useAssetItems,
@@ -54,9 +77,12 @@ function requireEmployeeId(): number | null {
 export default function RequestNewRepair() {
   const navigate = useNavigate();
   const location = useLocation();
+  const [searchParams] = useSearchParams();
   const qc = useQueryClient();
   const isAdminArea = location.pathname.startsWith('/admin');
   const backTo = requestsListPath('repair', isAdminArea);
+  const editId = searchParams.get('editId')?.trim() || '';
+  const isEditMode = editId.length > 0;
 
   const eqQ = useEnrichedEquipmentList();
   const eqAssignQ = useEquipmentAssignments();
@@ -74,7 +100,33 @@ export default function RequestNewRepair() {
     const me = allEmpQ.data.find(x => String(x.id) === myEmpIdStr);
     return me?.department?.id != null ? String(me.department.id) : null;
   }, [myEmpIdStr, allEmpQ.data]);
-  const myLocIdStr = resolveEmployeeLocationIdForRequests();
+  const myLocIdStr = useMemo(() => {
+    const fallbackFromContext = resolveEmployeeLocationIdForRequests();
+    if (!myEmpIdStr) return fallbackFromContext;
+    const fromEquipment = equipments.find(e => e.assignedTo === myEmpIdStr && e.assignedLocation)?.assignedLocation ?? null;
+    const fromConsumable =
+      (caQ.data ?? []).find(a => {
+        const empId =
+          a.employee?.id != null
+            ? String(a.employee.id)
+            : (a as { employeeId?: number | string }).employeeId != null
+              ? String((a as { employeeId?: number | string }).employeeId)
+              : null;
+        if (empId !== myEmpIdStr) return false;
+        if (a.location?.id != null) return true;
+        return (a as { locationId?: number | string }).locationId != null;
+      });
+    const fromConsumableLoc =
+      fromConsumable?.location?.id != null
+        ? String(fromConsumable.location.id)
+        : (fromConsumable as { locationId?: number | string } | undefined)?.locationId != null
+          ? String((fromConsumable as { locationId?: number | string }).locationId)
+          : null;
+    if (!allEmpQ.data) return fromEquipment ?? fromConsumableLoc ?? fallbackFromContext;
+    const me = allEmpQ.data.find(x => String(x.id) === myEmpIdStr);
+    const fromProfile = me?.location?.id != null ? String(me.location.id) : null;
+    return fromProfile ?? fromEquipment ?? fromConsumableLoc ?? fallbackFromContext;
+  }, [myEmpIdStr, allEmpQ.data, equipments, caQ.data]);
 
   const myEquipment: Equipment[] = useMemo(
     () =>
@@ -95,17 +147,57 @@ export default function RequestNewRepair() {
   );
   const equipmentRows = useMemo(() => sortEquipmentForDisplay(myEquipment), [myEquipment]);
 
+  const retSnap = returnQ.data;
+  const returnRequests = retSnap?.requests ?? [];
+  const returnLineDtos = retSnap?.lineDtos;
+
+  const aggregationOpts = useMemo<OpenRequestAggregationOptions | undefined>(() => {
+    if (!isEditMode) return undefined;
+    const n = Number(editId);
+    return Number.isFinite(n) ? { excludeRepairRequestId: n } : undefined;
+  }, [isEditMode, editId]);
+
   const equipmentOpenHints = useMemo(
-    () => mapEquipmentIdToOpenRequestHints(myEmpIdStr, repairQ.data ?? [], returnQ.data ?? [], lossQ.data ?? []),
-    [myEmpIdStr, repairQ.data, returnQ.data, lossQ.data],
+    () =>
+      mapEquipmentIdToOpenRequestHints(
+        myEmpIdStr,
+        repairQ.data ?? [],
+        returnRequests,
+        lossQ.data ?? [],
+        returnLineDtos,
+        aggregationOpts,
+      ),
+    [myEmpIdStr, repairQ.data, returnRequests, lossQ.data, returnLineDtos, aggregationOpts],
+  );
+
+  const equipmentOpenEntries = useMemo(
+    () =>
+      mapEquipmentIdToOpenRequestEntries(
+        myEmpIdStr,
+        repairQ.data ?? [],
+        returnRequests,
+        lossQ.data ?? [],
+        returnLineDtos,
+        aggregationOpts,
+      ),
+    [myEmpIdStr, repairQ.data, returnRequests, lossQ.data, returnLineDtos, aggregationOpts],
   );
 
   const consumablePendingByAssetItem = useMemo(
-    () => mapAssetItemIdToConsumablePending(myEmpIdStr, repairQ.data ?? [], returnQ.data ?? [], lossQ.data ?? []),
-    [myEmpIdStr, repairQ.data, returnQ.data, lossQ.data],
+    () =>
+      mapAssetItemIdToConsumablePending(
+        myEmpIdStr,
+        repairQ.data ?? [],
+        returnRequests,
+        lossQ.data ?? [],
+        returnLineDtos,
+        aggregationOpts,
+      ),
+    [myEmpIdStr, repairQ.data, returnRequests, lossQ.data, returnLineDtos, aggregationOpts],
   );
 
   const [repairSelected, setRepairSelected] = useState<Record<string, boolean>>({});
+  const [assetOwnershipTab, setAssetOwnershipTab] = useState<'MY' | 'COMPANY'>('MY');
   const toggleRepair = (id: string) => setRepairSelected(p => ({ ...p, [id]: !p[id] }));
 
   /** Theo mã mặt hàng vật tư (gộp các dòng bàn giao). */
@@ -120,30 +212,152 @@ export default function RequestNewRepair() {
       return next;
     });
   };
+  const displayEquipmentRows = useMemo(() => {
+    const rows = [...equipmentRows];
+    if (!isEditMode) return rows;
+    const seen = new Set(rows.map(r => String(r.id)));
+    for (const [eqId, selected] of Object.entries(repairSelected)) {
+      if (!selected || seen.has(eqId)) continue;
+      const eq = equipments.find(e => String(e.id) === eqId);
+      if (!eq) continue;
+      rows.push(eq);
+      seen.add(eqId);
+    }
+    return sortEquipmentForDisplay(rows);
+  }, [equipmentRows, isEditMode, repairSelected, equipments]);
+  const visibleEquipmentRows = useMemo(() => {
+    if (isEditMode) return displayEquipmentRows;
+    return displayEquipmentRows.filter(e => {
+      const scope = resolveMyAssetScope(e, myEmpIdStr, myDeptIdStr, myLocIdStr);
+      if (assetOwnershipTab === 'COMPANY') return scope === 'location';
+      return scope !== 'location';
+    });
+  }, [displayEquipmentRows, isEditMode, assetOwnershipTab, myEmpIdStr, myDeptIdStr, myLocIdStr]);
 
   const [repairIssue, setRepairIssue] = useState('');
   const [repairDesc, setRepairDesc] = useState('');
   const [repairAttachment, setRepairAttachment] = useState('');
   const [repairFile, setRepairFile] = useState<File | null>(null);
   const [repairBusy, setRepairBusy] = useState(false);
+  const [cancelConfirmOpen, setCancelConfirmOpen] = useState(false);
+  const [editBootstrapLoading, setEditBootstrapLoading] = useState(false);
+
+  useEffect(() => {
+    if (!isEditMode) return;
+    let cancelled = false;
+    (async () => {
+      setEditBootstrapLoading(true);
+      try {
+        const req = await apiGet<any>(`/api/repair-requests/${editId}`);
+        if (cancelled) return;
+        setRepairIssue(req?.problemCategory ?? '');
+        setRepairDesc(req?.description ?? '');
+        setRepairAttachment(req?.attachmentNote ?? '');
+        const lines = (req?.lines ?? []) as any[];
+        const nextEq: Record<string, boolean> = {};
+        const nextConsSel: Record<string, boolean> = {};
+        const nextConsQty: Record<string, string> = {};
+        for (const line of lines) {
+          const lt = String(line?.lineType ?? 'DEVICE').toUpperCase();
+          if (lt === 'CONSUMABLE') {
+            const aid =
+              line?.assetItem?.id != null
+                ? String(line.assetItem.id)
+                : line?.assetItemId != null
+                  ? String(line.assetItemId)
+                  : line?.itemId != null
+                    ? String(line.itemId)
+                    : '';
+            if (!aid) continue;
+            nextConsSel[aid] = true;
+            nextConsQty[aid] = String(Number(line?.quantity ?? 1));
+          } else {
+            const eid = line?.equipment?.id != null ? String(line.equipment.id) : '';
+            if (!eid) continue;
+            nextEq[eid] = true;
+          }
+        }
+        setRepairSelected(nextEq);
+        setRepairConsumableSelected(nextConsSel);
+        setRepairConsumableQty(nextConsQty);
+      } catch (e) {
+        if (!cancelled) toast.error(e instanceof Error ? e.message : 'Không tải được dữ liệu yêu cầu để sửa');
+      } finally {
+        if (!cancelled) setEditBootstrapLoading(false);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [isEditMode, editId]);
+
+  const displayConsumableItems = useMemo(() => {
+    const rows = consumableGroups.map(g => ({
+      itemId: g.assetItemId,
+      held: totalHeldForConsumableGroup(g.assignments),
+      isCompanyAsset: g.assignments.some(
+        a => resolveMyConsumableScope(a, myEmpIdStr, myDeptIdStr, myLocIdStr) === 'location',
+      ),
+    }));
+    if (!isEditMode) return rows;
+    const seen = new Set(rows.map(r => r.itemId));
+    for (const [itemId, selected] of Object.entries(repairConsumableSelected)) {
+      if (!selected || seen.has(itemId)) continue;
+      const seededQty = Number.parseInt((repairConsumableQty[itemId] ?? '1').trim(), 10);
+      rows.push({
+        itemId,
+        held: Number.isFinite(seededQty) && seededQty > 0 ? seededQty : 1,
+        isCompanyAsset: false,
+      });
+      seen.add(itemId);
+    }
+    return rows;
+  }, [
+    consumableGroups,
+    isEditMode,
+    repairConsumableSelected,
+    repairConsumableQty,
+    myEmpIdStr,
+    myDeptIdStr,
+    myLocIdStr,
+  ]);
+  const visibleConsumableItems = useMemo(() => {
+    if (isEditMode) return displayConsumableItems;
+    return displayConsumableItems.filter(g => (assetOwnershipTab === 'COMPANY' ? g.isCompanyAsset : !g.isCompanyAsset));
+  }, [displayConsumableItems, isEditMode, assetOwnershipTab]);
 
   const submitRepair = async () => {
-    const eqIds = Object.entries(repairSelected).filter(([, v]) => v).map(([k]) => k);
+    const visibleEquipmentIdSet = new Set(visibleEquipmentRows.map(e => String(e.id)));
+    const visibleConsumableIdSet = new Set(visibleConsumableItems.map(g => g.itemId));
+    const eqIds = Object.entries(repairSelected)
+      .filter(([k, v]) => v && (isEditMode || visibleEquipmentIdSet.has(String(k))))
+      .map(([k]) => k);
     const consumableLines: { assetItemId: number; qty: number }[] = [];
-    for (const g of consumableGroups) {
-      const assetItemIdStr = g.assetItemId;
-      if (!repairConsumableSelected[assetItemIdStr]) continue;
+    for (const [assetItemIdStr, selected] of Object.entries(repairConsumableSelected)) {
+      if (!isEditMode && !visibleConsumableIdSet.has(assetItemIdStr)) continue;
+      if (!selected) continue;
       const itemId = Number(assetItemIdStr);
       if (!Number.isFinite(itemId)) continue;
-      const max = totalHeldForConsumableGroup(g.assignments);
+      const g = consumableGroups.find(x => x.assetItemId === assetItemIdStr);
+      const max = g ? totalHeldForConsumableGroup(g.assignments) : 0;
       const raw = (repairConsumableQty[assetItemIdStr] ?? '1').trim();
       const qty = Number.parseInt(raw, 10);
       if (!Number.isFinite(qty) || qty < 1) {
         toast.error('Số lượng vật tư phải là số nguyên ≥ 1');
         return;
       }
-      if (qty > max) {
-        toast.error(`Số lượng không vượt quá tổng SL đang giữ của mặt hàng (${max})`);
+      const pend = consumablePendingByAssetItem.get(String(itemId));
+      const remaining = consumableRemainingForAssetItem(max, pend);
+      if (qty > remaining) {
+        toast.error(
+          remaining <= 0
+            ? `Mặt hàng không còn SL khả dụng (đã nằm trong phiếu sửa/thu hồi/báo mất chưa xử lý).${pend?.summary ? ` (${pend.summary})` : ''}`
+            : `Số lượng vượt phần còn khả dụng (tối đa ${remaining}).${pend?.summary ? ` Đang có: ${pend.summary}.` : ''}`,
+        );
+        return;
+      }
+      if (!isEditMode && max <= 0) {
+        toast.error('Vật tư đã chọn không còn trong danh sách đang giữ');
         return;
       }
       consumableLines.push({ assetItemId: itemId, qty });
@@ -152,25 +366,13 @@ export default function RequestNewRepair() {
     for (const id of eqIds) {
       const hint = equipmentOpenHints.get(id);
       if (hint) {
-        toast.error(
-          `Thiết bị đang có yêu cầu sửa/thu hồi/báo mất chưa xử lý — không tạo phiếu mới trùng. (${hint})`,
-        );
-        return;
-      }
-    }
-    for (const c of consumableLines) {
-      const pend = consumablePendingByAssetItem.get(String(c.assetItemId));
-      const blocked = pend && (pend.repairQty + pend.returnQty + pend.lossQty) > 0;
-      if (blocked) {
-        toast.error(
-          `Mặt hàng vật tư đang có SL nằm trong phiếu sửa/thu hồi/báo mất chưa xử lý — không chọn trùng. (${pend!.summary})`,
-        );
+        toast.error(`Thiết bị đang có yêu cầu sửa/thu hồi/báo mất chưa xử lý — không chọn trùng. (${hint})`);
         return;
       }
     }
     if (!repairIssue.trim()) return toast.error('Nhập vấn đề / danh mục');
-    const repEid = requireEmployeeId();
-    if (repEid == null) return;
+    const repEid = isEditMode ? Number.NaN : requireEmployeeId();
+    if (!isEditMode && repEid == null) return;
     setRepairBusy(true);
     try {
       let fileUrl: string | undefined;
@@ -205,17 +407,28 @@ export default function RequestNewRepair() {
         });
       }
 
-      await apiPost('/api/repair-requests', {
-        code: makeBizCode('RP'),
-        requestDate: new Date().toISOString(),
-        problemCategory: repairIssue.trim().slice(0, 100),
-        description: repairDesc.trim() || undefined,
-        attachmentNote: noteParts.length > 0 ? noteParts.join('\n') : undefined,
-        status: 'NEW',
-        requester: { id: repEid },
-        lines,
-      });
-      toast.success('Đã gửi yêu cầu sửa chữa');
+      if (isEditMode) {
+        const requestId = Number(editId);
+        await apiPatch(`/api/repair-requests/${requestId}`, {
+          id: requestId,
+          problemCategory: repairIssue.trim().slice(0, 100),
+          description: repairDesc.trim() || undefined,
+          attachmentNote: noteParts.length > 0 ? noteParts.join('\n') : undefined,
+          lines,
+        });
+      } else {
+        await apiPost('/api/repair-requests', {
+          code: makeBizCode('RP'),
+          requestDate: new Date().toISOString(),
+          problemCategory: repairIssue.trim().slice(0, 100),
+          description: repairDesc.trim() || undefined,
+          attachmentNote: noteParts.length > 0 ? noteParts.join('\n') : undefined,
+          status: 'NEW',
+          requester: { id: repEid },
+          lines,
+        });
+      }
+      toast.success(isEditMode ? 'Đã cập nhật yêu cầu sửa chữa' : 'Đã gửi yêu cầu sửa chữa');
       await qc.invalidateQueries({ queryKey: ['api', 'allocation-requests-view'] });
       await qc.invalidateQueries({ queryKey: ['api', 'repair-requests-view'] });
       await qc.invalidateQueries({ queryKey: ['api', 'return-requests-view'] });
@@ -229,20 +442,25 @@ export default function RequestNewRepair() {
   };
 
   const hasAnyAsset = myEquipment.length > 0 || myConsumables.length > 0;
+  const hasVisibleAsset = visibleEquipmentRows.length > 0 || visibleConsumableItems.length > 0;
   const loadingAssets =
-    eqQ.isLoading || caQ.isLoading || repairQ.isLoading || returnQ.isLoading || lossQ.isLoading;
+    eqQ.isLoading || caQ.isLoading || repairQ.isLoading || returnQ.isLoading || lossQ.isLoading || editBootstrapLoading;
 
   return (
     <div className="page-container max-w-none w-full pb-8">
       <header className="flex flex-col gap-4 border-b border-border pb-6">
         <div className="space-y-2 min-w-0">
-          <Button variant="ghost" size="sm" className="-ml-2 w-fit" asChild>
-            <Link to={backTo}>
-              <ArrowLeft className="h-4 w-4 mr-1" />
-              Quay lại danh sách
-            </Link>
+          <Button
+            variant="ghost"
+            size="sm"
+            className="-ml-2 w-fit"
+            type="button"
+            onClick={() => setCancelConfirmOpen(true)}
+          >
+            <ArrowLeft className="h-4 w-4 mr-1" />
+            Quay lại danh sách
           </Button>
-          <h1 className="page-title">Tạo yêu cầu sửa chữa</h1>
+          <h1 className="page-title">{isEditMode ? 'Sửa yêu cầu sửa chữa' : 'Tạo yêu cầu sửa chữa'}</h1>
         </div>
       </header>
 
@@ -253,7 +471,7 @@ export default function RequestNewRepair() {
         <CardContent className="space-y-4">
           {loadingAssets ? (
             <PageLoading label="Đang tải tài sản…" minHeight="min-h-[28vh]" />
-          ) : !hasAnyAsset ? (
+          ) : !hasAnyAsset && !isEditMode ? (
             <p className="text-sm text-muted-foreground">Bạn không có thiết bị hoặc vật tư đang giữ — không thể tạo yêu cầu sửa chữa.</p>
           ) : (
             <>
@@ -263,27 +481,40 @@ export default function RequestNewRepair() {
                   <RequiredMark />
                 </Label>
                 <p className="text-xs text-muted-foreground">
-                  Bắt buộc chọn ít nhất một thiết bị hoặc một vật tư. Mỗi thiết bị / mặt hàng chỉ được một yêu cầu sửa, thu hồi hoặc báo mất ở trạng thái chờ duyệt / đang xử lý — dòng gạch mờ là tài sản đã có phiếu như vậy.
+                  Danh sách bao gồm tài sản cá nhân/phòng ban và tài sản công ty theo vị trí làm việc của bạn.
                 </p>
               </div>
+              {!isEditMode ? (
+                <Tabs value={assetOwnershipTab} onValueChange={v => setAssetOwnershipTab(v as 'MY' | 'COMPANY')}>
+                  <TabsList className="grid w-full max-w-lg grid-cols-2">
+                    <TabsTrigger value="MY">Yêu cầu sửa tài sản của tôi</TabsTrigger>
+                    <TabsTrigger value="COMPANY">Yêu cầu sửa tài sản công ty</TabsTrigger>
+                  </TabsList>
+                </Tabs>
+              ) : null}
+              {!isEditMode && !hasVisibleAsset ? (
+                <p className="text-xs text-muted-foreground">
+                  {assetOwnershipTab === 'COMPANY'
+                    ? 'Không có tài sản công ty theo vị trí của bạn để tạo yêu cầu sửa chữa.'
+                    : 'Không có tài sản cá nhân/phòng ban để tạo yêu cầu sửa chữa.'}
+                </p>
+              ) : null}
               <AssetPickTwoColumnGrid>
                 <AssetPickColumn
                   icon={Monitor}
                   title="Thiết bị"
-                  description={
-                    <>
-                      Có thể chọn nhiều serial trên cùng phiếu. Mỗi serial = 1 chiếc. Dòng tô vàng là đã có phiếu chờ xử
-                      lý.
-                    </>
-                  }
                 >
-                  {myEquipment.length > 0 ? (
-                    equipmentRows.map(e => {
+                  {visibleEquipmentRows.length > 0 ? (
+                    visibleEquipmentRows.map(e => {
+                      const assetScope = resolveMyAssetScope(e, myEmpIdStr, myDeptIdStr, myLocIdStr);
+                      const companyTag = assetScope === 'location' ? 'Công ty' : null;
                       const deviceName = e.itemId ? getItemName(e.itemId, assetItems) : '—';
+                      const displayDeviceName = companyTag ? `[${companyTag}] ${deviceName}` : deviceName;
                       const serial = (e.serial ?? '').trim() || '—';
                       const hint = equipmentOpenHints.get(e.id);
-                      const blocked = Boolean(hint);
-                      const checked = !blocked && !!repairSelected[e.id];
+                      const lockedByOtherRequest = Boolean(hint);
+                      const checked = !!repairSelected[e.id];
+                      const blocked = lockedByOtherRequest && !(isEditMode && checked);
                       const lineText = blocked
                         ? `${deviceName} (Đã có yêu cầu sửa/báo mất/thu hồi${hint ? `: ${hint}` : ''})`
                         : `${deviceName} (Serial: ${serial})`;
@@ -292,10 +523,11 @@ export default function RequestNewRepair() {
                           key={e.id}
                           rowId={String(e.id)}
                           title={lineText}
-                          deviceName={deviceName}
+                          deviceName={displayDeviceName}
                           serial={serial}
                           blocked={blocked}
                           hint={hint}
+                          openEntries={equipmentOpenEntries.get(String(e.id))}
                           checked={checked}
                           onCheckedChange={next => {
                             if (blocked) return;
@@ -313,26 +545,30 @@ export default function RequestNewRepair() {
                 <AssetPickColumn
                   icon={Package}
                   title="Vật tư (gộp theo mặt hàng)"
-                  description={<>Theo mặt hàng đang giữ — nhập SL không vượt quá tổng còn.</>}
                 >
-                  {consumableGroups.length > 0 ? (
-                    consumableGroups.map(g => {
-                      const itemId = g.assetItemId;
-                      const held = totalHeldForConsumableGroup(g.assignments);
+                  {visibleConsumableItems.length > 0 ? (
+                    visibleConsumableItems.map(g => {
+                      const itemId = g.itemId;
+                      const held = g.held;
                       const label = itemId ? getItemName(itemId, assetItems) : '—';
+                      const displayLabel = g.isCompanyAsset ? `[Công ty] ${label}` : label;
                       const pend = itemId ? consumablePendingByAssetItem.get(itemId) : undefined;
-                      const blocked = pend != null && pend.repairQty + pend.returnQty + pend.lossQty > 0;
-                      const rowTitle = `${label} · Còn ${held.toLocaleString('vi-VN')}`;
+                      const remaining = consumableRemainingForAssetItem(held, pend);
+                      const checked = !!repairConsumableSelected[itemId];
+                      const blocked = remaining <= 0 && !(isEditMode && checked);
+                      const rowTitle = `${label} · Đang giữ ${held.toLocaleString('vi-VN')} · Khả dụng ${remaining.toLocaleString('vi-VN')}`;
                       return (
                         <AssetPickConsumableRow
                           key={itemId}
                           rowId={itemId}
                           title={rowTitle}
-                          itemLabel={label}
+                          itemLabel={displayLabel}
                           held={held}
                           blocked={blocked}
+                          availableQty={remaining}
                           pendingSummary={pend?.summary}
-                          checked={blocked ? false : !!repairConsumableSelected[itemId]}
+                          pendingEntries={pend?.entries}
+                          checked={checked}
                           onCheckedChange={next => {
                             if (blocked) return;
                             if (next !== !!repairConsumableSelected[itemId]) toggleRepairConsumable(itemId);
@@ -343,7 +579,7 @@ export default function RequestNewRepair() {
                                 className="h-9 w-full font-sans tabular-nums"
                                 type="number"
                                 min={1}
-                                max={held}
+                                max={Math.max(1, Math.min(held, remaining))}
                                 placeholder="SL"
                                 value={repairConsumableQty[itemId] ?? '1'}
                                 onChange={e => setRepairConsumableQty(q => ({ ...q, [itemId]: e.target.value }))}
@@ -389,13 +625,27 @@ export default function RequestNewRepair() {
                 {repairFile ? <p className="text-xs text-muted-foreground">Đã chọn: {repairFile.name}</p> : null}
               </div>
               <div className="flex flex-wrap gap-2 justify-end pt-2">
-                <Button variant="outline" asChild disabled={repairBusy}>
-                  <Link to={backTo}>Hủy</Link>
+                <Button variant="outline" type="button" onClick={() => setCancelConfirmOpen(true)} disabled={repairBusy}>
+                  Hủy
                 </Button>
-                <Button onClick={() => void submitRepair()} disabled={repairBusy || !hasAnyAsset}>
-                  {repairBusy ? 'Đang gửi…' : 'Gửi'}
+                <Button onClick={() => void submitRepair()} disabled={repairBusy || (!hasVisibleAsset && !isEditMode)}>
+                  {repairBusy ? 'Đang lưu…' : isEditMode ? 'Lưu thay đổi' : 'Gửi'}
                 </Button>
               </div>
+              <AlertDialog open={cancelConfirmOpen} onOpenChange={setCancelConfirmOpen}>
+                <AlertDialogContent>
+                  <AlertDialogHeader>
+                    <AlertDialogTitle>Hủy yêu cầu sửa chữa?</AlertDialogTitle>
+                    <AlertDialogDescription>
+                      Dữ liệu đang nhập chưa được lưu. Bạn có chắc muốn quay lại danh sách?
+                    </AlertDialogDescription>
+                  </AlertDialogHeader>
+                  <AlertDialogFooter>
+                    <AlertDialogCancel>Ở lại</AlertDialogCancel>
+                    <AlertDialogAction onClick={() => navigate(backTo)}>Thoát</AlertDialogAction>
+                  </AlertDialogFooter>
+                </AlertDialogContent>
+              </AlertDialog>
             </>
           )}
         </CardContent>

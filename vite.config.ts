@@ -36,6 +36,8 @@ export default defineConfig(async ({ mode }) => {
     plugins.push(componentTagger());
   }
   return {
+    /** Gốc URL khi deploy (vd: `'/harmony/'` nếu ứng dụng tại https://domain.com/harmony/). Phải khớp cấu hình reverse-proxy / static host. */
+    base: "/",
     server: {
       host: "::",
       port: 5173,

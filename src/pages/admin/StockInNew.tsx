@@ -1,4 +1,4 @@
-import { useState, useMemo } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { useQueryClient } from '@tanstack/react-query';
 import { Button } from '@/components/ui/button';
@@ -8,26 +8,46 @@ import { Textarea } from '@/components/ui/textarea';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from '@/components/ui/alert-dialog';
 import { ArrowLeft, PlusCircle, Trash2 } from 'lucide-react';
 import { formatCurrency } from '@/data/mockData';
 import { toast } from 'sonner';
-import { mapAssetItemDto, useAssetItems, useSuppliers } from '@/hooks/useEntityApi';
+import {
+  mapAssetItemDto,
+  useAssetItems,
+  useConsumableAssignments,
+  useDepartments,
+  useEmployees,
+  useEnrichedEquipmentList,
+  useLocations,
+  useSuppliers,
+} from '@/hooks/useEntityApi';
 import { apiPost, apiPostMultipart } from '@/api/http';
 import type { StockReceiptDto } from '@/api/types';
 import { makeBizCode } from '@/api/businessCode';
 import { formatEquipmentCodeDisplay } from '@/utils/formatCodes';
 import { appendFileUrlsToNote, buildReceiptNote } from '@/utils/stockReceiptNote';
+import { consumableQuantityHeld } from '@/utils/myEquipment';
+import { resolveEmployeeIdForRequests, resolveEmployeeLocationIdForRequests } from '@/api/account';
+import { pushInAppNotification } from '@/lib/inAppNotifications';
 
 const FE_SOURCE_TO_API: Record<string, string> = {
   PURCHASE: 'NEW_PURCHASE',
   RETURN: 'RECOVERY',
-  ADJUSTMENT: 'MANUAL_ADJUSTMENT',
 };
 
 const FE_SOURCE_LABELS: Record<keyof typeof FE_SOURCE_TO_API, string> = {
   PURCHASE: 'Mua mới',
   RETURN: 'Thu hồi',
-  ADJUSTMENT: 'Điều chỉnh',
 };
 
 type NumMaybeEmpty = number | '';
@@ -73,11 +93,19 @@ interface ConsumableLine {
   unitPrice: NumMaybeEmpty;
 }
 
+type ReturnOwnerType = 'EMPLOYEE' | 'COMPANY' | 'DEPARTMENT';
+type ReturnLookupType = 'EMPLOYEE' | 'LOCATION' | 'DEPARTMENT';
+
 const StockInNewPage = () => {
   const navigate = useNavigate();
   const qc = useQueryClient();
   const iQ = useAssetItems();
   const sQ = useSuppliers();
+  const eqQ = useEnrichedEquipmentList();
+  const caQ = useConsumableAssignments();
+  const empQ = useEmployees();
+  const depQ = useDepartments();
+  const locQ = useLocations();
 
   const assetItems = useMemo(() => (iQ.data ?? []).map(mapAssetItemDto), [iQ.data]);
   const suppliers = useMemo(
@@ -90,6 +118,11 @@ const StockInNewPage = () => {
   );
   const deviceItems = useMemo(() => assetItems.filter(i => i.managementType === 'DEVICE'), [assetItems]);
   const consumableItems = useMemo(() => assetItems.filter(i => i.managementType === 'CONSUMABLE'), [assetItems]);
+  const equipments = eqQ.data ?? [];
+  const consumableAssignments = caQ.data ?? [];
+  const employees = empQ.data ?? [];
+  const departments = depQ.data ?? [];
+  const locations = locQ.data ?? [];
 
   const [assetType, setAssetType] = useState<'DEVICE' | 'CONSUMABLE'>('DEVICE');
   const [source, setSource] = useState<string>('PURCHASE');
@@ -99,6 +132,22 @@ const StockInNewPage = () => {
   const [deviceLines, setDeviceLines] = useState<DeviceLine[]>([]);
   const [consumableLines, setConsumableLines] = useState<ConsumableLine[]>([]);
   const [createBusy, setCreateBusy] = useState(false);
+  const [cancelConfirmOpen, setCancelConfirmOpen] = useState(false);
+  const [returnOwnerType, setReturnOwnerType] = useState<ReturnOwnerType>('EMPLOYEE');
+  const [returnLookupType, setReturnLookupType] = useState<ReturnLookupType>('EMPLOYEE');
+  const [returnSearch, setReturnSearch] = useState('');
+  const [returnHolderKey, setReturnHolderKey] = useState('');
+  const [selectedRecoveryEquipmentIds, setSelectedRecoveryEquipmentIds] = useState<string[]>([]);
+  const [selectedRecoveryConsumables, setSelectedRecoveryConsumables] = useState<Record<string, number>>({});
+  const myEmployeeId = resolveEmployeeIdForRequests();
+  const myLocationId = useMemo(() => {
+    const fromAccount = resolveEmployeeLocationIdForRequests();
+    if (!myEmployeeId) return fromAccount;
+    const me = employees.find(x => String(x.id) === myEmployeeId);
+    const fromProfile = me?.location?.id != null ? String(me.location.id) : null;
+    return fromProfile ?? fromAccount;
+  }, [employees, myEmployeeId]);
+  const isReturnSource = source === 'RETURN';
 
   const resetForm = () => {
     setAssetType('DEVICE');
@@ -108,7 +157,182 @@ const StockInNewPage = () => {
     setAttachmentFile(null);
     setDeviceLines([]);
     setConsumableLines([]);
+    setReturnOwnerType('EMPLOYEE');
+    setReturnLookupType('EMPLOYEE');
+    setReturnSearch('');
+    setReturnHolderKey('');
+    setSelectedRecoveryEquipmentIds([]);
+    setSelectedRecoveryConsumables({});
   };
+
+  const holderOptions = useMemo(() => {
+    const keys = new Set<string>();
+    const out: Array<{ key: string; label: string; kind: 'EMPLOYEE' | 'DEPARTMENT' | 'LOCATION' }> = [];
+    const pushIfNew = (key: string, label: string, kind: 'EMPLOYEE' | 'DEPARTMENT' | 'LOCATION') => {
+      if (!key || keys.has(key)) return;
+      keys.add(key);
+      out.push({ key, label, kind });
+    };
+
+    for (const e of equipments) {
+      if (e.status === 'LOST' || e.status === 'DISPOSED') continue;
+      if (returnOwnerType === 'EMPLOYEE' && !e.assignedTo) continue;
+      if (returnOwnerType === 'DEPARTMENT' && !e.assignedDepartment) continue;
+      if (returnOwnerType === 'COMPANY' && !e.assignedLocation) continue;
+      if (returnLookupType === 'EMPLOYEE' && e.assignedTo) {
+        const emp = employees.find(x => String(x.id) === e.assignedTo);
+        pushIfNew(`EMPLOYEE:${e.assignedTo}`, `${emp?.code ?? ''} - ${emp?.fullName ?? ''}`.trim() || e.assignedTo, 'EMPLOYEE');
+      }
+      if (returnLookupType === 'DEPARTMENT' && e.assignedDepartment) {
+        const dep = departments.find(x => String(x.id) === e.assignedDepartment);
+        pushIfNew(
+          `DEPARTMENT:${e.assignedDepartment}`,
+          `${dep?.code ?? ''} - ${dep?.name ?? ''}`.trim() || e.assignedDepartment,
+          'DEPARTMENT',
+        );
+      }
+      if (returnLookupType === 'LOCATION' && e.assignedLocation) {
+        const loc = locations.find(x => String(x.id) === e.assignedLocation);
+        pushIfNew(
+          `LOCATION:${e.assignedLocation}`,
+          `${loc?.code ?? ''} - ${loc?.name ?? ''}`.trim() || e.assignedLocation,
+          'LOCATION',
+        );
+      }
+    }
+
+    for (const a of consumableAssignments) {
+      if (consumableQuantityHeld(a) <= 0) continue;
+      if (returnOwnerType === 'EMPLOYEE' && a.employee?.id == null) continue;
+      if (returnOwnerType === 'DEPARTMENT' && a.department?.id == null) continue;
+      if (returnOwnerType === 'COMPANY' && a.location?.id == null) continue;
+      if (returnLookupType === 'EMPLOYEE' && a.employee?.id != null) {
+        pushIfNew(
+          `EMPLOYEE:${String(a.employee.id)}`,
+          `${a.employee.code ?? ''} - ${a.employee.fullName ?? ''}`.trim() || String(a.employee.id),
+          'EMPLOYEE',
+        );
+      }
+      if (returnLookupType === 'DEPARTMENT' && a.department?.id != null) {
+        pushIfNew(
+          `DEPARTMENT:${String(a.department.id)}`,
+          `${a.department.code ?? ''} - ${a.department.name ?? ''}`.trim() || String(a.department.id),
+          'DEPARTMENT',
+        );
+      }
+      if (returnLookupType === 'LOCATION' && a.location?.id != null) {
+        pushIfNew(
+          `LOCATION:${String(a.location.id)}`,
+          `${a.location.code ?? ''} - ${a.location.name ?? ''}`.trim() || String(a.location.id),
+          'LOCATION',
+        );
+      }
+    }
+
+    const kw = returnSearch.trim().toLowerCase();
+    return out.filter(o => (o.label || '').toLowerCase().includes(kw)).sort((a, b) => a.label.localeCompare(b.label, 'vi'));
+  }, [
+    consumableAssignments,
+    departments,
+    employees,
+    equipments,
+    locations,
+    returnLookupType,
+    returnOwnerType,
+    returnSearch,
+  ]);
+  const holderOptionsForUi = useMemo(() => {
+    if (returnOwnerType !== 'COMPANY') return holderOptions;
+    return holderOptions.filter(o => o.kind === 'LOCATION');
+  }, [returnOwnerType, holderOptions, locations, returnSearch]);
+  const companyLocationHolderOptions = useMemo(
+    () => holderOptionsForUi.filter(o => o.kind === 'LOCATION'),
+    [holderOptionsForUi],
+  );
+
+  useEffect(() => {
+    if (returnOwnerType !== 'COMPANY') return;
+    setReturnLookupType('LOCATION');
+    const preferredKey = myLocationId ? `LOCATION:${myLocationId}` : '';
+    if (preferredKey && companyLocationHolderOptions.some(o => o.key === preferredKey)) {
+      setReturnHolderKey(preferredKey);
+      return;
+    }
+    if (!returnHolderKey && companyLocationHolderOptions.length > 0) {
+      setReturnHolderKey(companyLocationHolderOptions[0].key);
+    }
+  }, [returnOwnerType, myLocationId, companyLocationHolderOptions, returnHolderKey]);
+
+  const matchHolderBySearchType = (params: {
+    employeeId?: string;
+    departmentId?: string;
+    locationId?: string;
+  }): boolean => {
+    if (!returnHolderKey) return true;
+    const [kind, id] = returnHolderKey.split(':');
+    if (kind === 'EMPLOYEE') return params.employeeId === id;
+    if (kind === 'DEPARTMENT') return params.departmentId === id;
+    return params.locationId === id;
+  };
+
+  const recoverableEquipments = useMemo(() => {
+    return equipments
+      .filter(e => {
+        if (e.status === 'LOST' || e.status === 'DISPOSED') return false;
+        if (returnOwnerType === 'EMPLOYEE' && !e.assignedTo) return false;
+        if (returnOwnerType === 'DEPARTMENT' && !e.assignedDepartment) return false;
+        if (returnOwnerType === 'COMPANY' && !e.assignedLocation) return false;
+        const emp = employees.find(x => String(x.id) === e.assignedTo);
+        const dep = departments.find(x => String(x.id) === e.assignedDepartment);
+        const loc = locations.find(x => String(x.id) === e.assignedLocation);
+        const searchText =
+          returnLookupType === 'EMPLOYEE'
+            ? `${emp?.code ?? ''} ${emp?.fullName ?? ''}`
+            : returnLookupType === 'DEPARTMENT'
+              ? `${dep?.code ?? ''} ${dep?.name ?? ''}`
+              : `${loc?.code ?? ''} ${loc?.name ?? ''}`;
+        const kw = returnSearch.trim().toLowerCase();
+        if (kw && !searchText.toLowerCase().includes(kw)) return false;
+        return matchHolderBySearchType({
+          employeeId: e.assignedTo,
+          departmentId: e.assignedDepartment,
+          locationId: e.assignedLocation,
+        });
+      })
+      .sort((a, b) => a.equipmentCode.localeCompare(b.equipmentCode, 'vi', { numeric: true }));
+  }, [departments, employees, equipments, locations, returnHolderKey, returnLookupType, returnOwnerType, returnSearch]);
+
+  const recoverableConsumables = useMemo(() => {
+    return consumableAssignments
+      .filter(a => {
+        const held = consumableQuantityHeld(a);
+        if (held <= 0) return false;
+        if (returnOwnerType === 'EMPLOYEE' && a.employee?.id == null) return false;
+        if (returnOwnerType === 'DEPARTMENT' && a.department?.id == null) return false;
+        if (returnOwnerType === 'COMPANY' && a.location?.id == null) return false;
+        const searchText =
+          returnLookupType === 'EMPLOYEE'
+            ? `${a.employee?.code ?? ''} ${a.employee?.fullName ?? ''}`
+            : returnLookupType === 'DEPARTMENT'
+              ? `${a.department?.code ?? ''} ${a.department?.name ?? ''}`
+              : `${a.location?.code ?? ''} ${a.location?.name ?? ''}`;
+        const kw = returnSearch.trim().toLowerCase();
+        if (kw && !searchText.toLowerCase().includes(kw)) return false;
+        return matchHolderBySearchType({
+          employeeId: String(a.employee?.id ?? ''),
+          departmentId: String(a.department?.id ?? ''),
+          locationId: String(a.location?.id ?? ''),
+        });
+      })
+      .map(a => ({
+        assignmentId: String(a.id ?? ''),
+        itemId: String(a.assetItem?.id ?? ''),
+        itemCode: a.assetItem?.code ?? '',
+        itemName: a.assetItem?.name ?? '',
+        held: consumableQuantityHeld(a),
+      }))
+      .sort((a, b) => a.itemCode.localeCompare(b.itemCode, 'vi'));
+  }, [consumableAssignments, returnHolderKey, returnLookupType, returnOwnerType, returnSearch]);
 
   const addDeviceLine = () => {
     const now = Date.now();
@@ -232,47 +456,61 @@ const StockInNewPage = () => {
   };
 
   const handleCreate = async () => {
-    if (deviceLines.length === 0 && consumableLines.length === 0) {
-      toast.error('Vui lòng thêm ít nhất 1 dòng thiết bị hoặc vật tư');
-      return;
+    if (isReturnSource) {
+      if (!returnHolderKey) {
+        toast.error('Vui lòng chọn đối tượng cần thu hồi');
+        return;
+      }
+      const selectedConsumableCount = Object.values(selectedRecoveryConsumables).filter(v => Number(v) > 0).length;
+      if (selectedRecoveryEquipmentIds.length === 0 && selectedConsumableCount === 0) {
+        toast.error('Vui lòng chọn ít nhất 1 tài sản để thu hồi nhập kho');
+        return;
+      }
     }
 
-    const emptyDeviceItem = deviceLines.some(l => !l.itemId);
-    const emptyConsumableItem = consumableLines.some(l => !l.itemId);
-    if (emptyDeviceItem || emptyConsumableItem) {
-      toast.error('Vui lòng chọn tài sản cho tất cả các dòng');
-      return;
-    }
+    if (!isReturnSource) {
+      if (deviceLines.length === 0 && consumableLines.length === 0) {
+        toast.error('Vui lòng thêm ít nhất 1 dòng thiết bị hoặc vật tư');
+        return;
+      }
 
-    if (deviceLines.length > 0) {
-      if (deviceLines.some(l => l.quantity === '' || numOrZero(l.quantity) < 1)) {
-        toast.error('Nhập số lượng thiết bị ≥ 1 cho mọi dòng');
+      const emptyDeviceItem = deviceLines.some(l => !l.itemId);
+      const emptyConsumableItem = consumableLines.some(l => !l.itemId);
+      if (emptyDeviceItem || emptyConsumableItem) {
+        toast.error('Vui lòng chọn tài sản cho tất cả các dòng');
         return;
       }
-      const emptySerials = deviceLines.some(l => {
-        const item = assetItems.find(i => i.id === l.itemId);
-        if (!item?.enableSerial) return false;
-        return l.serials.some(s => !s.serial || !String(s.serial).trim());
-      });
-      if (emptySerials) {
-        toast.error('Vui lòng nhập đầy đủ serial cho các thiết bị yêu cầu theo dõi serial');
-        return;
+
+      if (deviceLines.length > 0) {
+        if (deviceLines.some(l => l.quantity === '' || numOrZero(l.quantity) < 1)) {
+          toast.error('Nhập số lượng thiết bị ≥ 1 cho mọi dòng');
+          return;
+        }
+        const emptySerials = deviceLines.some(l => {
+          const item = assetItems.find(i => i.id === l.itemId);
+          if (!item?.enableSerial) return false;
+          return l.serials.some(s => !s.serial || !String(s.serial).trim());
+        });
+        if (emptySerials) {
+          toast.error('Vui lòng nhập đầy đủ serial cho các thiết bị yêu cầu theo dõi serial');
+          return;
+        }
+        const invalidDep = deviceLines.some(l => {
+          const item = assetItems.find(i => i.id === l.itemId);
+          if (!item?.enableDepreciation) return false;
+          const m = numOrZero(l.depreciationMonths);
+          return !Number.isFinite(m) || m <= 0;
+        });
+        if (invalidDep) {
+          toast.error('Nhập số tháng khấu hao > 0 cho các thiết bị có khấu hao');
+          return;
+        }
       }
-      const invalidDep = deviceLines.some(l => {
-        const item = assetItems.find(i => i.id === l.itemId);
-        if (!item?.enableDepreciation) return false;
-        const m = numOrZero(l.depreciationMonths);
-        return !Number.isFinite(m) || m <= 0;
-      });
-      if (invalidDep) {
-        toast.error('Nhập số tháng khấu hao > 0 cho các thiết bị có khấu hao');
-        return;
-      }
-    }
-    if (consumableLines.length > 0) {
-      if (consumableLines.some(l => l.quantity === '' || numOrZero(l.quantity) < 1)) {
-        toast.error('Nhập số lượng vật tư ≥ 1 cho mọi dòng');
-        return;
+      if (consumableLines.length > 0) {
+        if (consumableLines.some(l => l.quantity === '' || numOrZero(l.quantity) < 1)) {
+          toast.error('Nhập số lượng vật tư ≥ 1 cho mọi dòng');
+          return;
+        }
       }
     }
 
@@ -281,7 +519,6 @@ const StockInNewPage = () => {
       toast.error('Nguồn nhập không hợp lệ');
       return;
     }
-
     const receiptDate = new Date().toISOString().slice(0, 10);
     const code = makeBizCode('PN');
 
@@ -295,7 +532,10 @@ const StockInNewPage = () => {
         if (!up?.url) throw new Error('Upload không trả URL');
         fileUrls = [up.url];
       }
-      const note = appendFileUrlsToNote(buildReceiptNote(notes, supplierId), fileUrls);
+      const note = appendFileUrlsToNote(
+        buildReceiptNote(notes, supplierId),
+        fileUrls,
+      );
 
       const created = await apiPost<StockReceiptDto>('/api/stock-receipts', {
         code,
@@ -308,8 +548,30 @@ const StockInNewPage = () => {
       if (rid == null) throw new Error('API không trả id phiếu nhập');
 
       let lineNo = 1;
-      if (deviceLines.length > 0) {
-        for (const line of deviceLines) {
+      const linesToCreateDevice =
+        isReturnSource
+          ? selectedRecoveryEquipmentIds
+              .map(id => recoverableEquipments.find(e => e.id === id))
+              .filter((e): e is NonNullable<typeof e> => !!e)
+              .map((e, idx) => ({
+                id: `ret-eq-${e.id}-${idx}`,
+                itemId: e.itemId,
+                quantity: 1 as NumMaybeEmpty,
+                unitPrice: e.originalCost as NumMaybeEmpty,
+                depreciationMonths: e.depreciationMonths as NumMaybeEmpty,
+                salvageValue: e.salvageValue as NumMaybeEmpty,
+                serials: [
+                  {
+                    equipmentCode: e.equipmentCode,
+                    serial: e.serial ?? '',
+                    modelName: e.modelName ?? '',
+                  },
+                ],
+              }))
+          : deviceLines;
+
+      if (linesToCreateDevice.length > 0) {
+        for (const line of linesToCreateDevice) {
           const serialRows =
             Array.isArray(line.serials) && line.serials.length > 0
               ? line.serials
@@ -339,8 +601,20 @@ const StockInNewPage = () => {
           }
         }
       }
-      if (consumableLines.length > 0) {
-        for (const line of consumableLines) {
+      const linesToCreateConsumable =
+        isReturnSource
+          ? recoverableConsumables
+              .map(row => ({
+                id: row.assignmentId,
+                itemId: row.itemId,
+                quantity: (selectedRecoveryConsumables[row.assignmentId] ?? 0) as NumMaybeEmpty,
+                unitPrice: 0 as NumMaybeEmpty,
+              }))
+              .filter(line => numOrZero(line.quantity) > 0)
+          : consumableLines;
+
+      if (linesToCreateConsumable.length > 0) {
+        for (const line of linesToCreateConsumable) {
           await apiPost('/api/stock-receipt-lines', {
             lineNo: lineNo++,
             quantity: numOrZero(line.quantity),
@@ -352,6 +626,12 @@ const StockInNewPage = () => {
       }
 
       toast.success('Đã tạo phiếu nhập kho');
+      pushInAppNotification({
+        title: 'Nhập kho',
+        message: `Đã tạo phiếu nhập ${code}.`,
+        kind: 'success',
+        route: '/admin/stock-in',
+      });
       resetForm();
       invalidateStock();
       navigate('/admin/stock-in');
@@ -388,7 +668,17 @@ const StockInNewPage = () => {
             </div>
             <div className="space-y-2">
               <Label>Nguồn nhập</Label>
-              <Select value={source} onValueChange={setSource}>
+              <Select
+                value={source}
+                onValueChange={v => {
+                  setSource(v);
+                  if (v !== 'RETURN') {
+                    setReturnHolderKey('');
+                    setSelectedRecoveryEquipmentIds([]);
+                    setSelectedRecoveryConsumables({});
+                  }
+                }}
+              >
                 <SelectTrigger><SelectValue /></SelectTrigger>
                 <SelectContent>
                   {(Object.entries(FE_SOURCE_LABELS) as Array<[keyof typeof FE_SOURCE_LABELS, string]>).map(([v, l]) => (
@@ -397,6 +687,72 @@ const StockInNewPage = () => {
                 </SelectContent>
               </Select>
             </div>
+            {isReturnSource && (
+              <div className="space-y-3 rounded-md border p-3">
+                <div className="space-y-2">
+                  <Label>Đối tượng thu hồi</Label>
+                  <Select
+                    value={returnOwnerType}
+                    onValueChange={v => {
+                      const t = v as ReturnOwnerType;
+                      setReturnOwnerType(t);
+                      setReturnLookupType(t === 'COMPANY' ? 'LOCATION' : t);
+                      setReturnHolderKey('');
+                      setSelectedRecoveryEquipmentIds([]);
+                      setSelectedRecoveryConsumables({});
+                    }}
+                  >
+                    <SelectTrigger><SelectValue /></SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="EMPLOYEE">Nhân viên</SelectItem>
+                      <SelectItem value="COMPANY">Công ty</SelectItem>
+                      <SelectItem value="DEPARTMENT">Phòng ban</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div className={returnOwnerType === 'COMPANY' ? 'grid grid-cols-1 gap-2 sm:grid-cols-[1fr_200px]' : 'space-y-2'}>
+                  <Input
+                    value={returnSearch}
+                    onChange={e => setReturnSearch(e.target.value)}
+                    placeholder="Tìm đối tượng..."
+                  />
+                  {returnOwnerType === 'COMPANY' ? (
+                    <Select
+                      value={returnLookupType}
+                      onValueChange={v => {
+                        setReturnLookupType(v as ReturnLookupType);
+                        setReturnHolderKey('');
+                      }}
+                    >
+                      <SelectTrigger><SelectValue /></SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="LOCATION">Theo vị trí</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  ) : null}
+                </div>
+                <div className="space-y-2">
+                  <Label>Chọn đối tượng cụ thể</Label>
+                  <Select
+                    value={returnHolderKey || '__none__'}
+                    onValueChange={v => {
+                      const key = v === '__none__' ? '' : v;
+                      setReturnHolderKey(key);
+                      setSelectedRecoveryEquipmentIds([]);
+                      setSelectedRecoveryConsumables({});
+                    }}
+                  >
+                    <SelectTrigger><SelectValue placeholder="Chọn đối tượng..." /></SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="__none__">— Chọn —</SelectItem>
+                      {holderOptionsForUi.map(o => (
+                        <SelectItem key={o.key} value={o.key}>{o.label}</SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+              </div>
+            )}
             <div className="space-y-2">
               <Label>Nhà cung cấp</Label>
               <Select value={supplierId} onValueChange={setSupplierId}>
@@ -441,6 +797,85 @@ const StockInNewPage = () => {
             <CardTitle className="text-base text-primary">Chi tiết hàng nhập</CardTitle>
           </CardHeader>
           <CardContent className="space-y-4">
+            {source === 'RETURN' ? (
+              <div className="space-y-4">
+                <div className="rounded-md border p-3">
+                  <h3 className="font-medium text-sm mb-2">Thiết bị đang nắm giữ</h3>
+                  {!returnHolderKey ? (
+                    <p className="text-sm text-muted-foreground">Chọn đối tượng để xem danh sách thiết bị có thể thu hồi.</p>
+                  ) : recoverableEquipments.length === 0 ? (
+                    <p className="text-sm text-muted-foreground">Không có thiết bị phù hợp.</p>
+                  ) : (
+                    <div className="space-y-2">
+                      {recoverableEquipments.map(eq => {
+                        const checked = selectedRecoveryEquipmentIds.includes(eq.id);
+                        return (
+                          <label key={eq.id} className="flex items-center gap-2 text-sm">
+                            <input
+                              type="checkbox"
+                              checked={checked}
+                              onChange={e => {
+                                const on = e.target.checked;
+                                setSelectedRecoveryEquipmentIds(prev =>
+                                  on ? [...prev, eq.id] : prev.filter(x => x !== eq.id),
+                                );
+                              }}
+                            />
+                            <span className="font-mono">{formatEquipmentCodeDisplay(eq.equipmentCode)}</span>
+                            <span>— {assetItems.find(i => i.id === eq.itemId)?.name ?? eq.itemId}</span>
+                          </label>
+                        );
+                      })}
+                    </div>
+                  )}
+                </div>
+
+                <div className="rounded-md border p-3">
+                  <h3 className="font-medium text-sm mb-2">Vật tư đang nắm giữ</h3>
+                  {!returnHolderKey ? (
+                    <p className="text-sm text-muted-foreground">Chọn đối tượng để xem danh sách vật tư có thể thu hồi.</p>
+                  ) : recoverableConsumables.length === 0 ? (
+                    <p className="text-sm text-muted-foreground">Không có vật tư phù hợp.</p>
+                  ) : (
+                    <div className="space-y-2">
+                      {recoverableConsumables.map(row => {
+                        const currentQty = selectedRecoveryConsumables[row.assignmentId] ?? 0;
+                        return (
+                          <div key={row.assignmentId} className="grid grid-cols-[1fr_120px] items-center gap-3">
+                            <label className="flex items-center gap-2 text-sm">
+                              <input
+                                type="checkbox"
+                                checked={currentQty > 0}
+                                onChange={e => {
+                                  const on = e.target.checked;
+                                  setSelectedRecoveryConsumables(prev => ({
+                                    ...prev,
+                                    [row.assignmentId]: on ? row.held : 0,
+                                  }));
+                                }}
+                              />
+                              <span className="font-mono">{row.itemCode || '—'}</span>
+                              <span>— {row.itemName} (đang giữ: {row.held})</span>
+                            </label>
+                            <Input
+                              type="number"
+                              min={0}
+                              max={row.held}
+                              value={currentQty}
+                              onChange={e => {
+                                const n = Number(e.target.value);
+                                const next = Number.isFinite(n) ? Math.max(0, Math.min(row.held, Math.floor(n))) : 0;
+                                setSelectedRecoveryConsumables(prev => ({ ...prev, [row.assignmentId]: next }));
+                              }}
+                            />
+                          </div>
+                        );
+                      })}
+                    </div>
+                  )}
+                </div>
+              </div>
+            ) : (
             <div className="space-y-3">
               <Label className="text-sm font-medium">Loại tài sản nhập <span className="text-destructive">*</span></Label>
               <Tabs value={assetType} onValueChange={v => { setAssetType(v as 'DEVICE' | 'CONSUMABLE'); }}>
@@ -634,6 +1069,7 @@ const StockInNewPage = () => {
             </TabsContent>
           </Tabs>
             </div>
+            )}
           </CardContent>
         </Card>
       </div>
@@ -644,11 +1080,33 @@ const StockInNewPage = () => {
             Tổng tiền: <span className="text-primary">{formatCurrency(totalAmount)}</span>
           </div>
           <div className="flex flex-wrap gap-2">
-            <Button variant="outline" onClick={() => navigate('/admin/stock-in')} disabled={createBusy}>Hủy</Button>
+            <Button variant="outline" onClick={() => setCancelConfirmOpen(true)} disabled={createBusy}>Hủy</Button>
             <Button onClick={() => void handleCreate()} disabled={createBusy}>{createBusy ? 'Đang tạo…' : 'Tạo phiếu nhập'}</Button>
           </div>
         </div>
       )}
+
+      <AlertDialog open={cancelConfirmOpen} onOpenChange={setCancelConfirmOpen}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Hủy tạo phiếu nhập?</AlertDialogTitle>
+            <AlertDialogDescription>
+              Thông tin phiếu chưa được lưu. Bạn có chắc muốn quay lại danh sách phiếu nhập kho?
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Ở lại</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={() => {
+                resetForm();
+                navigate('/admin/stock-in');
+              }}
+            >
+              Thoát
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 };

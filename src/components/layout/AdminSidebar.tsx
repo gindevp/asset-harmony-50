@@ -42,7 +42,7 @@ const navItems: NavItem[] = [
       { label: 'Tồn kho', path: '/admin/inventory' },
     ]
   },
-  { label: 'Quản lý trạng thái', path: '/admin/asset-tracking', icon: ClipboardCheck },
+  { label: 'Tra cứu tài sản', path: '/admin/asset-tracking', icon: ClipboardCheck },
   {
     label: 'Quản lý yêu cầu', icon: FileText, children: [
       { label: 'Yêu cầu cấp phát', path: '/admin/allocation-requests' },

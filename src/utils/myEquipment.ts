@@ -6,6 +6,39 @@ import { isReturnRequestOpen } from '@/utils/openAssetRequestBlocks';
 /** Cách thiết bị «thuộc» tài khoản NV theo bàn giao (cá nhân / PB / vị trí — chỉ khi phiếu không gán cá nhân). */
 export type MyAssetScope = 'personal' | 'department' | 'location';
 
+/** Khớp `note` trên equipment-assignment / consumable-assignment (BE AllocationRequestService). */
+const ASSIGNMENT_NOTE_DEPARTMENT_POOL = 'scoped=DEPT';
+const ASSIGNMENT_NOTE_LOCATION_POOL = 'scoped=LOC';
+const ASSIGNMENT_NOTE_COMPANY_VI = 'đối tượng: công ty';
+const ASSIGNMENT_NOTE_COMPANY_ASCII = 'doi tuong: cong ty';
+
+function hasCompanyLocationHint(note: string): boolean {
+  const n = note.toLowerCase();
+  return (
+    n.includes(ASSIGNMENT_NOTE_LOCATION_POOL.toLowerCase()) ||
+    n.includes(ASSIGNMENT_NOTE_COMPANY_VI) ||
+    n.includes(ASSIGNMENT_NOTE_COMPANY_ASCII)
+  );
+}
+
+function assignmentEmployeeId(a: ConsumableAssignmentDto): string | null {
+  if (a.employee?.id != null) return String(a.employee.id);
+  const raw = (a as { employeeId?: number | string }).employeeId;
+  return raw != null ? String(raw) : null;
+}
+
+function assignmentDepartmentId(a: ConsumableAssignmentDto): string | null {
+  if (a.department?.id != null) return String(a.department.id);
+  const raw = (a as { departmentId?: number | string }).departmentId;
+  return raw != null ? String(raw) : null;
+}
+
+function assignmentLocationId(a: ConsumableAssignmentDto): string | null {
+  if (a.location?.id != null) return String(a.location.id);
+  const raw = (a as { locationId?: number | string }).locationId;
+  return raw != null ? String(raw) : null;
+}
+
 const scopeLabels: Record<MyAssetScope, string> = {
   personal: 'Cá nhân',
   department: 'Phòng ban',
@@ -31,11 +64,37 @@ export function resolveMyAssetScope(
     e.status === 'IN_USE' || e.status === 'PENDING_ISSUE' || e.status === 'LOST';
   if (!visible) return null;
 
+  /**
+   * Cấp phát theo vị trí có thể vẫn có employee nhận bàn giao ở assignment.
+   * Nếu vị trí đến trực tiếp từ assignment.location thì ưu tiên xem là tài sản công ty theo vị trí.
+   */
+  if (e.locationAssignedDirectly && e.assignedLocation && locationId && e.assignedLocation === locationId) {
+    return 'location';
+  }
+
+  /**
+   * Cấp phát có đối tượng nhận = phòng ban: BE gán cả NV nhận bàn giao → vẫn «scoped=DEPT» trên note,
+   * toàn bộ NV cùng PB thấy thiết bị (không chỉ người được gán).
+   */
+  if (
+    e.departmentPoolFromAllocation &&
+    e.assignedDepartment &&
+    departmentId &&
+    e.assignedDepartment === departmentId
+  ) {
+    return 'department';
+  }
+  if (
+    e.locationPoolFromAllocation &&
+    e.assignedLocation &&
+    locationId &&
+    e.assignedLocation === locationId
+  ) {
+    return 'location';
+  }
   if (e.assignedTo === employeeId) return 'personal';
   /**
    * Chỉ «Phòng ban» / «Vị trí» khi phiếu gán không gán cho cá nhân.
-   * mapEquipmentDto lấy assignedDepartment/assignedLocation cả từ NV đang giữ (để hiển thị),
-   * nếu so khớp PB/Vị trí khi vẫn có assignedTo thì cả phòng sẽ thấy tài sản cá nhân của đồng nghiệp.
    */
   const noPersonalHolder = !e.assignedTo || String(e.assignedTo).trim() === '';
   if (noPersonalHolder && e.assignedDepartment && departmentId && e.assignedDepartment === departmentId) {
@@ -79,12 +138,25 @@ export function resolveMyConsumableScope(
   const lossLine = lossApprovedAssignmentIds?.has(String(a.id ?? ''));
   if (held <= 0 && !lossLine) return null;
 
-  if (a.employee?.id != null && String(a.employee.id) === employeeId) return 'personal';
-  const noPersonalHolder = a.employee?.id == null;
-  if (noPersonalHolder && a.department?.id != null && departmentId && String(a.department.id) === departmentId) {
+  const note = typeof a.note === 'string' ? a.note : '';
+  const aEmpId = assignmentEmployeeId(a);
+  const aDepId = assignmentDepartmentId(a);
+  const aLocId = assignmentLocationId(a);
+  if (note.includes(ASSIGNMENT_NOTE_DEPARTMENT_POOL) && aDepId && departmentId && aDepId === departmentId) {
     return 'department';
   }
-  if (noPersonalHolder && a.location?.id != null && locationId && String(a.location.id) === locationId) {
+  if (note.includes(ASSIGNMENT_NOTE_LOCATION_POOL) && aLocId && locationId && aLocId === locationId) {
+    return 'location';
+  }
+  if (hasCompanyLocationHint(note) && aLocId && locationId && aLocId === locationId) {
+    return 'location';
+  }
+  if (aEmpId && aEmpId === employeeId) return 'personal';
+  const noPersonalHolder = !aEmpId;
+  if (noPersonalHolder && aDepId && departmentId && aDepId === departmentId) {
+    return 'department';
+  }
+  if (noPersonalHolder && aLocId && locationId && aLocId === locationId) {
     return 'location';
   }
   return null;
@@ -156,7 +228,7 @@ export function getConsumableAssignmentDisplayStatus(
   }
 
   const assetItemId = a.assetItem?.id != null ? String(a.assetItem.id) : '';
-  const holderId = a.employee?.id != null ? String(a.employee.id) : '';
+  const holderId = assignmentEmployeeId(a) ?? '';
 
   if (assetItemId && holderId) {
     for (const r of repairRequests) {

@@ -17,6 +17,7 @@ import type { StockOut } from '@/data/mockData';
 import {
   stockOutStatusLabels,
   formatDate,
+  getItemCode,
   getItemName,
   getEmployeeName,
   getDepartmentName,
@@ -45,6 +46,12 @@ const recipientTypeLabels: Record<string, string> = {
   LOCATION: 'Vị trí',
   COMPANY: 'Công ty',
 };
+const selectableRecipientTypeLabels: Record<string, string> = {
+  EMPLOYEE: 'Nhân viên',
+  DEPARTMENT: 'Phòng ban',
+  COMPANY: 'Công ty',
+};
+const COMPANY_RECIPIENT_MARKER = 'Đối tượng: Công ty';
 
 const StockOutPage = () => {
   const qc = useQueryClient();
@@ -75,7 +82,7 @@ const StockOutPage = () => {
       case 'LOCATION':
         return getLocationName(id, locations);
       case 'COMPANY':
-        return 'Toàn công ty';
+        return id ? getLocationName(id, locations) : 'Toàn công ty';
       default:
         return id;
     }
@@ -118,12 +125,10 @@ const StockOutPage = () => {
         return departments
           .filter(d => d.active !== false)
           .map(d => ({ value: String(d.id), label: `${d.code} - ${d.name}` }));
-      case 'LOCATION':
+      case 'COMPANY':
         return locations
           .filter(l => l.active !== false)
           .map(l => ({ value: String(l.id), label: `${l.code} - ${l.name}` }));
-      case 'COMPANY':
-        return [];
       default:
         return [];
     }
@@ -144,7 +149,7 @@ const StockOutPage = () => {
 
   const saveEditStockOut = async () => {
     if (!editOutDraft) return;
-    if (!editOutRecipientId && editOutRecipientType !== 'COMPANY') {
+    if (!editOutRecipientId) {
       toast.error('Vui lòng chọn đối tượng nhận');
       return;
     }
@@ -155,12 +160,15 @@ const StockOutPage = () => {
         code: editOutDraft.code,
         issueDate: editOutDate,
         status: 'DRAFT',
-        assigneeType: editOutRecipientType,
-        note: editOutNotes.trim() || undefined,
+        assigneeType: editOutRecipientType === 'COMPANY' ? 'LOCATION' : editOutRecipientType,
+        note:
+          editOutRecipientType === 'COMPANY'
+            ? [editOutNotes.trim(), COMPANY_RECIPIENT_MARKER].filter(Boolean).join(' — ')
+            : (editOutNotes.trim() || undefined),
       };
       if (editOutRecipientType === 'EMPLOYEE') body.employee = { id: Number(editOutRecipientId) };
       else if (editOutRecipientType === 'DEPARTMENT') body.department = { id: Number(editOutRecipientId) };
-      else if (editOutRecipientType === 'LOCATION') body.location = { id: Number(editOutRecipientId) };
+      else if (editOutRecipientType === 'COMPANY') body.location = { id: Number(editOutRecipientId) };
       await apiPatch(`/api/stock-issues/${editOutDraft.id}`, body);
       toast.success('Đã cập nhật phiếu xuất');
       const oid = editOutDraft.id;
@@ -261,6 +269,7 @@ const StockOutPage = () => {
         else if (doc.recipientType === 'DEPARTMENT' && doc.recipientId) body.department = { id: Number(doc.recipientId) };
         else if (doc.recipientType === 'LOCATION' && doc.recipientId) body.location = { id: Number(doc.recipientId) };
         else if (doc.recipientType === 'COMPANY') {
+          if (doc.recipientId) body.location = { id: Number(doc.recipientId) };
           body.note = [doc.notes, 'Đối tượng: Công ty'].filter(Boolean).join(' — ') || 'Đối tượng: Công ty';
         }
         await apiPost('/api/equipment-assignments', body);
@@ -374,8 +383,20 @@ const StockOutPage = () => {
           </DialogHeader>
           {selected && (
             <div className="space-y-4">
+              {(() => {
+                const recipientName = getRecipientName(selected.recipientType, selected.recipientId);
+                const recipientDisplay =
+                  selected.recipientType === 'COMPANY'
+                    ? 'Công ty'
+                    : `${recipientTypeLabels[selected.recipientType]}${recipientName ? ` – ${recipientName}` : ''}`;
+                const issuedLocation =
+                  selected.recipientId && (selected.recipientType === 'COMPANY' || selected.recipientType === 'LOCATION')
+                    ? getLocationName(selected.recipientId, locations)
+                    : '—';
+                return (
               <div className="grid grid-cols-2 gap-3 text-sm">
-                <div><span className="text-muted-foreground">Đối tượng nhận:</span> {recipientTypeLabels[selected.recipientType]} – {getRecipientName(selected.recipientType, selected.recipientId)}</div>
+                <div><span className="text-muted-foreground">Đối tượng nhận:</span> {recipientDisplay}</div>
+                <div><span className="text-muted-foreground">Vị trí được cấp:</span> {issuedLocation}</div>
                 <div><span className="text-muted-foreground">Trạng thái:</span> <StatusBadge status={selected.status} label={stockOutStatusLabels[selected.status]} /></div>
                 <div><span className="text-muted-foreground">Người tạo:</span> {createdLogin || '—'}</div>
                 <div><span className="text-muted-foreground">Ngày tạo:</span> {formatDate(selected.createdAt)}</div>
@@ -390,16 +411,27 @@ const StockOutPage = () => {
                   </div>
                 </div>
               </div>
+                );
+              })()}
               <DataTable
                 columns={[
                   { key: 'item', label: 'Tài sản', render: (r: any) => getItemName(r.itemId, assetItems) },
                   {
                     key: 'equipment',
-                    label: 'Mã TB',
+                    label: 'Mã tài sản',
+                    render: (r: any) => {
+                      if (!r.equipmentId) return getItemCode(r.itemId, assetItems) || '—';
+                      const eq = equipments.find(e => String(e.id) === String(r.equipmentId));
+                      return eq ? formatEquipmentCodeDisplay(eq.equipmentCode) : String(r.equipmentId);
+                    },
+                  },
+                  {
+                    key: 'serial',
+                    label: 'Serial',
                     render: (r: any) => {
                       if (!r.equipmentId) return '—';
                       const eq = equipments.find(e => String(e.id) === String(r.equipmentId));
-                      return eq ? formatEquipmentCodeDisplay(eq.equipmentCode) : String(r.equipmentId);
+                      return (eq?.serial ?? '').trim() || '—';
                     },
                   },
                   { key: 'quantity', label: 'SL', className: 'text-right' },
@@ -453,25 +485,25 @@ const StockOutPage = () => {
                 >
                   <SelectTrigger><SelectValue /></SelectTrigger>
                   <SelectContent>
-                    {Object.entries(recipientTypeLabels).map(([v, l]) => (
+                    {Object.entries(selectableRecipientTypeLabels).map(([v, l]) => (
                       <SelectItem key={v} value={v}>{l}</SelectItem>
                     ))}
                   </SelectContent>
                 </Select>
               </div>
-              {editOutRecipientType !== 'COMPANY' && (
-                <div className="space-y-2">
-                  <Label>{recipientTypeLabels[editOutRecipientType]} <span className="text-destructive">*</span></Label>
-                  <Select value={editOutRecipientId} onValueChange={setEditOutRecipientId}>
-                    <SelectTrigger><SelectValue placeholder="Chọn..." /></SelectTrigger>
-                    <SelectContent>
-                      {editRecipientOptions.map(o => (
-                        <SelectItem key={o.value} value={o.value}>{o.label}</SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                </div>
-              )}
+              <div className="space-y-2">
+                <Label>{recipientTypeLabels[editOutRecipientType]} <span className="text-destructive">*</span></Label>
+                <Select value={editOutRecipientId} onValueChange={setEditOutRecipientId}>
+                  <SelectTrigger>
+                    <SelectValue placeholder={editOutRecipientType === 'COMPANY' ? 'Chọn vị trí...' : 'Chọn...'} />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {editRecipientOptions.map(o => (
+                      <SelectItem key={o.value} value={o.value}>{o.label}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
               <div className="space-y-2">
                 <Label>Ghi chú</Label>
                 <Textarea value={editOutNotes} onChange={e => setEditOutNotes(e.target.value)} rows={3} />

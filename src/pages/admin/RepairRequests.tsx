@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
 import {
   AlertDialog,
@@ -24,7 +25,7 @@ import { Eye, Pencil, Trash2 } from 'lucide-react';
 import type { RepairRequest } from '@/data/mockData';
 import {
   repairStatusLabels,
-  getEmployeeName,
+  getRequesterDisplayByJobTitle,
   getDepartmentName,
   formatDate,
 } from '@/data/mockData';
@@ -52,7 +53,11 @@ import { ApiError, apiDelete, apiGet, apiPatch, parseProblemDetailJson } from '@
 import type { RepairRequestDto, RepairRequestLineDto } from '@/api/types';
 import { AttachmentNoteView } from '@/components/shared/AttachmentNoteView';
 import { canDeleteRepairRequest, canEditRepairRequestFields } from '@/utils/requestRecordActions';
-import { formatRepairRequestAssetNamesSummary, getRepairListKindLabel } from '@/utils/repairRequestListDisplay';
+import {
+  formatRepairRequestAssetNamesSummary,
+  getRepairListKindLabel,
+  getRepairRequestTypeLabel,
+} from '@/utils/repairRequestListDisplay';
 import { LoadingIndicator, PageLoading } from '@/components/shared/page-loading';
 
 const outcomeLabels: Record<string, string> = {
@@ -68,6 +73,7 @@ function hideRepairEditDeleteForQlts(): boolean {
 }
 
 const RepairRequests = () => {
+  const navigate = useNavigate();
   const qc = useQueryClient();
   const hideRowEditDelete = hideRepairEditDeleteForQlts();
   const rrQ = useRepairRequestsView();
@@ -272,7 +278,7 @@ const RepairRequests = () => {
       label: 'Mã YC',
       render: r => <span className="font-mono text-sm font-medium">{formatBizCodeDisplay(r.code)}</span>,
     },
-    { key: 'requester', label: 'Người yêu cầu', render: r => getEmployeeName(r.requesterId, employees) },
+    { key: 'requester', label: 'Người yêu cầu', render: r => getRequesterDisplayByJobTitle(r.requesterId, employees) },
     { key: 'department', label: 'Phòng ban', render: r => getDepartmentName(r.departmentId, departments) },
     {
       key: 'assetKind',
@@ -280,13 +286,9 @@ const RepairRequests = () => {
       render: r => getRepairListKindLabel(r),
     },
     {
-      key: 'assetNames',
-      label: 'Tên tài sản',
-      render: r => (
-        <span className="max-w-md truncate block" title={formatRepairRequestAssetNamesSummary(r, equipments, assetItems)}>
-          {formatRepairRequestAssetNamesSummary(r, equipments, assetItems)}
-        </span>
-      ),
+      key: 'requestType',
+      label: 'Loại yêu cầu',
+      render: r => getRepairRequestTypeLabel(r, equipments),
     },
     { key: 'status', label: 'Trạng thái', render: r => <StatusBadge status={r.status} label={repairStatusLabels[r.status]} /> },
     { key: 'result', label: 'Kết quả', render: r => (r.result ? outcomeLabels[r.result] ?? r.result : '—') },
@@ -318,8 +320,7 @@ const RepairRequests = () => {
               className="h-8 w-8"
               title="Sửa"
               onClick={() => {
-                setDialogMode('edit');
-                setSelected(r);
+                navigate(`/admin/request-new/repair?editId=${encodeURIComponent(String(r.id))}`);
               }}
             >
               <Pencil className="h-4 w-4" />
@@ -384,7 +385,18 @@ const RepairRequests = () => {
           </DialogHeader>
           {selected && (
             <div className="space-y-4">
-              <RequesterEmployeeInfo requesterId={selected.requesterId} employees={employees} />
+              <RequesterEmployeeInfo
+                requesterId={selected.requesterId}
+                employees={employees}
+                hideLocation
+                appendRows={[
+                  { label: 'Ngày tạo', value: formatDate(selected.createdAt) },
+                  {
+                    label: 'Trạng thái',
+                    value: <StatusBadge status={selected.status} label={repairStatusLabels[selected.status]} />,
+                  },
+                ]}
+              />
               <div className="space-y-3 text-sm">
                 <div className="space-y-2">
                   <p className="text-sm font-medium text-foreground">Thiết bị / vật tư</p>
@@ -399,15 +411,6 @@ const RepairRequests = () => {
                       emptyMessage="Không có dòng"
                     />
                   )}
-                </div>
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                  <div>
-                    <span className="text-muted-foreground">Ngày tạo:</span> {formatDate(selected.createdAt)}
-                  </div>
-                  <div className="flex flex-wrap items-center gap-2">
-                    <span className="text-muted-foreground">Trạng thái:</span>{' '}
-                    <StatusBadge status={selected.status} label={repairStatusLabels[selected.status]} />
-                  </div>
                 </div>
                 {selected.result ? (
                   <div>

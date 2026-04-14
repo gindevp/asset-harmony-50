@@ -23,6 +23,7 @@ import type { StockIssueDto } from '@/api/types';
 import { makeBizCode } from '@/api/businessCode';
 import { formatEquipmentCodeDisplay } from '@/utils/formatCodes';
 import { appendFileUrlsToNote } from '@/utils/stockReceiptNote';
+import { pushInAppNotification } from '@/lib/inAppNotifications';
 
 const recipientTypeLabels: Record<string, string> = {
   EMPLOYEE: 'Nhân viên',
@@ -30,6 +31,12 @@ const recipientTypeLabels: Record<string, string> = {
   LOCATION: 'Vị trí',
   COMPANY: 'Công ty',
 };
+const selectableRecipientTypeLabels: Record<string, string> = {
+  EMPLOYEE: 'Nhân viên',
+  DEPARTMENT: 'Phòng ban',
+  COMPANY: 'Công ty',
+};
+const COMPANY_RECIPIENT_MARKER = 'Đối tượng: Công ty';
 
 type NumMaybeEmpty = number | '';
 
@@ -62,7 +69,6 @@ const StockOutNewPage = () => {
   const equipments = eqQ.data ?? [];
   const employees = empQ.data ?? [];
   const departments = depQ.data ?? [];
-  const locations = locQ.data ?? [];
 
   const deviceItems = useMemo(() => assetItems.filter(i => i.managementType === 'DEVICE'), [assetItems]);
   const consumableItems = useMemo(() => assetItems.filter(i => i.managementType === 'CONSUMABLE'), [assetItems]);
@@ -142,19 +148,17 @@ const StockOutNewPage = () => {
         return departments
           .filter(d => d.active !== false)
           .map(d => ({ value: String(d.id), label: `${d.code} - ${d.name}` }));
-      case 'LOCATION':
-        return locations
-          .filter(l => l.active !== false)
-          .map(l => ({ value: String(l.id), label: `${l.code} - ${l.name}` }));
       case 'COMPANY':
-        return [];
+        return locQ.data
+          ?.filter(l => l.active !== false)
+          .map(l => ({ value: String(l.id), label: `${l.code} - ${l.name}` })) ?? [];
       default:
         return [];
     }
-  }, [recipientType, employees, departments, locations]);
+  }, [recipientType, employees, departments, locQ.data]);
 
   const handleCreate = async () => {
-    if (!recipientId && recipientType !== 'COMPANY') { toast.error('Vui lòng chọn đối tượng nhận'); return; }
+    if (!recipientId) { toast.error('Vui lòng chọn đối tượng nhận'); return; }
     if (deviceLines.length === 0 && consumableLines.length === 0) {
       toast.error('Vui lòng thêm ít nhất 1 dòng thiết bị hoặc vật tư');
       return;
@@ -185,16 +189,21 @@ const StockOutNewPage = () => {
         fileUrls = [up.url];
       }
       const mergedNote = appendFileUrlsToNote(notes.trim(), fileUrls);
+      const apiAssigneeType = recipientType === 'COMPANY' ? 'LOCATION' : recipientType;
+      const apiNote =
+        recipientType === 'COMPANY'
+          ? [mergedNote, COMPANY_RECIPIENT_MARKER].filter(Boolean).join(' — ')
+          : mergedNote;
       const body: Record<string, unknown> = {
         code,
         issueDate,
         status: 'DRAFT',
-        assigneeType: recipientType,
-        ...(mergedNote ? { note: mergedNote } : {}),
+        assigneeType: apiAssigneeType,
+        ...(apiNote ? { note: apiNote } : {}),
       };
       if (recipientType === 'EMPLOYEE') body.employee = { id: Number(recipientId) };
       else if (recipientType === 'DEPARTMENT') body.department = { id: Number(recipientId) };
-      else if (recipientType === 'LOCATION') body.location = { id: Number(recipientId) };
+      else if (recipientType === 'COMPANY') body.location = { id: Number(recipientId) };
 
       const created = await apiPost<StockIssueDto>('/api/stock-issues', body);
       const issueId = created.id;
@@ -224,6 +233,12 @@ const StockOutNewPage = () => {
         }
       }
       toast.success('Đã tạo phiếu xuất kho');
+      pushInAppNotification({
+        title: 'Xuất kho',
+        message: `Đã tạo phiếu xuất ${code}.`,
+        kind: 'success',
+        route: '/admin/stock-out',
+      });
       resetForm();
       await qc.invalidateQueries({ queryKey: ['api', 'stock-outs-view'] });
       await qc.invalidateQueries({ queryKey: ['api', 'stock-document-events'] });
@@ -264,24 +279,20 @@ const StockOutNewPage = () => {
               <Select value={recipientType} onValueChange={v => { setRecipientType(v); setRecipientId(''); }}>
                 <SelectTrigger><SelectValue /></SelectTrigger>
                 <SelectContent>
-                  {Object.entries(recipientTypeLabels).map(([v, l]) => (
+                  {Object.entries(selectableRecipientTypeLabels).map(([v, l]) => (
                     <SelectItem key={v} value={v}>{l}</SelectItem>
                   ))}
                 </SelectContent>
               </Select>
             </div>
             <div className="space-y-2">
-              <Label>{recipientTypeLabels[recipientType]} {recipientType !== 'COMPANY' && <span className="text-destructive">*</span>}</Label>
-              {recipientType === 'COMPANY' ? (
-                <p className="text-sm text-muted-foreground py-2">Không cần chọn đối tượng — cấp phát mức công ty</p>
-              ) : (
-                <Select value={recipientId} onValueChange={setRecipientId}>
-                  <SelectTrigger><SelectValue placeholder={`Chọn ${recipientTypeLabels[recipientType]?.toLowerCase()}...`} /></SelectTrigger>
-                  <SelectContent>
-                    {recipientOptions.map(o => <SelectItem key={o.value} value={o.value}>{o.label}</SelectItem>)}
-                  </SelectContent>
-                </Select>
-              )}
+              <Label>{recipientType === 'COMPANY' ? 'Vị trí nhận' : recipientTypeLabels[recipientType]} <span className="text-destructive">*</span></Label>
+              <Select value={recipientId} onValueChange={setRecipientId}>
+                <SelectTrigger><SelectValue placeholder={`Chọn ${recipientType === 'COMPANY' ? 'vị trí' : recipientTypeLabels[recipientType]?.toLowerCase()}...`} /></SelectTrigger>
+                <SelectContent>
+                  {recipientOptions.map(o => <SelectItem key={o.value} value={o.value}>{o.label}</SelectItem>)}
+                </SelectContent>
+              </Select>
             </div>
             <div className="space-y-2">
               <Label>Ghi chú</Label>

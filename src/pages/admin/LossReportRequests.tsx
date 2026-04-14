@@ -23,7 +23,7 @@ import { Textarea } from '@/components/ui/textarea';
 import { Eye, Pencil, Trash2 } from 'lucide-react';
 import { toast } from 'sonner';
 import { formatBizCodeDisplay } from '@/utils/formatCodes';
-import { getEmployeeName, getItemName, formatDate } from '@/data/mockData';
+import { getRequesterDisplayByJobTitle, getItemName, formatDate } from '@/data/mockData';
 import { lossReportStatusLabels } from '@/data/mockData';
 import type { LossReportRequestDto } from '@/api/types';
 import { ApiError, apiDelete, apiPatch, getApiErrorMessage, parseProblemDetailJson } from '@/api/http';
@@ -194,7 +194,7 @@ const LossReportRequests = () => {
     {
       key: 'requester',
       label: 'Người báo',
-      render: r => getEmployeeName(String(r.requester?.id ?? ''), employees),
+      render: r => getRequesterDisplayByJobTitle(String(r.requester?.id ?? ''), employees),
     },
     {
       key: 'kind',
@@ -283,17 +283,18 @@ const LossReportRequests = () => {
                 const assetRows = buildLossAssetRows(selected, assetItems, equipments);
                 return (
                   <>
-              <RequesterEmployeeInfo requesterId={String(selected.requester?.id ?? '')} employees={employees} />
-              <div className="grid gap-2">
-                <div>
-                  <span className="text-muted-foreground">Trạng thái:</span>{' '}
-                  <StatusBadge status={selected.status ?? ''} label={lossReportStatusLabels[selected.status ?? ''] ?? selected.status} />
-                </div>
-                <div>
-                  <span className="text-muted-foreground">Loại:</span>{' '}
-                  {getLossReportKindDisplayLabel(selected)}
-                </div>
-              </div>
+              <RequesterEmployeeInfo
+                requesterId={String(selected.requester?.id ?? '')}
+                employees={employees}
+                hideLocation
+                appendRows={[
+                  {
+                    label: 'Trạng thái',
+                    value: <StatusBadge status={selected.status ?? ''} label={lossReportStatusLabels[selected.status ?? ''] ?? selected.status} />,
+                  },
+                  { label: 'Loại', value: getLossReportKindDisplayLabel(selected) },
+                ]}
+              />
               {assetRows.length > 0 ? (
                 <div className="space-y-2">
                   <div className="text-muted-foreground">Tài sản trong phiếu</div>
@@ -303,6 +304,7 @@ const LossReportRequests = () => {
                         <tr>
                           <th className="px-3 py-2 text-left font-medium">Loại</th>
                           <th className="px-3 py-2 text-left font-medium">Tài sản</th>
+                          <th className="px-3 py-2 text-left font-medium">Serial</th>
                           <th className="px-3 py-2 text-right font-medium">SL báo mất</th>
                         </tr>
                       </thead>
@@ -311,6 +313,7 @@ const LossReportRequests = () => {
                           <tr key={`${a.type}-${idx}`} className="border-t">
                             <td className="px-3 py-2">{a.type}</td>
                             <td className="px-3 py-2 break-words">{a.asset}</td>
+                            <td className="px-3 py-2 font-mono">{a.serial}</td>
                             <td className="px-3 py-2 text-right tabular-nums">{a.quantity}</td>
                           </tr>
                         ))}

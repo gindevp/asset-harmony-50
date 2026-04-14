@@ -206,6 +206,8 @@ export type ReturnRequestDto = {
   id?: number;
   code?: string;
   requestDate?: string;
+  /** API backend (Jackson): note */
+  note?: string;
   reason?: string;
   status?: string;
   requester?: EmployeeDto;

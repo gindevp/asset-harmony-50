@@ -15,8 +15,6 @@ import { Eye, Paperclip, Pencil, Plus } from 'lucide-react';
 import {
   allocationStatusLabels,
   formatDate,
-  getAssetLineDisplay,
-  getItemName,
   repairStatusLabels,
   returnStatusLabels,
   returnLineKindLabel,
@@ -47,11 +45,21 @@ import {
   repairLineSerialDisplay,
 } from '@/utils/repairRequestLineDisplay';
 import {
+  type AllocationDetailRow,
+  allocationDetailAssetName,
+  allocationDetailCatalogCode,
+  allocationDetailKindLabel,
+  allocationDetailQuantity,
+  allocationDetailSerial,
   buildAllocationDetailRows,
   formatAllocationRequestAssetNamesSummary,
   getAllocationListKindLabel,
 } from '@/utils/allocationDisplayRows';
-import { formatRepairRequestAssetNamesSummary, getRepairListKindLabel } from '@/utils/repairRequestListDisplay';
+import {
+  formatRepairRequestAssetNamesSummary,
+  getRepairListKindLabel,
+  getRepairRequestTypeLabel,
+} from '@/utils/repairRequestListDisplay';
 import {
   formatReturnRequestAssetNamesSummary,
   getReturnListKindLabel,
@@ -151,7 +159,7 @@ const EmployeeRequests = () => {
 
   const allocationRequests = arQ.data ?? [];
   const repairRequests = rrQ.data ?? [];
-  const returnRequests = retQ.data ?? [];
+  const returnRequests = retQ.data?.requests ?? [];
   const equipments = eqQ.data ?? [];
 
   const iQ = useAssetItems();
@@ -275,6 +283,7 @@ const EmployeeRequests = () => {
     else if (kind === 'repair') navigate(`${p}/request-new/repair`);
     else navigate(`${p}/request-new/return`);
   };
+  const editBasePath = location.pathname.startsWith('/admin') ? '/admin' : '/employee';
 
   const [cancelBusy, setCancelBusy] = useState<string | null>(null);
 
@@ -337,6 +346,43 @@ const EmployeeRequests = () => {
       },
     ],
     [assetItems],
+  );
+
+  const allocationEmpDetailRows = useMemo((): AllocationDetailRow[] => {
+    if (empDetail?.section !== 'allocation') return [];
+    return buildAllocationDetailRows(empDetail.row.lines);
+  }, [empDetail]);
+
+  const allocationEmpLineColumns: Column<AllocationDetailRow>[] = useMemo(
+    () => [
+      {
+        key: 'kind',
+        label: 'Loại',
+        render: row => allocationDetailKindLabel(row),
+      },
+      {
+        key: 'item',
+        label: 'Tài sản',
+        render: row => allocationDetailAssetName(row, assetItems, equipments, assetLinesApi),
+      },
+      {
+        key: 'assetCode',
+        label: 'Mã tài sản',
+        render: row => allocationDetailCatalogCode(row, assetItems, equipments),
+      },
+      {
+        key: 'serial',
+        label: 'Serial',
+        render: row => allocationDetailSerial(row, equipments),
+      },
+      {
+        key: 'quantity',
+        label: 'SL',
+        className: 'text-right',
+        render: row => allocationDetailQuantity(row),
+      },
+    ],
+    [assetItems, equipments, assetLinesApi],
   );
 
   useEffect(() => {
@@ -536,18 +582,6 @@ const EmployeeRequests = () => {
                 label: 'Loại',
                 render: (r: AllocationRequest) => getAllocationListKindLabel(r.lines, employeePortalKindLabel),
               },
-              {
-                key: 'assetNames',
-                label: 'Tên tài sản',
-                render: (r: AllocationRequest) => (
-                  <span
-                    className="max-w-md truncate block"
-                    title={formatAllocationRequestAssetNamesSummary(r.lines, assetItems, equipments)}
-                  >
-                    {formatAllocationRequestAssetNamesSummary(r.lines, assetItems, equipments)}
-                  </span>
-                ),
-              },
             {
               key: 'attach',
               label: 'Đính kèm',
@@ -601,7 +635,7 @@ const EmployeeRequests = () => {
                       size="icon"
                       className="h-8 w-8"
                       title="Sửa"
-                      onClick={() => setEmpDetail({ section: 'allocation', mode: 'edit', row: r })}
+                      onClick={() => navigate(`${editBasePath}/request-new?editId=${encodeURIComponent(String(r.id))}`)}
                     >
                       <Pencil className="h-4 w-4" />
                     </Button>
@@ -647,16 +681,9 @@ const EmployeeRequests = () => {
                 render: (r: RepairRequest) => getRepairListKindLabel(r, employeePortalKindLabel),
               },
               {
-                key: 'assetNames',
-                label: 'Tên tài sản',
-                render: (r: RepairRequest) => (
-                  <span
-                    className="max-w-md truncate block"
-                    title={formatRepairRequestAssetNamesSummary(r, equipments, assetItems)}
-                  >
-                    {formatRepairRequestAssetNamesSummary(r, equipments, assetItems)}
-                  </span>
-                ),
+                key: 'requestType',
+                label: 'Loại yêu cầu',
+                render: (r: RepairRequest) => getRepairRequestTypeLabel(r, equipments),
               },
               {
                 key: 'status',
@@ -687,7 +714,7 @@ const EmployeeRequests = () => {
                       size="icon"
                       className="h-8 w-8"
                       title="Sửa"
-                      onClick={() => setEmpDetail({ section: 'repair', mode: 'edit', row: r })}
+                      onClick={() => navigate(`${editBasePath}/request-new/repair?editId=${encodeURIComponent(String(r.id))}`)}
                     >
                       <Pencil className="h-4 w-4" />
                     </Button>
@@ -733,15 +760,6 @@ const EmployeeRequests = () => {
                 render: (r: ReturnRequest) => getReturnListKindLabel(r, employeePortalKindLabel),
               },
               {
-                key: 'assetNames',
-                label: 'Tên tài sản',
-                render: (r: ReturnRequest) => (
-                  <span className="text-sm break-words max-w-[min(20rem,45vw)] inline-block align-top">
-                    {formatReturnRequestAssetNamesSummary(r, assetItems)}
-                  </span>
-                ),
-              },
-              {
                 key: 'note',
                 label: 'Ghi chú',
                 render: (r: ReturnRequest) => (
@@ -777,7 +795,7 @@ const EmployeeRequests = () => {
                       size="icon"
                       className="h-8 w-8"
                       title="Sửa"
-                      onClick={() => setEmpDetail({ section: 'return', mode: 'edit', row: r })}
+                      onClick={() => navigate(`${editBasePath}/request-new/return?editId=${encodeURIComponent(String(r.id))}`)}
                     >
                       <Pencil className="h-4 w-4" />
                     </Button>
@@ -849,47 +867,23 @@ const EmployeeRequests = () => {
                 <>
                   <div><span className="text-muted-foreground">Lý do:</span> {empDetail.row.reason}</div>
                   {empDetail.row.attachmentNote ? (
-                    <div className="space-y-1">
-                      <div className="text-muted-foreground">Đính kèm</div>
-                      <AttachmentNoteView text={empDetail.row.attachmentNote} showCaption={false} />
+                    <div className="flex flex-wrap items-start gap-x-2 gap-y-1">
+                      <span className="text-muted-foreground shrink-0">Đính kèm:</span>
+                      <div className="min-w-0 flex-1">
+                        <AttachmentNoteView text={empDetail.row.attachmentNote} showCaption={false} />
+                      </div>
                     </div>
                   ) : null}
                 </>
               )}
-              <div className="text-muted-foreground border-t pt-2">
-                <p className="font-medium text-foreground mb-1">Các dòng</p>
-                <ul className="list-disc pl-4 space-y-1">
-                  {buildAllocationDetailRows(empDetail.row.lines).map(row => {
-                    if (row.kind === 'device_group') {
-                      const label =
-                        assetLinesApi.find(l => String(l.id) === row.assetLineId)?.name?.trim() ||
-                        getAssetLineDisplay(row.assetLineId, assetLinesApi);
-                      const qty = row.lines.reduce((s, l) => s + (l.quantity ?? 1), 0);
-                      return (
-                        <li key={row.id}>
-                          {label} × {qty}
-                        </li>
-                      );
-                    }
-                    const line = row.line;
-                    const lt = (line.lineType ?? '').toUpperCase();
-                    const label =
-                      lt === 'CONSUMABLE'
-                        ? line.assetLineId
-                          ? assetLinesApi.find(l => String(l.id) === line.assetLineId)?.name?.trim() ||
-                            getAssetLineDisplay(line.assetLineId, assetLinesApi)
-                          : getItemName(line.itemId, assetItems)
-                        : line.assetLineId
-                          ? assetLinesApi.find(l => String(l.id) === line.assetLineId)?.name?.trim() ||
-                            getAssetLineDisplay(line.assetLineId, assetLinesApi)
-                          : getItemName(line.itemId, assetItems);
-                    return (
-                      <li key={line.id}>
-                        {label} × {line.quantity}
-                      </li>
-                    );
-                  })}
-                </ul>
+              <div className="space-y-2 border-t pt-3">
+                <p className="text-sm font-medium text-foreground">Bảng thiết bị / vật tư</p>
+                <DataTable
+                  columns={allocationEmpLineColumns}
+                  data={allocationEmpDetailRows}
+                  pageSize={Math.max(1, allocationEmpDetailRows.length)}
+                  emptyMessage="Không có dòng"
+                />
               </div>
             </div>
           )}

@@ -32,6 +32,7 @@ import {
   mapConsumableStockDto,
   mapEquipmentDto,
   mapRepairDto,
+  type ReturnRequestsViewSnapshot,
 } from '@/api/viewModels';
 import type { AssetItem } from '@/data/mockData';
 import { pickAssignmentForEquipment } from '@/utils/equipmentJoin';
@@ -243,15 +244,20 @@ export function useRepairRequestsView() {
 export function useReturnRequestsView() {
   return useQuery({
     queryKey: ['api', 'return-requests-view'],
-    queryFn: async () => {
+    queryFn: async (): Promise<ReturnRequestsViewSnapshot> => {
       const [reqs, lines] = await Promise.all([
         apiGet<ReturnRequestDto[]>(`/api/return-requests?${PAGE_ALL}`),
         apiGet<ReturnRequestLineDto[]>(`/api/return-request-lines?${PAGE_ALL}`),
       ]);
-      return buildReturnRequests(reqs, lines);
+      return {
+        requests: buildReturnRequests(reqs, lines),
+        lineDtos: lines,
+      };
     },
   });
 }
+
+export type { ReturnRequestsViewSnapshot };
 
 export function useLossReportRequests() {
   return useQuery({

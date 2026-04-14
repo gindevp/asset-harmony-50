@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 import {
   AlertDialog,
   AlertDialogAction,
@@ -22,7 +23,7 @@ import type { ReturnRequest } from '@/data/mockData';
 import {
   returnStatusLabels,
   returnLineKindLabel,
-  getEmployeeName,
+  getRequesterDisplayByJobTitle,
   getDepartmentName,
   formatDate,
 } from '@/data/mockData';
@@ -60,13 +61,14 @@ function hideReturnEditDeleteForQlts(): boolean {
 }
 
 const ReturnRequests = () => {
+  const navigate = useNavigate();
   const hideRowEditDelete = hideReturnEditDeleteForQlts();
   const qc = useQueryClient();
   const retQ = useReturnRequestsView();
   const empQ = useEmployees();
   const depQ = useDepartments();
   const iQ = useAssetItems();
-  const returnRequests = retQ.data ?? [];
+  const returnRequests = retQ.data?.requests ?? [];
   const employees = empQ.data ?? [];
   const departments = depQ.data ?? [];
   const assetItems = useMemo(() => (iQ.data ?? []).map(mapAssetItemDto), [iQ.data]);
@@ -238,7 +240,6 @@ const ReturnRequests = () => {
             : (l.equipment?.serial ?? '—'),
       },
       { key: 'quantity', label: 'SL', className: 'text-right', render: l => l.quantity ?? 0 },
-      { key: 'notes', label: 'Ghi chú', render: l => l.note ?? '' },
     ];
   }, [assetItems]);
 
@@ -296,21 +297,12 @@ const ReturnRequests = () => {
       label: 'Mã YC',
       render: r => <span className="font-mono text-sm font-medium">{formatBizCodeDisplay(r.code)}</span>,
     },
-    { key: 'requester', label: 'Người yêu cầu', render: r => getEmployeeName(r.requesterId, employees) },
+    { key: 'requester', label: 'Người yêu cầu', render: r => getRequesterDisplayByJobTitle(r.requesterId, employees) },
     { key: 'department', label: 'Phòng ban', render: r => getDepartmentName(r.departmentId, departments) },
     {
       key: 'kind',
       label: 'Loại',
       render: r => getReturnListKindLabel(r),
-    },
-    {
-      key: 'assetNames',
-      label: 'Tên tài sản',
-      render: r => (
-        <span className="text-sm break-words max-w-[min(20rem,45vw)] inline-block align-top">
-          {formatReturnRequestAssetNamesSummary(r, assetItems)}
-        </span>
-      ),
     },
     {
       key: 'note',
@@ -347,8 +339,7 @@ const ReturnRequests = () => {
               className="h-8 w-8"
               title="Sửa"
               onClick={() => {
-                setDialogMode('edit');
-                setSelected(pickFreshReturn(r));
+                navigate(`/admin/request-new/return?editId=${encodeURIComponent(String(r.id))}`);
               }}
             >
               <Pencil className="h-4 w-4" />

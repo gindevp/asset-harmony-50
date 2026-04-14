@@ -31,6 +31,14 @@ function num(v: string | number | undefined | null): number {
   return typeof v === 'number' ? v : parseFloat(v) || 0;
 }
 
+/** Khớp ghi chú bàn giao do BE thêm khi YC cấp phát có đối tượng nhận = phòng ban (AllocationRequestService). */
+const ASSIGNMENT_NOTE_DEPARTMENT_POOL = 'scoped=DEPT';
+const ASSIGNMENT_NOTE_LOCATION_POOL = 'scoped=LOC';
+const ASSIGNMENT_NOTE_COMPANY_VI = 'đối tượng: công ty';
+const ASSIGNMENT_NOTE_COMPANY_ASCII = 'doi tuong: cong ty';
+const STOCK_ISSUE_NOTE_COMPANY_VI = 'đối tượng: công ty';
+const STOCK_ISSUE_NOTE_COMPANY_ASCII = 'doi tuong: cong ty';
+
 /**
  * Gộp 1 bản ghi thiết bị (EquipmentDto) + tối đa 1 phiếu gán đang hiệu lực (EquipmentAssignmentDto).
  * Người dùng / phòng ban / vị trí chỉ đến từ `assignment`, không có trong GET /api/equipment.
@@ -44,21 +52,36 @@ export function mapEquipmentDto(
   const deptId =
     assignment?.department?.id != null
       ? String(assignment.department.id)
+      : (assignment as { departmentId?: number | string })?.departmentId != null
+        ? String((assignment as { departmentId?: number | string }).departmentId)
       : assignment?.employee?.department?.id != null
         ? String(assignment.employee.department.id)
         : undefined;
   const locId =
     assignment?.location?.id != null
       ? String(assignment.location.id)
+      : (assignment as { locationId?: number | string })?.locationId != null
+        ? String((assignment as { locationId?: number | string }).locationId)
       : assignment?.employee?.location?.id != null
         ? String(assignment.employee.location.id)
         : undefined;
+  const locationAssignedDirectly =
+    assignment?.location?.id != null ||
+    (assignment as { locationId?: number | string })?.locationId != null;
   const deptName =
     assignment?.department?.name ??
     assignment?.employee?.department?.name ??
     undefined;
   const locName =
     assignment?.location?.name ?? assignment?.employee?.location?.name ?? undefined;
+  const assignNote = typeof assignment?.note === 'string' ? assignment.note : '';
+  const departmentPoolFromAllocation =
+    assignNote.includes(ASSIGNMENT_NOTE_DEPARTMENT_POOL);
+  const noteLower = assignNote.toLowerCase();
+  const locationPoolFromAllocation =
+    assignNote.includes(ASSIGNMENT_NOTE_LOCATION_POOL) ||
+    noteLower.includes(ASSIGNMENT_NOTE_COMPANY_VI) ||
+    noteLower.includes(ASSIGNMENT_NOTE_COMPANY_ASCII);
   return {
     id: String(e.id),
     equipmentCode: e.equipmentCode ?? '',
@@ -84,6 +107,9 @@ export function mapEquipmentDto(
       undefined,
     assignedDepartmentName: deptName,
     assignedLocationName: locName,
+    locationAssignedDirectly,
+    departmentPoolFromAllocation,
+    locationPoolFromAllocation,
     supplierId: String(e.supplier?.id ?? ''),
     stockInCode: '',
     notes: e.conditionNote ?? '',
@@ -128,7 +154,7 @@ function stripSupplierRefFromReceiptNote(note: string | undefined): string {
   if (!note) return '';
   return note
     .split('\n')
-    .filter(l => !l.startsWith('supplierRef:'))
+    .filter(l => !l.startsWith('supplierRef:') && !l.startsWith('returnRequestRef:'))
     .join('\n')
     .trim();
 }
@@ -223,15 +249,19 @@ export function buildStockOuts(issues: StockIssueDto[], lines: StockIssueLineDto
     }));
     let recipientType: StockOut['recipientType'] = 'EMPLOYEE';
     let recipientId = '';
+    const noteLower = String(iss.note ?? '').toLowerCase();
+    const isCompanyByNote =
+      noteLower.includes(STOCK_ISSUE_NOTE_COMPANY_VI) ||
+      noteLower.includes(STOCK_ISSUE_NOTE_COMPANY_ASCII);
     if (iss.assigneeType === 'DEPARTMENT') {
       recipientType = 'DEPARTMENT';
       recipientId = String(iss.department?.id ?? '');
     } else if (iss.assigneeType === 'LOCATION') {
-      recipientType = 'LOCATION';
+      recipientType = isCompanyByNote ? 'COMPANY' : 'LOCATION';
       recipientId = String(iss.location?.id ?? '');
     } else if (iss.assigneeType === 'COMPANY') {
       recipientType = 'COMPANY';
-      recipientId = '';
+      recipientId = String(iss.location?.id ?? '');
     } else {
       recipientId = String(iss.employee?.id ?? '');
     }
@@ -256,12 +286,7 @@ function allocationAssigneeSummary(req: AllocationRequestDto): { type: Allocatio
   switch (at) {
     case 'DEPARTMENT': {
       const d = req.beneficiaryDepartment;
-      const e = req.beneficiaryEmployee;
       const deptText = d ? `${d.code ?? d.id} — ${d.name ?? ''}` : '—';
-      if (e?.id != null) {
-        const en = `${(e.code ?? '').trim() || e.id} — ${(e.fullName ?? '').trim() || '—'}`;
-        return { type: 'DEPARTMENT', text: `${deptText} · NV nhận: ${en}` };
-      }
       return { type: 'DEPARTMENT', text: deptText };
     }
     case 'LOCATION': {
@@ -377,26 +402,71 @@ export function buildReturnRequests(
   lines: ReturnRequestLineDto[],
 ): ReturnRequest[] {
   return requests.map(req => {
-    const rlines = lines.filter(l => l.request?.id === req.id);
-    const mapped: ReturnRequestLine[] = rlines.map(l => ({
-      id: String(l.id),
-      itemId: String(l.assetItem?.id ?? ''),
-      lineType: String(l.lineType ?? 'DEVICE').toUpperCase() === 'CONSUMABLE' ? 'CONSUMABLE' : 'DEVICE',
-      equipmentId: l.equipment?.id != null ? String(l.equipment.id) : undefined,
-      quantity: l.quantity ?? 0,
-      selected: l.selected === true,
-      disposition: (l.disposition as ReturnRequestLine['disposition']) ?? 'TO_STOCK',
-      notes: l.note ?? '',
-    }));
+    const reqId = String(req.id ?? '');
+    const rlines = lines.filter(l => String(l.request?.id ?? '') === reqId);
+    const mapped: ReturnRequestLine[] = rlines.map(l => {
+      const lineType =
+        String(l.lineType ?? 'DEVICE').toUpperCase() === 'CONSUMABLE' ? 'CONSUMABLE' : 'DEVICE';
+      const itemFromLine = l.assetItem?.id != null ? String(l.assetItem.id) : '';
+      const itemFromEquipment = l.equipment?.assetItem?.id != null ? String(l.equipment.assetItem.id) : '';
+      const itemId = itemFromLine || itemFromEquipment;
+      return {
+        id: String(l.id),
+        itemId,
+        lineType,
+        equipmentId: l.equipment?.id != null ? String(l.equipment.id) : undefined,
+        quantity: l.quantity ?? 0,
+        selected: l.selected === true,
+        disposition: (l.disposition as ReturnRequestLine['disposition']) ?? 'TO_STOCK',
+        notes: l.note ?? '',
+      };
+    });
     return {
       id: String(req.id),
       code: req.code ?? '',
       requesterId: String(req.requester?.id ?? ''),
       departmentId: String(req.requester?.department?.id ?? ''),
-      reason: req.note ?? '',
+      reason: req.note ?? req.reason ?? '',
       status: normalizeReturnRequestStatus(req.status),
       lines: mapped,
       createdAt: req.requestDate ? req.requestDate.slice(0, 10) : '',
     };
   });
+}
+
+/**
+ * Sau POST phiếu + dòng: refetch đôi khi thiếu dòng (đọc list chưa kịp thấy FK) → cột Loại/Tên trống.
+ * Gộp bản build từ body API tạo phiếu để vá cache khi thiếu dòng.
+ */
+export function mergeReturnRequestViewAfterCreate(
+  previous: ReturnRequest[] | undefined,
+  header: ReturnRequestDto,
+  lineBodies: ReturnRequestLineDto[],
+): ReturnRequest[] {
+  const [fresh] = buildReturnRequests([header], lineBodies);
+  const list = previous ?? [];
+  const idx = list.findIndex(r => String(r.id) === String(header.id));
+  if (idx === -1) return [fresh, ...list];
+  const cur = list[idx];
+  if ((cur.lines?.length ?? 0) > 0) return list;
+  return list.map((r, i) => (i === idx ? fresh : r));
+}
+
+/** Snapshot cache React Query cho `return-requests-view`. */
+export type ReturnRequestsViewSnapshot = {
+  requests: ReturnRequest[];
+  lineDtos: ReturnRequestLineDto[];
+};
+
+export function mergeReturnRequestsFullViewAfterCreate(
+  previous: ReturnRequestsViewSnapshot | undefined,
+  header: ReturnRequestDto,
+  lineBodies: ReturnRequestLineDto[],
+): ReturnRequestsViewSnapshot {
+  const p = previous ?? { requests: [], lineDtos: [] };
+  const requests = mergeReturnRequestViewAfterCreate(p.requests, header, lineBodies);
+  const existingIds = new Set(p.lineDtos.map(l => String(l.id ?? '')));
+  const toAdd = lineBodies.filter(l => l.id != null && !existingIds.has(String(l.id)));
+  const lineDtos = [...toAdd, ...p.lineDtos];
+  return { requests, lineDtos };
 }

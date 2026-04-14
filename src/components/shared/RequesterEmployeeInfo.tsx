@@ -52,7 +52,7 @@ export function RequesterEmployeeInfo({
     >
       <div className="mb-3 flex items-center gap-2 text-sm font-semibold text-primary">
         <User className="h-4 w-4 shrink-0" aria-hidden />
-        Thông tin nhân viên yêu cầu
+        Thông tin người dùng yêu cầu
       </div>
       <dl className="grid gap-2 sm:grid-cols-2">
         {rows.map(row => (

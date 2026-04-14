@@ -38,7 +38,7 @@ const Dashboard = () => {
   const equipments = eqQ.data ?? [];
   const allocationRequests = allocQ.data ?? [];
   const repairRequests = repairQ.data ?? [];
-  const returnRequests = retQ.data ?? [];
+  const returnRequests = retQ.data?.requests ?? [];
   const consumableStocks = csQ.data ?? [];
   const assetItemsRaw = itemsQ.data ?? [];
   const employees = empQ.data ?? [];

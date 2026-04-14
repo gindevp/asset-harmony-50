@@ -1,4 +1,5 @@
 import { useState, useMemo, useEffect } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { useQueryClient } from '@tanstack/react-query';
 import { DataTable, Column } from '@/components/shared/DataTable';
 import { FilterBar, FilterField } from '@/components/shared/FilterBar';
@@ -8,23 +9,17 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
-import { StatusBadge } from '@/components/shared/StatusBadge';
 import { Eye, FileDown } from 'lucide-react';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { toast } from 'sonner';
 import { ApiError, apiPatch } from '@/api/http';
-import { mapEquipmentDto } from '@/api/viewModels';
-import type { EmployeeDto, EquipmentAssignmentDto } from '@/api/types';
 import {
   equipmentStatusLabels,
-  getEmployeeName,
-  getDepartmentName,
-  getLocationName,
   getItemName,
   formatCurrency,
   calculateDepreciation,
 } from '@/data/mockData';
-import type { AssetItem, ConsumableStock, Equipment } from '@/data/mockData';
+import type { ConsumableStock, Equipment } from '@/data/mockData';
 import {
   mapAssetItemDto,
   useAssetItems,
@@ -36,151 +31,18 @@ import {
   useLocations,
 } from '@/hooks/useEntityApi';
 import { formatEquipmentCodeDisplay } from '@/utils/formatCodes';
-import { pickAssignmentForEquipment } from '@/utils/equipmentJoin';
-
-/** Khớp mục 9 tài liệu — tra cứu tài sản (thiết bị) */
-interface DeviceListFilters {
-  search: string;
-  equipmentCode: string;
-  serial: string;
-  employeeId: string;
-  departmentId: string;
-  locationId: string;
-  status: string;
-}
-
-function equipmentDisplayName(eq: Equipment, assetItems: AssetItem[]): string {
-  const fromCat = getItemName(eq.itemId, assetItems);
-  if (fromCat && fromCat !== eq.itemId) return fromCat;
-  const fb = [eq.brandName, eq.modelName].filter(Boolean).join(' ').trim();
-  return fb || '—';
-}
-
-/** Phòng ban trên phiếu gán, hoặc phòng ban mặc định của nhân viên (xuất kho theo người). */
-function effectiveDepartmentId(eq: Equipment, employees: EmployeeDto[]): string | undefined {
-  if (eq.assignedDepartment) return eq.assignedDepartment;
-  if (!eq.assignedTo) return undefined;
-  const emp = employees.find(x => String(x.id) === eq.assignedTo);
-  return emp?.department?.id != null ? String(emp.department.id) : undefined;
-}
-
-/** Vị trí trên phiếu gán, hoặc vị trí nhân viên (HR). */
-function effectiveLocationId(eq: Equipment, employees: EmployeeDto[]): string | undefined {
-  if (eq.assignedLocation) return eq.assignedLocation;
-  if (!eq.assignedTo) return undefined;
-  const emp = employees.find(x => String(x.id) === eq.assignedTo);
-  return emp?.location?.id != null ? String(emp.location.id) : undefined;
-}
-
-/** Ưu tiên tên từ payload phiếu gán (đã map vào Equipment), không phụ thuộc GET /employees. */
-function displayEmployeeName(eq: Equipment, employees: EmployeeDto[]): string {
-  const n = eq.assignedToName?.trim();
-  if (n) return n;
-  if (eq.assignedTo) return getEmployeeName(eq.assignedTo, employees);
-  return '—';
-}
-
-function displayDepartmentName(
-  eq: Equipment,
-  employees: EmployeeDto[],
-  departments: { id?: number; name?: string }[],
-): string {
-  const n = eq.assignedDepartmentName?.trim();
-  if (n) return n;
-  const depId = effectiveDepartmentId(eq, employees);
-  return depId ? getDepartmentName(depId, departments) : '—';
-}
-
-function displayLocationName(
-  eq: Equipment,
-  employees: EmployeeDto[],
-  locations: { id?: number; name?: string }[],
-): string {
-  const n = eq.assignedLocationName?.trim();
-  if (n) return n;
-  const locId = effectiveLocationId(eq, employees);
-  return locId ? getLocationName(locId, locations) : '—';
-}
-
-/** Một dòng bảng thiết bị: model UI + phiếu gán raw từ API (hiển thị/lọc ưu tiên từ assignment). */
-type DeviceTableRow = {
-  /** Cho key bảng (DataTable dùng row.id) */
-  id: string;
-  equipment: Equipment;
-  assignment?: EquipmentAssignmentDto;
-};
-
-function matchesTraCuuDeviceRow(
-  row: DeviceTableRow,
-  f: DeviceListFilters,
-  assetItems: AssetItem[],
-  employees: EmployeeDto[],
-): boolean {
-  const eq = row.equipment;
-  const a = row.assignment;
-  const item = eq.itemId ? assetItems.find(i => i.id === eq.itemId) : undefined;
-  if (item != null && item.managementType !== 'DEVICE') return false;
-  if (f.search) {
-    const s = f.search.toLowerCase();
-    const name = (item?.name ?? '').toLowerCase();
-    const code = (item?.code ?? '').toLowerCase();
-    const model = (eq.modelName || '').toLowerCase();
-    const brand = (eq.brandName || '').toLowerCase();
-    const eqCode = (eq.equipmentCode || '').toLowerCase();
-    if (!name.includes(s) && !code.includes(s) && !model.includes(s) && !brand.includes(s) && !eqCode.includes(s)) {
-      return false;
-    }
-  }
-  if (f.equipmentCode) {
-    const c = f.equipmentCode.toLowerCase().replace(/\s/g, '');
-    const code = (eq.equipmentCode || '').toLowerCase().replace(/\s/g, '');
-    if (!code.includes(c)) return false;
-  }
-  if (f.serial) {
-    const c = f.serial.toLowerCase();
-    if (!(eq.serial || '').toLowerCase().includes(c)) return false;
-  }
-  if (f.status && eq.status !== f.status) return false;
-  if (f.employeeId) {
-    const fromAssign = a?.employee?.id != null ? String(a.employee.id) : '';
-    if (fromAssign !== f.employeeId && eq.assignedTo !== f.employeeId) return false;
-  }
-  if (f.departmentId) {
-    const dA = a?.department?.id != null ? String(a.department.id) : '';
-    const dEmp = a?.employee?.department?.id != null ? String(a.employee.department.id) : '';
-    const dEq = effectiveDepartmentId(eq, employees) ?? '';
-    if (f.departmentId !== dA && f.departmentId !== dEmp && f.departmentId !== dEq) return false;
-  }
-  if (f.locationId) {
-    const lA = a?.location?.id != null ? String(a.location.id) : '';
-    const lEmp = a?.employee?.location?.id != null ? String(a.employee.location.id) : '';
-    const lEq = effectiveLocationId(eq, employees) ?? '';
-    if (f.locationId !== lA && f.locationId !== lEmp && f.locationId !== lEq) return false;
-  }
-  return true;
-}
-
-/** Ưu tiên JSON equipment-assignments, fallback model đã map. */
-function uiEmployeeName(row: DeviceTableRow, employees: EmployeeDto[]): string {
-  const emp = row.assignment?.employee;
-  const name = emp?.fullName?.trim();
-  if (name) return name;
-  const code = emp?.code?.trim();
-  if (code) return code;
-  return displayEmployeeName(row.equipment, employees);
-}
-
-function uiDepartmentName(row: DeviceTableRow, employees: EmployeeDto[], departments: { id?: number; name?: string }[]): string {
-  const n = row.assignment?.department?.name ?? row.assignment?.employee?.department?.name;
-  if (n?.trim()) return n.trim();
-  return displayDepartmentName(row.equipment, employees, departments);
-}
-
-function uiLocationName(row: DeviceTableRow, employees: EmployeeDto[], locations: { id?: number; name?: string }[]): string {
-  const n = row.assignment?.location?.name ?? row.assignment?.employee?.location?.name;
-  if (n?.trim()) return n.trim();
-  return displayLocationName(row.equipment, employees, locations);
-}
+import {
+  buildDeviceTableRows,
+  equipmentDisplayName,
+  formatDeviceGroupStatusSummary,
+  matchesTraCuuDeviceRow,
+  uiDepartmentName,
+  uiEmployeeName,
+  uiLocationName,
+  type DeviceCatalogGroupRow,
+  type DeviceListFilters,
+  type DeviceTableRow,
+} from '@/pages/admin/assetListDeviceShared';
 
 const emptyDeviceFilters: DeviceListFilters = {
   search: '',
@@ -193,6 +55,7 @@ const emptyDeviceFilters: DeviceListFilters = {
 };
 
 const AssetList = () => {
+  const navigate = useNavigate();
   const qc = useQueryClient();
   const iQ = useAssetItems();
   const csQ = useConsumableStocksView();
@@ -204,15 +67,10 @@ const AssetList = () => {
 
   const assetItems = useMemo(() => (iQ.data ?? []).map(mapAssetItemDto), [iQ.data]);
   const consumableStocks = csQ.data ?? [];
-  const deviceRows = useMemo((): DeviceTableRow[] => {
-    const dtos = eqQ.data ?? [];
-    const assigns = assignQ.data ?? [];
-    return dtos.map(dto => {
-      const assignment = pickAssignmentForEquipment(dto, assigns);
-      const equipment = mapEquipmentDto(dto, assignment);
-      return { id: equipment.id, assignment, equipment };
-    });
-  }, [eqQ.data, assignQ.data]);
+  const deviceRows = useMemo(
+    () => buildDeviceTableRows(eqQ.data, assignQ.data),
+    [eqQ.data, assignQ.data],
+  );
   const employees = empQ.data ?? [];
   const departments = depQ.data ?? [];
   const locations = locQ.data ?? [];
@@ -240,6 +98,30 @@ const AssetList = () => {
       (a.equipment.equipmentCode || '').localeCompare(b.equipment.equipmentCode || '', undefined, { numeric: true }),
     );
   }, [deviceRows, deviceFilters, assetItems, employees]);
+
+  const groupedDeviceRows = useMemo((): DeviceCatalogGroupRow[] => {
+    const map = new Map<string, DeviceTableRow[]>();
+    for (const row of filteredDeviceRows) {
+      const key = row.equipment.itemId;
+      if (!map.has(key)) map.set(key, []);
+      map.get(key)!.push(row);
+    }
+    const groups: DeviceCatalogGroupRow[] = [];
+    for (const [itemId, rows] of map) {
+      const item = assetItems.find(i => i.id === itemId);
+      const first = rows[0];
+      groups.push({
+        id: itemId,
+        itemId,
+        itemCode: item?.code ?? '—',
+        itemName: item?.name ?? equipmentDisplayName(first.equipment, assetItems),
+        totalCount: rows.length,
+        statusSummary: formatDeviceGroupStatusSummary(rows),
+      });
+    }
+    groups.sort((a, b) => a.itemCode.localeCompare(b.itemCode, 'vi', { numeric: true }));
+    return groups;
+  }, [filteredDeviceRows, assetItems]);
 
   const filteredConsumables = useMemo(() => {
     if (!consumableSearch.trim()) return consumableStocks;
@@ -275,66 +157,40 @@ const AssetList = () => {
     }
   };
 
-  const deviceColumns: Column<DeviceTableRow>[] = [
+  const deviceGroupColumns: Column<DeviceCatalogGroupRow>[] = [
     {
-      key: 'equipmentCode',
-      label: 'Mã TB',
-      render: r => (
-        <span className="font-mono text-sm font-medium">{formatEquipmentCodeDisplay(r.equipment.equipmentCode)}</span>
-      ),
+      key: 'itemCode',
+      label: 'Mã danh mục',
+      render: r => <span className="font-mono text-sm font-medium">{r.itemCode}</span>,
     },
     {
-      key: 'name',
-      label: 'Tên thiết bị',
-      render: r => <span className="font-medium">{equipmentDisplayName(r.equipment, assetItems)}</span>,
+      key: 'itemName',
+      label: 'Tên mặt hàng',
+      render: r => <span className="font-medium">{r.itemName}</span>,
     },
     {
-      key: 'serial',
-      label: 'Serial',
-      render: r => <span className="font-mono text-sm text-muted-foreground">{r.equipment.serial || '—'}</span>,
-    },
-    {
-      key: 'status',
-      label: 'Trạng thái',
-      render: r => (
-        <StatusBadge status={r.equipment.status} label={equipmentStatusLabels[r.equipment.status] ?? r.equipment.status} />
-      ),
-    },
-    {
-      key: 'user',
-      label: 'Người sử dụng',
-      render: r => uiEmployeeName(r, employees),
-    },
-    {
-      key: 'dept',
-      label: 'Phòng ban',
-      render: r => uiDepartmentName(r, employees, departments),
-    },
-    {
-      key: 'originalCost',
-      label: 'Nguyên giá',
+      key: 'totalCount',
+      label: 'Tổng thiết bị',
       className: 'text-right',
-      render: r => formatCurrency(r.equipment.originalCost),
+      render: r => <span className="font-medium tabular-nums">{r.totalCount}</span>,
     },
     {
-      key: 'remain',
-      label: 'GT còn lại',
-      className: 'text-right',
-      render: r => {
-        const dep = calculateDepreciation(
-          r.equipment.originalCost,
-          r.equipment.salvageValue,
-          r.equipment.depreciationMonths,
-          r.equipment.capitalizedDate,
-        );
-        return <span className="font-medium text-primary">{formatCurrency(dep.currentValue)}</span>;
-      },
+      key: 'statusSummary',
+      label: 'Theo trạng thái',
+      render: r => <span className="text-sm text-muted-foreground leading-snug">{r.statusSummary}</span>,
     },
     {
       key: 'actions',
       label: '',
       render: r => (
-        <Button variant="ghost" size="sm" onClick={e => { e.stopPropagation(); setSelectedRow(r); }}>
+        <Button
+          variant="ghost"
+          size="sm"
+          onClick={e => {
+            e.stopPropagation();
+            navigate(`/admin/assets/catalog/${encodeURIComponent(r.itemId)}`);
+          }}
+        >
           <Eye className="h-4 w-4" />
         </Button>
       ),
@@ -457,13 +313,15 @@ const AssetList = () => {
         deviceRows.length === 0 &&
         filteredDeviceRows.length === 0 && (
         <p className="text-sm text-muted-foreground">
-          Chưa có thiết bị nào. Tạo thiết bị khi <strong className="font-medium text-foreground">xác nhận phiếu nhập kho</strong> (Nhập kho → thiết bị có serial &amp; mã EQxxxxxx).
+          Chưa có thiết bị nào. Tạo thiết bị khi <strong className="font-medium text-foreground">phiếu nhập chuyển sang Đã nhập kho</strong> (Nhập kho → thiết bị có serial &amp; mã EQxxxxxx).
         </p>
       )}
 
       <Tabs value={tab} onValueChange={v => { setTab(v); }}>
         <TabsList>
-          <TabsTrigger value="devices">Thiết bị ({filteredDeviceRows.length})</TabsTrigger>
+          <TabsTrigger value="devices">
+            Thiết bị ({groupedDeviceRows.length}{filteredDeviceRows.length !== groupedDeviceRows.length ? ` · ${filteredDeviceRows.length} TB` : ''})
+          </TabsTrigger>
           <TabsTrigger value="consumables">Vật tư ({filteredConsumables.length})</TabsTrigger>
         </TabsList>
         <TabsContent value="devices" className="space-y-4 mt-4">
@@ -560,7 +418,18 @@ const AssetList = () => {
               </Button>
             </CardContent>
           </Card>
-          <DataTable columns={deviceColumns} data={filteredDeviceRows} currentPage={page} onPageChange={setPage} />
+          {filteredDeviceRows.length > 0 && (
+            <p className="text-xs text-muted-foreground">
+              {groupedDeviceRows.length} mặt hàng danh mục · {filteredDeviceRows.length} thiết bị (sau lọc). Nhấn một dòng để mở trang chi tiết mặt hàng (từng chiếc theo trạng thái).
+            </p>
+          )}
+          <DataTable
+            columns={deviceGroupColumns}
+            data={groupedDeviceRows}
+            currentPage={page}
+            onPageChange={setPage}
+            onRowClick={g => navigate(`/admin/assets/catalog/${encodeURIComponent(g.itemId)}`)}
+          />
         </TabsContent>
         <TabsContent value="consumables" className="space-y-4 mt-4">
           <FilterBar

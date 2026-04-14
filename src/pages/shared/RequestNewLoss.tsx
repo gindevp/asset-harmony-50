@@ -1,6 +1,17 @@
-import { Link, useLocation, useNavigate } from 'react-router-dom';
+import { useState } from 'react';
+import { useLocation, useNavigate } from 'react-router-dom';
 import { ArrowLeft } from 'lucide-react';
 import { Button } from '@/components/ui/button';
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from '@/components/ui/alert-dialog';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { LossReportCreateForm } from '@/components/shared/LossReportCreateForm';
 import { requestsListPath } from './requestNewPaths';
@@ -31,16 +42,21 @@ export default function RequestNewLoss() {
   const defaultList = requestsListPath('loss', isAdminArea);
   const st = (location.state ?? null) as RequestNewLossLocationState | null;
   const backTo = safeBackTo(st?.backTo, isAdminArea, defaultList);
+  const [cancelConfirmOpen, setCancelConfirmOpen] = useState(false);
 
   return (
     <div className="page-container max-w-none w-full pb-8">
       <header className="flex flex-col gap-4 border-b border-border pb-6">
         <div className="space-y-2 min-w-0">
-          <Button variant="ghost" size="sm" className="-ml-2 w-fit" asChild>
-            <Link to={backTo}>
-              <ArrowLeft className="h-4 w-4 mr-1" />
-              Quay lại danh sách
-            </Link>
+          <Button
+            variant="ghost"
+            size="sm"
+            className="-ml-2 w-fit"
+            type="button"
+            onClick={() => setCancelConfirmOpen(true)}
+          >
+            <ArrowLeft className="h-4 w-4 mr-1" />
+            Quay lại danh sách
           </Button>
           <h1 className="page-title">Tạo yêu cầu báo mất</h1>
         </div>
@@ -53,6 +69,7 @@ export default function RequestNewLoss() {
         <CardContent className="space-y-4">
           <LossReportCreateForm
             backTo={backTo}
+            onCancelClick={() => setCancelConfirmOpen(true)}
             onSuccess={() => navigate(backTo)}
             initialKind={st?.initialKind}
             initialEquipmentId={st?.initialEquipmentId}
@@ -60,6 +77,20 @@ export default function RequestNewLoss() {
           />
         </CardContent>
       </Card>
+      <AlertDialog open={cancelConfirmOpen} onOpenChange={setCancelConfirmOpen}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Hủy yêu cầu báo mất?</AlertDialogTitle>
+            <AlertDialogDescription>
+              Dữ liệu đang nhập chưa được lưu. Bạn có chắc muốn quay lại danh sách?
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Ở lại</AlertDialogCancel>
+            <AlertDialogAction onClick={() => navigate(backTo)}>Thoát</AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 }

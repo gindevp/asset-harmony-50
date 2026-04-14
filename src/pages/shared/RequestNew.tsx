@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
-import { Link, useLocation, useNavigate } from 'react-router-dom';
+import { useLocation, useNavigate, useSearchParams } from 'react-router-dom';
 import { useQueryClient } from '@tanstack/react-query';
 import { ArrowLeft, PlusCircle, Trash2 } from 'lucide-react';
 import { toast } from 'sonner';
@@ -10,9 +10,19 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Textarea } from '@/components/ui/textarea';
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from '@/components/ui/alert-dialog';
 
 import { resolveEmployeeIdForRequests } from '@/api/account';
-import { apiPost, apiPostMultipart, getStoredToken } from '@/api/http';
+import { apiDelete, apiGet, apiPatch, apiPost, apiPostMultipart, getStoredToken, PAGE_ALL } from '@/api/http';
 import { hasAnyAuthority } from '@/auth/jwt';
 import { makeBizCode } from '@/api/businessCode';
 import { RequiredMark } from '@/components/shared/RequiredMark';
@@ -78,9 +88,12 @@ function requireEmployeeId(): number | null {
 export default function RequestNew() {
   const navigate = useNavigate();
   const location = useLocation();
+  const [searchParams] = useSearchParams();
   const qc = useQueryClient();
   const isAdminArea = location.pathname.startsWith('/admin');
   const backTo = requestsListPath('allocation', isAdminArea);
+  const editId = searchParams.get('editId')?.trim() || '';
+  const isEditMode = editId.length > 0;
 
   const iQ = useAssetItems();
   const depQ = useDepartments();
@@ -154,6 +167,7 @@ export default function RequestNew() {
 
   const token = getStoredToken();
   const isAdminOrAssetMgr = hasAnyAuthority(token, ['ROLE_ADMIN', 'ROLE_ASSET_MANAGER']);
+  const canFullEditRequest = hasAnyAuthority(token, ['ROLE_ADMIN', 'ROLE_ASSET_MANAGER', 'ROLE_GD']);
   const isDeptCoordinator = hasAnyAuthority(token, ['ROLE_DEPARTMENT_COORDINATOR']);
   /** Điều phối PB: được chọn đối tượng nhưng chỉ trong phạm vi phòng ban mình (không có quyền QLTS/Admin). */
   const restrictAssigneeToDeptScope = isDeptCoordinator && !isAdminOrAssetMgr;
@@ -181,6 +195,8 @@ export default function RequestNew() {
   const [deviceLines, setDeviceLines] = useState<AllocDeviceLine[]>([]);
   const [allocFile, setAllocFile] = useState<File | null>(null);
   const [allocBusy, setAllocBusy] = useState(false);
+  const [cancelConfirmOpen, setCancelConfirmOpen] = useState(false);
+  const [editBootstrapLoading, setEditBootstrapLoading] = useState(false);
 
   /** Danh sách chọn «Nhân viên nhận»: không bao gồm chính người tạo YC; điều phối PB thì thêm lọc cùng phòng ban. */
   const employeesForAssigneeSelect = useMemo(() => {
@@ -190,11 +206,11 @@ export default function RequestNew() {
     if (restrictAssigneeToDeptScope && myDepartmentIdStr) {
       list = list.filter(e => String(e.department?.id ?? '') === myDepartmentIdStr);
     }
-    if (myEmpIdStr) {
+    if (myEmpIdStr && !isEditMode) {
       list = list.filter(e => String(e.id ?? '') !== myEmpIdStr);
     }
     return list;
-  }, [allEmpQ.data, restrictAssigneeToDeptScope, myDepartmentIdStr, assigneeType, myEmpIdStr]);
+  }, [allEmpQ.data, restrictAssigneeToDeptScope, myDepartmentIdStr, assigneeType, myEmpIdStr, isEditMode]);
 
   useEffect(() => {
     if (!restrictAssigneeToDeptScope) return;
@@ -218,7 +234,64 @@ export default function RequestNew() {
     }
   }, [canSetExtendedAssignee, assigneeType, employeesForAssigneeSelect, beneficiaryEmployeeId]);
 
+  useEffect(() => {
+    if (!isEditMode) return;
+    let cancelled = false;
+    (async () => {
+      setEditBootstrapLoading(true);
+      try {
+        const [req, lines] = await Promise.all([
+          apiGet<any>(`/api/allocation-requests/${editId}`),
+          apiGet<any[]>(`/api/allocation-request-lines?${PAGE_ALL}`),
+        ]);
+        if (cancelled) return;
+        setAllocReason(req?.reason ?? '');
+        setAssigneeType((req?.assigneeType ?? 'EMPLOYEE') as 'EMPLOYEE' | 'DEPARTMENT' | 'LOCATION' | 'COMPANY');
+        setBeneficiaryEmployeeId(
+          req?.beneficiaryEmployee?.id != null
+            ? String(req.beneficiaryEmployee.id)
+            : req?.assigneeType === 'EMPLOYEE'
+              ? (myEmpIdStr ?? '')
+              : '',
+        );
+        setBeneficiaryDepartmentId(req?.beneficiaryDepartment?.id != null ? String(req.beneficiaryDepartment.id) : '');
+        setBeneficiaryLocationId(req?.beneficiaryLocation?.id != null ? String(req.beneficiaryLocation.id) : '');
+        const mine = (lines ?? [])
+          .filter(l => String(l.request?.id ?? '') === String(editId))
+          .sort((a, b) => Number(a.lineNo ?? 0) - Number(b.lineNo ?? 0));
+        setConsumableLines(
+          mine
+            .filter(l => String(l.lineType ?? '').toUpperCase() === 'CONSUMABLE')
+            .map(l => ({
+              localId: `E-${l.id}-${Math.random().toString(36).slice(2, 7)}`,
+              lineType: 'CONSUMABLE' as const,
+              assetLineId: l.assetLine?.id != null ? String(l.assetLine.id) : '',
+              quantity: Number(l.quantity ?? 1),
+            })),
+        );
+        setDeviceLines(
+          mine
+            .filter(l => String(l.lineType ?? '').toUpperCase() !== 'CONSUMABLE')
+            .map(l => ({
+              localId: `E-${l.id}-${Math.random().toString(36).slice(2, 7)}`,
+              lineType: 'DEVICE' as const,
+              assetLineId: l.assetLine?.id != null ? String(l.assetLine.id) : '',
+              quantity: Number(l.quantity ?? 1),
+            })),
+        );
+      } catch (e) {
+        if (!cancelled) toast.error(e instanceof Error ? e.message : 'Không tải được dữ liệu yêu cầu để sửa');
+      } finally {
+        if (!cancelled) setEditBootstrapLoading(false);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [isEditMode, editId, myEmpIdStr]);
+
   const submitAllocation = async () => {
+    const isLimitedEdit = isEditMode && !canFullEditRequest;
     if (!allocReason.trim()) return toast.error('Nhập lý do');
     if (consumableLines.length === 0 && deviceLines.length === 0) {
       return toast.error('Thêm ít nhất một dòng vật tư hoặc thiết bị');
@@ -235,36 +308,42 @@ export default function RequestNew() {
         return toast.error('Nhập số lượng thiết bị (số nguyên ≥ 1) cho mọi dòng thiết bị');
       }
     }
-    const reqEid = requireEmployeeId();
-    if (reqEid == null) return;
-    if (assigneeType === 'EMPLOYEE') {
-      if (canSetExtendedAssignee) {
+    const reqEid = isEditMode ? Number.NaN : requireEmployeeId();
+    if (!isEditMode && reqEid == null) return;
+    if (!isLimitedEdit && assigneeType === 'EMPLOYEE') {
+      if (!isEditMode && canSetExtendedAssignee) {
         if (employeesForAssigneeSelect.length === 0) {
           return toast.error('Không có nhân viên nhận hợp lệ (đã loại trừ tài khoản của bạn).');
         }
         if (!beneficiaryEmployeeId) return toast.error('Chọn nhân viên nhận');
       }
-      const be = canSetExtendedAssignee && beneficiaryEmployeeId ? Number(beneficiaryEmployeeId) : reqEid;
-      if (!Number.isFinite(be)) return toast.error('Chọn nhân viên nhận');
-      if (canSetExtendedAssignee && be === reqEid) {
+      const be = canSetExtendedAssignee
+        ? Number(beneficiaryEmployeeId || (isEditMode ? myEmpIdStr ?? '' : ''))
+        : reqEid;
+      if (!isEditMode && !Number.isFinite(be)) return toast.error('Chọn nhân viên nhận');
+      if (!isEditMode && canSetExtendedAssignee && be === reqEid) {
         return toast.error('Nhân viên nhận không được là chính bạn — chọn đồng nghiệp hoặc đối tượng Phòng ban.');
       }
       if (restrictAssigneeToDeptScope) {
+        if (isEditMode && !Number.isFinite(be)) {
+          // Keep legacy assignee on edit when beneficiaryEmployee is absent.
+        } else {
         if (!myDepartmentIdStr) return toast.error('Tài khoản chưa gán phòng ban.');
         const emp = (allEmpQ.data ?? []).find(x => Number(x.id) === be);
         if (!emp || String(emp.department?.id ?? '') !== myDepartmentIdStr) {
           return toast.error('Chỉ được chọn nhân viên cùng phòng ban.');
         }
+        }
       }
     }
-    if (assigneeType === 'DEPARTMENT') {
+    if (!isLimitedEdit && assigneeType === 'DEPARTMENT') {
       if (restrictAssigneeToDeptScope) {
         if (!myDepartmentIdStr) return toast.error('Tài khoản chưa gán phòng ban.');
       } else if (!beneficiaryDepartmentId) {
         return toast.error('Chọn phòng ban nhận');
       }
     }
-    if (assigneeType === 'LOCATION' && !beneficiaryLocationId) return toast.error('Chọn vị trí / khu vực nhận');
+    if (!isLimitedEdit && assigneeType === 'LOCATION' && !beneficiaryLocationId) return toast.error('Chọn vị trí / khu vực nhận');
 
     setAllocBusy(true);
     try {
@@ -276,36 +355,62 @@ export default function RequestNew() {
         fileUrl = up?.url;
         if (!fileUrl) throw new Error('Upload không trả URL');
       }
-      const body: Record<string, unknown> = {
-        code: makeBizCode('AR'),
-        requestDate: new Date().toISOString(),
-        reason: allocReason.trim(),
-        status: 'PENDING',
-        assigneeType,
-        requester: { id: reqEid },
-        attachmentNote: fileUrl ? `FILE:${fileUrl}` : undefined,
-      };
-      if (assigneeType === 'EMPLOYEE') {
-        const be = canSetExtendedAssignee && beneficiaryEmployeeId ? Number(beneficiaryEmployeeId) : reqEid;
-        body.beneficiaryEmployee = { id: be };
-      } else if (assigneeType === 'DEPARTMENT') {
+      const body: Record<string, unknown> = isLimitedEdit
+        ? {
+            reason: allocReason.trim(),
+            attachmentNote: fileUrl ? `FILE:${fileUrl}` : undefined,
+          }
+        : {
+            reason: allocReason.trim(),
+            assigneeType,
+            attachmentNote: fileUrl ? `FILE:${fileUrl}` : undefined,
+          };
+      if (!isEditMode) {
+        body.code = makeBizCode('AR');
+        body.requestDate = new Date().toISOString();
+        body.status = 'PENDING';
+        body.requester = { id: reqEid };
+      }
+      if (!isLimitedEdit && assigneeType === 'EMPLOYEE') {
+        const be =
+          canSetExtendedAssignee || isEditMode
+            ? Number(beneficiaryEmployeeId || (isEditMode ? myEmpIdStr ?? '' : ''))
+            : reqEid;
+        if (!Number.isFinite(be)) {
+          if (!isEditMode) return toast.error('Chọn nhân viên nhận');
+        } else {
+          body.beneficiaryEmployee = { id: be };
+        }
+      } else if (!isLimitedEdit && assigneeType === 'DEPARTMENT') {
         const deptId = restrictAssigneeToDeptScope ? myDepartmentIdStr : beneficiaryDepartmentId;
         body.beneficiaryDepartment = { id: Number(deptId) };
-        if (restrictAssigneeToDeptScope) {
+        if (restrictAssigneeToDeptScope && Number.isFinite(reqEid)) {
           body.beneficiaryEmployee = { id: reqEid };
         }
-      } else if (assigneeType === 'LOCATION') {
+      } else if (!isLimitedEdit && assigneeType === 'LOCATION') {
         body.beneficiaryLocation = { id: Number(beneficiaryLocationId) };
       }
 
-      const created = await apiPost<{ id: number }>('/api/allocation-requests', body);
+      let requestId: number;
+      if (isEditMode) {
+        requestId = Number(editId);
+        await apiPatch(`/api/allocation-requests/${requestId}`, { id: requestId, ...body });
+        const oldLines = await apiGet<any[]>(`/api/allocation-request-lines?${PAGE_ALL}`);
+        const mine = oldLines.filter(l => String(l.request?.id ?? '') === String(requestId));
+        for (const l of mine) {
+          if (l.id != null) await apiDelete(`/api/allocation-request-lines/${l.id}`);
+        }
+      } else {
+        const created = await apiPost<{ id: number }>('/api/allocation-requests', body);
+        requestId = created.id;
+      }
       let lineNo = 1;
       for (const line of consumableLines) {
         const payload: Record<string, unknown> = {
           lineNo: lineNo++,
           lineType: 'CONSUMABLE',
           quantity: line.quantity,
-          request: { id: created.id },
+          request: { id: requestId },
           assetLine: { id: Number(line.assetLineId) },
         };
         await apiPost('/api/allocation-request-lines', payload);
@@ -315,12 +420,12 @@ export default function RequestNew() {
           lineNo: lineNo++,
           lineType: 'DEVICE',
           quantity: line.quantity,
-          request: { id: created.id },
+          request: { id: requestId },
           assetLine: { id: Number(line.assetLineId) },
         };
         await apiPost('/api/allocation-request-lines', payload);
       }
-      toast.success('Đã gửi yêu cầu cấp phát');
+      toast.success(isEditMode ? 'Đã cập nhật yêu cầu cấp phát' : 'Đã gửi yêu cầu cấp phát');
       await qc.invalidateQueries({ queryKey: ['api', 'allocation-requests-view'] });
       await qc.invalidateQueries({ queryKey: ['api', 'repair-requests-view'] });
       await qc.invalidateQueries({ queryKey: ['api', 'return-requests-view'] });
@@ -333,19 +438,23 @@ export default function RequestNew() {
   };
 
   const formBootstrapLoading =
-    iQ.isLoading || depQ.isLoading || locQ.isLoading || allEmpQ.isLoading || linesQ.isLoading;
+    iQ.isLoading || depQ.isLoading || locQ.isLoading || allEmpQ.isLoading || linesQ.isLoading || editBootstrapLoading;
 
   return (
     <div className="page-container max-w-none w-full pb-8">
       <header className="flex flex-col gap-4 border-b border-border pb-6 sm:flex-row sm:items-end sm:justify-between">
         <div className="space-y-2 min-w-0">
-          <Button variant="ghost" size="sm" className="-ml-2 w-fit" asChild>
-            <Link to={backTo}>
-              <ArrowLeft className="h-4 w-4 mr-1" />
-              Quay lại danh sách
-            </Link>
+          <Button
+            variant="ghost"
+            size="sm"
+            className="-ml-2 w-fit"
+            type="button"
+            onClick={() => setCancelConfirmOpen(true)}
+          >
+            <ArrowLeft className="h-4 w-4 mr-1" />
+            Quay lại danh sách
           </Button>
-          <h1 className="page-title">Tạo yêu cầu cấp phát</h1>
+          <h1 className="page-title">{isEditMode ? 'Sửa yêu cầu cấp phát' : 'Tạo yêu cầu cấp phát'}</h1>
         </div>
       </header>
 
@@ -718,13 +827,29 @@ export default function RequestNew() {
           </div>
 
           <div className="flex flex-wrap gap-2 justify-end pt-2">
-            <Button variant="outline" asChild disabled={allocBusy}>
-              <Link to={backTo}>Hủy</Link>
+            <Button variant="outline" onClick={() => setCancelConfirmOpen(true)} disabled={allocBusy}>
+              Hủy
             </Button>
             <Button onClick={() => void submitAllocation()} disabled={allocBusy}>
-              {allocBusy ? 'Đang gửi…' : 'Gửi'}
+              {allocBusy ? 'Đang lưu…' : isEditMode ? 'Lưu thay đổi' : 'Gửi'}
             </Button>
           </div>
+          <AlertDialog open={cancelConfirmOpen} onOpenChange={setCancelConfirmOpen}>
+            <AlertDialogContent>
+              <AlertDialogHeader>
+                <AlertDialogTitle>Hủy yêu cầu cấp phát?</AlertDialogTitle>
+                <AlertDialogDescription>
+                  Dữ liệu đang nhập chưa được lưu. Bạn có chắc muốn quay lại danh sách?
+                </AlertDialogDescription>
+              </AlertDialogHeader>
+              <AlertDialogFooter>
+                <AlertDialogCancel>Ở lại</AlertDialogCancel>
+                <AlertDialogAction onClick={() => navigate(backTo)}>
+                  Thoát
+                </AlertDialogAction>
+              </AlertDialogFooter>
+            </AlertDialogContent>
+          </AlertDialog>
           </>
           )}
         </CardContent>

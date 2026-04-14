@@ -53,6 +53,13 @@ const FE_SOURCE_LABELS: Record<keyof typeof FE_SOURCE_TO_API, string> = {
 };
 
 const EQ_CODE_RE = /^EQ\d{6}$/;
+const RETURN_REF_RE = /^returnRequestRef:(\d+)$/m;
+
+function extractReturnRequestRefId(note: string | undefined): string {
+  if (!note) return '';
+  const m = note.match(RETURN_REF_RE);
+  return m?.[1] ?? '';
+}
 
 const StockInPage = () => {
   const qc = useQueryClient();
@@ -146,7 +153,9 @@ const StockInPage = () => {
         receiptDate: editReceiptDate,
         source: apiSource,
         status: 'DRAFT',
-        note: buildReceiptNote(editUserNotes, editSupplierId),
+        note: buildReceiptNote(editUserNotes, editSupplierId, {
+          returnRequestRefId: extractReturnRequestRefId(editReceiptDraft.notes),
+        }),
       });
       toast.success('Đã cập nhật phiếu nhập');
       const rid = editReceiptDraft.id;
@@ -278,7 +287,7 @@ const StockInPage = () => {
         id: Number(selected.id),
         status: 'CONFIRMED',
       });
-      toast.success('Đã xác nhận phiếu — đã ghi nhận thiết bị / tồn vật tư');
+      toast.success('Đã nhập kho — đã ghi nhận thiết bị / tồn vật tư');
       setSelected(null);
       invalidateStock();
       void qc.invalidateQueries({ queryKey: ['api', 'equipment'] });
@@ -381,7 +390,7 @@ const StockInPage = () => {
                   </div>
                 </div>
                 <div><span className="text-muted-foreground">Ngày tạo:</span> {formatDate(selected.createdAt)}</div>
-                {selected.confirmedAt && <div><span className="text-muted-foreground">Ngày XN:</span> {formatDate(selected.confirmedAt)}</div>}
+                {selected.confirmedAt && <div><span className="text-muted-foreground">Ngày nhập kho:</span> {formatDate(selected.confirmedAt)}</div>}
               </div>
               <DataTable
                 columns={[
@@ -406,7 +415,7 @@ const StockInPage = () => {
               {selected.status === 'DRAFT' && (
                 <ApprovalActionBar
                   disabled={detailBusy || pdfBusy}
-                  approveLabel="Xác nhận"
+                  approveLabel="Xác nhận nhập kho"
                   onApprove={() => void handleConfirmReceipt()}
                   onCancel={() => void handleCancelReceipt()}
                   showReject={false} showCancel={true}

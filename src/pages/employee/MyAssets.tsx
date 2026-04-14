@@ -23,11 +23,9 @@ import {
   equipmentIdsOnOpenReturnForRequester,
   filterConsumableAssignmentsForMyAccount,
   filterEquipmentForMyAccount,
-  getConsumableAssignmentDisplayStatus,
   getEquipmentDisplayStatusForMyAssets,
 } from '@/utils/myEquipment';
 import {
-  getConsumableGroupDisplayStatusForMyAssets,
   groupConsumableAssignmentsByAssetItem,
   sortEquipmentForDisplay,
   totalHeldForConsumableGroup,
@@ -42,6 +40,10 @@ import { PageLoading } from '@/components/shared/page-loading';
 
 type MyConsumableGroupRow = GroupedConsumableRow & { id: string };
 
+function consumableGroupHasApprovedLoss(g: GroupedConsumableRow, approvedLossIds: Set<string>): boolean {
+  return g.assignments.some(a => approvedLossIds.has(String(a.id ?? '')));
+}
+
 const MyAssets = () => {
   const eqQ = useEnrichedEquipmentList();
   const caQ = useConsumableAssignments();
@@ -52,7 +54,8 @@ const MyAssets = () => {
   const empQ = useEmployees();
   const equipments = eqQ.data ?? [];
   const repairRequests = repairQ.data ?? [];
-  const returnRequests = returnQ.data ?? [];
+  const returnRequests = returnQ.data?.requests ?? [];
+  const returnLineDtos = returnQ.data?.lineDtos;
   const consumableAssignments = caQ.data ?? [];
   const assetItems = useMemo(() => (iQ.data ?? []).map(mapAssetItemDto), [iQ.data]);
   const listLoading =
@@ -104,8 +107,8 @@ const MyAssets = () => {
   const equipmentSorted = useMemo(() => sortEquipmentForDisplay(myEquipments), [myEquipments]);
 
   const consumablePendingByAssetItem = useMemo(
-    () => mapAssetItemIdToConsumablePending(empId, repairRequests, returnRequests, lossQ.data ?? []),
-    [empId, repairRequests, returnRequests, lossQ.data],
+    () => mapAssetItemIdToConsumablePending(empId, repairRequests, returnRequests, lossQ.data ?? [], returnLineDtos),
+    [empId, repairRequests, returnRequests, lossQ.data, returnLineDtos],
   );
 
   const consumableGroupRows = useMemo(
@@ -144,45 +147,24 @@ const MyAssets = () => {
   );
 
   const consumableInUseRowCount = useMemo(
-    () =>
-      consumableGroupRows.filter(
-        g =>
-          getConsumableGroupDisplayStatusForMyAssets(
-            g,
-            repairRequests,
-            consumablePendingByAssetItem,
-            approvedLossConsumableIds,
-          ).status === 'IN_USE',
-      ).length,
-    [consumableGroupRows, repairRequests, consumablePendingByAssetItem, approvedLossConsumableIds],
+    () => consumableGroupRows.filter(g => totalHeldForConsumableGroup(g.assignments) > 0).length,
+    [consumableGroupRows],
   );
 
   const consumableUnderRepairRowCount = useMemo(
     () =>
-      consumableGroupRows.filter(
-        g =>
-          getConsumableGroupDisplayStatusForMyAssets(
-            g,
-            repairRequests,
-            consumablePendingByAssetItem,
-            approvedLossConsumableIds,
-          ).status === 'UNDER_REPAIR',
-      ).length,
-    [consumableGroupRows, repairRequests, consumablePendingByAssetItem, approvedLossConsumableIds],
+      consumableGroupRows.filter(g => (consumablePendingByAssetItem.get(g.assetItemId)?.repairQty ?? 0) > 0).length,
+    [consumableGroupRows, consumablePendingByAssetItem],
   );
 
   const consumableLostRowCount = useMemo(
     () =>
       consumableGroupRows.filter(
         g =>
-          getConsumableGroupDisplayStatusForMyAssets(
-            g,
-            repairRequests,
-            consumablePendingByAssetItem,
-            approvedLossConsumableIds,
-          ).status === 'LOST',
+          totalHeldForConsumableGroup(g.assignments) <= 0 &&
+          consumableGroupHasApprovedLoss(g, approvedLossConsumableIds),
       ).length,
-    [consumableGroupRows, repairRequests, consumablePendingByAssetItem, approvedLossConsumableIds],
+    [consumableGroupRows, approvedLossConsumableIds],
   );
 
   /** Phiếu thu hồi mở (chờ duyệt / đã duyệt chưa hoàn tất) — thiết bị nằm trong phiếu của tôi. */
@@ -292,47 +274,51 @@ const MyAssets = () => {
         },
       },
       {
-        key: 'status',
-        label: 'Trạng thái',
+        key: 'inUseQty',
+        label: 'Đang sử dụng',
+        className: 'text-right font-medium tabular-nums',
         render: g => {
-          const { status, label } = getConsumableGroupDisplayStatusForMyAssets(
-            g,
-            repairRequests,
-            consumablePendingByAssetItem,
-            approvedLossConsumableIds,
-          );
-          return <StatusBadge status={status} label={label} />;
-        },
-      },
-      {
-        key: 'qtyHeld',
-        label: 'SL còn giữ',
-        className: 'text-right font-medium',
-        render: g => totalHeldForConsumableGroup(g.assignments).toLocaleString('vi-VN'),
-      },
-      {
-        key: 'repairPending',
-        label: 'Đang sửa chữa',
-        className: 'text-right tabular-nums',
-        render: g => {
-          const q = consumablePendingByAssetItem.get(g.assetItemId)?.repairQty ?? 0;
-          return <span className="font-medium">{(q > 0 ? q : 0).toLocaleString('vi-VN')}</span>;
-        },
-      },
-      {
-        key: 'lossPending',
-        label: 'Mất',
-        className: 'text-right tabular-nums',
-        render: g => {
-          const q = consumablePendingByAssetItem.get(g.assetItemId)?.lossQty ?? 0;
-          return <span className="font-medium">{(q > 0 ? q : 0).toLocaleString('vi-VN')}</span>;
+          const held = totalHeldForConsumableGroup(g.assignments);
+          return held.toLocaleString('vi-VN');
         },
       },
       {
         key: 'returned',
         label: 'Đã thu hồi',
-        className: 'text-right text-muted-foreground',
-        render: g => totalReturnedForConsumableGroup(g.assignments).toLocaleString('vi-VN'),
+        className: 'text-right text-muted-foreground tabular-nums',
+        render: g => {
+          const pend = consumablePendingByAssetItem.get(g.assetItemId)?.returnQty ?? 0;
+          const done = totalReturnedForConsumableGroup(g.assignments);
+          const total = done + pend;
+          return (
+            <span className="font-medium">
+              {total.toLocaleString('vi-VN')}
+              {pend > 0 ? <span className="text-xs text-muted-foreground"> ({pend.toLocaleString('vi-VN')} chờ)</span> : null}
+            </span>
+          );
+        },
+      },
+      {
+        key: 'lost',
+        label: 'Đã mất',
+        className: 'text-right text-muted-foreground tabular-nums',
+        render: g => {
+          const pend = consumablePendingByAssetItem.get(g.assetItemId)?.lossQty ?? 0;
+          let approved = 0;
+          for (const a of g.assignments) {
+            if (!approvedLossConsumableIds.has(String(a.id ?? ''))) continue;
+            const q = a.quantity ?? 0;
+            const r = a.returnedQuantity ?? 0;
+            approved += Math.max(0, q - r);
+          }
+          const total = pend + approved;
+          return (
+            <span className="font-medium">
+              {total.toLocaleString('vi-VN')}
+              {pend > 0 ? <span className="text-xs text-muted-foreground"> ({pend.toLocaleString('vi-VN')} chờ)</span> : null}
+            </span>
+          );
+        },
       },
       {
         key: 'assignedDate',
@@ -346,7 +332,7 @@ const MyAssets = () => {
         },
       },
     ],
-    [assetItems, repairRequests, consumablePendingByAssetItem, approvedLossConsumableIds],
+    [assetItems, consumablePendingByAssetItem, approvedLossConsumableIds],
   );
 
   return (
@@ -378,7 +364,7 @@ const MyAssets = () => {
                 <>
                   <span className="text-muted-foreground hidden sm:inline">·</span>
                   <span>
-                    <span className="text-muted-foreground">Tổng SL vật tư còn giữ:</span>{' '}
+                    <span className="text-muted-foreground">Tổng vật tư đang sử dụng:</span>{' '}
                     <span className="font-semibold tabular-nums text-emerald-800 dark:text-emerald-300">
                       {totalConsumableQtyHeld.toLocaleString('vi-VN')}
                     </span>
@@ -417,7 +403,7 @@ const MyAssets = () => {
                 {!listLoading && consumableGroupRows.length > 0 && (
                   <>
                     {' '}
-                    <span className="text-muted-foreground">· SL còn giữ</span>{' '}
+                    <span className="text-muted-foreground">· đang sử dụng</span>{' '}
                     <span className="font-semibold tabular-nums text-emerald-800 dark:text-emerald-300">
                       {totalConsumableQtyHeld.toLocaleString('vi-VN')}
                     </span>
@@ -572,7 +558,7 @@ const MyAssets = () => {
             {!listLoading && (
               <span className="font-normal text-muted-foreground">
                 {' '}
-                — {consumableGroupRows.length} mặt hàng (gộp theo mã) · tổng SL còn{' '}
+                — {consumableGroupRows.length} mặt hàng (gộp theo mã) · tổng đang sử dụng{' '}
                 <span className="tabular-nums">{totalConsumableQtyHeld.toLocaleString('vi-VN')}</span>
               </span>
             )}
@@ -590,7 +576,7 @@ const MyAssets = () => {
         {!listLoading && consumableGroupRows.length > 0 && (
           <p className="text-sm text-muted-foreground pt-1">
             Số mặt hàng vật tư (đã gộp theo mã): <span className="font-medium text-foreground tabular-nums">{consumableGroupRows.length}</span> — tổng số
-            lượng còn giữ:{' '}
+            lượng đang sử dụng:{' '}
             <span className="font-medium text-foreground tabular-nums">{totalConsumableQtyHeld.toLocaleString('vi-VN')}</span>
           </p>
         )}
