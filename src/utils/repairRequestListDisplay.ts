@@ -5,12 +5,14 @@ import { REQUEST_KIND_COMBINED_ADMIN, REQUEST_KIND_COMBINED_EMPLOYEE } from '@/u
 
 /** Cột «Loại» trên danh sách YC sửa chữa — cùng cách gọi như cấp phát / báo mất khi có cả TB + VT. */
 export function getRepairListKindLabel(r: RepairRequest, forEmployeePortal = false): string {
-  if (r.companySiteReport) {
-    return forEmployeePortal ? 'Theo vị trí (công ty)' : 'Theo vị trí — chờ gán TB';
-  }
   const hasDevice =
     (r.equipmentLineIds && r.equipmentLineIds.length > 0) || Boolean(String(r.equipmentId ?? '').trim());
   const hasConsumable = (r.consumableRepairLines?.length ?? 0) > 0;
+  const hasAnyAssignedAsset = hasDevice || hasConsumable;
+  if (r.companySiteReport) {
+    if (forEmployeePortal) return 'Theo vị trí (công ty)';
+    return hasAnyAssignedAsset ? 'Theo vị trí' : 'Theo vị trí — chờ gán tài sản';
+  }
   if (hasDevice && hasConsumable) return forEmployeePortal ? REQUEST_KIND_COMBINED_EMPLOYEE : REQUEST_KIND_COMBINED_ADMIN;
   if (hasConsumable) return 'Vật tư';
   if (hasDevice) return 'Thiết bị';

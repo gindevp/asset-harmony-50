@@ -674,13 +674,7 @@ export default function RequestNewRepair() {
                       Bạn đã chọn vị trí và gửi ảnh/mô tả. QLTS sẽ gán đúng serial thiết bị khi tiếp nhận — sau đó các dòng tài sản
                       sẽ hiển thị tại đây nếu cần chỉnh.
                     </>
-                  ) : (
-                    <>
-                      <span className="font-medium text-foreground">Của tôi:</span> tài sản đang bàn giao cho bạn/phòng ban.{' '}
-                      <span className="font-medium text-foreground">Công ty:</span> chỉ cần chọn vị trí và mô tả/ảnh — không chọn
-                      serial; QLTS đối chiếu hình ảnh và gán thiết bị trước khi tiếp nhận.
-                    </>
-                  )}
+                  ) : null}
                 </p>
               </div>
               {!isEditMode ? (
@@ -727,9 +721,6 @@ export default function RequestNewRepair() {
                         ))}
                       </SelectContent>
                     </Select>
-                    <p className="text-[11px] text-muted-foreground leading-relaxed">
-                      Không cần chọn serial tại bước này. Đính kèm ảnh hiện trường để QLTS xác định đúng thiết bị khi tiếp nhận.
-                    </p>
                   </div>
                 </div>
               ) : (

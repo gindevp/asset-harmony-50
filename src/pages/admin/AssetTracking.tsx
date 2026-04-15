@@ -34,6 +34,8 @@ type ConsumableHoldingRow = {
   assignedDate: string;
 };
 
+const ASSIGNMENT_NOTE_DEPARTMENT_POOL = 'scoped=DEPT';
+
 /**
  * Tài sản «của phòng ban»: gán cho phòng ban (pool / không cấp cá nhân),
  * không gồm thiết bị chỉ gán cho nhân viên trong khi PB chỉ lấy từ hồ sơ NV.
@@ -43,6 +45,26 @@ function isDepartmentScopedEquipment(e: Equipment): boolean {
   if (e.departmentPoolFromAllocation) return true;
   const noPersonalHolder = !e.assignedTo || String(e.assignedTo).trim() === '';
   return noPersonalHolder;
+}
+
+/**
+ * Vật tư «của phòng ban»: chấp nhận cả ca department pool có employee nhận hộ
+ * (BE ghi note scoped=DEPT), không chỉ ca employee = null.
+ */
+function consumableDepartmentScope(
+  a: ConsumableAssignmentDto,
+): { id: string; code: string; name: string } | null {
+  const note = typeof a.note === 'string' ? a.note : '';
+  const dept = a.department ?? a.employee?.department;
+  if (!dept?.id) return null;
+  const noPersonalHolder = a.employee?.id == null;
+  const departmentPool = note.includes(ASSIGNMENT_NOTE_DEPARTMENT_POOL);
+  if (!departmentPool && !noPersonalHolder) return null;
+  return {
+    id: String(dept.id),
+    code: dept.code ?? '',
+    name: dept.name ?? '',
+  };
 }
 
 const AssetTracking = () => {
@@ -146,10 +168,9 @@ const AssetTracking = () => {
         continue;
       }
       if (searchPayload.type === 'department') {
-        if (a.employee?.id != null) continue;
-        const dept = a.department;
-        if (!dept?.id) continue;
-        const idStr = String(dept.id);
+        const dept = consumableDepartmentScope(a);
+        if (!dept) continue;
+        const idStr = dept.id;
         if (matchingDepartmentIds.size > 0) {
           if (!matchingDepartmentIds.has(idStr)) continue;
         } else {
