@@ -14,6 +14,7 @@ import {
 } from '@/hooks/useEntityApi';
 import { apiGet, PAGE_ALL } from '@/api/http';
 import type { StockReceiptDto, StockReceiptLineDto } from '@/api/types';
+import { cn } from '@/lib/utils';
 
 /** Đơn giá BQGQ từ phiếu nhập đã nhập kho (dòng vật tư, không gắn thiết bị). */
 function buildConsumableAvgUnitPriceByItemId(
@@ -75,6 +76,15 @@ const stockStatusLabel: Record<InventoryRow['stockStatus'], string> = {
   OUT_OF_STOCK: 'Hết hàng',
 };
 
+const stockStatusPillClass: Record<InventoryRow['stockStatus'], string> = {
+  IN_STOCK:
+    'bg-emerald-100 text-emerald-900 ring-1 ring-emerald-200/80 dark:bg-emerald-950/45 dark:text-emerald-200 dark:ring-emerald-800/60',
+  LOW_STOCK:
+    'bg-amber-100 text-amber-900 ring-1 ring-amber-200/80 dark:bg-amber-950/45 dark:text-amber-200 dark:ring-amber-800/60',
+  OUT_OF_STOCK:
+    'bg-red-100 text-red-900 ring-1 ring-red-200/80 dark:bg-red-950/45 dark:text-red-200 dark:ring-red-800/60',
+};
+
 export default function Inventory() {
   const gQ = useAssetGroups();
   const lQ = useAssetLines();
@@ -129,14 +139,15 @@ export default function Inventory() {
 
   const inventoryData: InventoryRow[] = useMemo(() => {
     return assetItems.map(item => {
+      const line = assetLines.find(l => l.id === item.lineId);
+      const resolvedGroupId = item.groupId || line?.groupId || '';
+      const group = assetGroups.find(g => g.id === resolvedGroupId);
       if (item.managementType === 'DEVICE') {
         const eqs = equipments.filter(eq => eq.itemId === item.id);
         const inStock = eqs.filter(e => e.status === 'IN_STOCK').length;
         const inUse = eqs.filter(e => e.status === 'IN_USE' || e.status === 'PENDING_ISSUE').length;
         const broken = eqs.filter(e => e.status === 'BROKEN' || e.status === 'UNDER_REPAIR').length;
         const total = eqs.length;
-        const line = assetLines.find(l => l.id === item.lineId);
-        const group = assetGroups.find(g => g.id === item.groupId);
         return {
           id: item.id, code: item.code, name: item.name, managementType: item.managementType,
           lineName: line?.name || '', groupName: group?.name || '', unit: item.unit,
@@ -145,8 +156,6 @@ export default function Inventory() {
         };
       } else {
         const cs = consumableStocks.find(c => c.itemId === item.id);
-        const line = assetLines.find(l => l.id === item.lineId);
-        const group = assetGroups.find(g => g.id === item.groupId);
         const onHand = cs?.inStockQuantity ?? 0;
         return {
           id: item.id, code: item.code, name: item.name, managementType: item.managementType,
@@ -169,7 +178,9 @@ export default function Inventory() {
       }
       if (filters.group) {
         const item = assetItems.find(i => i.id === row.id);
-        if (item?.groupId !== filters.group) return false;
+        const line = item ? assetLines.find(l => l.id === item.lineId) : undefined;
+        const gid = item?.groupId || line?.groupId || '';
+        if (gid !== filters.group) return false;
       }
       if (filters.line) {
         const item = assetItems.find(i => i.id === row.id);
@@ -183,7 +194,7 @@ export default function Inventory() {
       }
       return true;
     });
-  }, [inventoryData, filters, assetItems]);
+  }, [inventoryData, filters, assetItems, assetLines]);
 
   // Dependent filter options
   const groupOptions = useMemo(() => {
@@ -208,7 +219,16 @@ export default function Inventory() {
       key: 'stockStatus',
       label: 'Tình trạng tài sản',
       className: 'text-center',
-      render: r => stockStatusLabel[r.stockStatus],
+      render: r => (
+        <span
+          className={cn(
+            'inline-flex items-center justify-center rounded-full px-2.5 py-0.5 text-xs font-semibold',
+            stockStatusPillClass[r.stockStatus],
+          )}
+        >
+          {stockStatusLabel[r.stockStatus]}
+        </span>
+      ),
     },
   ];
 

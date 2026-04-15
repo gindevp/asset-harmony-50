@@ -20,6 +20,15 @@ export function lossOccurredAtFromDatetimeLocal(local: string): string {
   return d.toISOString();
 }
 
+/** Giá trị đã lưu (ISO hoặc chuỗi parse được) → `datetime-local` để sửa trong modal. */
+export function lossOccurredAtToDatetimeLocalValue(stored: string | undefined | null): string {
+  const t = stored?.trim() ?? '';
+  if (!t) return '';
+  const d = new Date(t);
+  if (Number.isNaN(d.getTime())) return '';
+  return toDatetimeLocalValue(d);
+}
+
 /** Hiển thị (ISO hoặc text tự do). */
 export function formatLossOccurredAtForDisplay(s: string): string {
   const t = s.trim();

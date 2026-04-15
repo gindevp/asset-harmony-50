@@ -5,6 +5,9 @@ import { REQUEST_KIND_COMBINED_ADMIN, REQUEST_KIND_COMBINED_EMPLOYEE } from '@/u
 
 /** Cột «Loại» trên danh sách YC sửa chữa — cùng cách gọi như cấp phát / báo mất khi có cả TB + VT. */
 export function getRepairListKindLabel(r: RepairRequest, forEmployeePortal = false): string {
+  if (r.companySiteReport) {
+    return forEmployeePortal ? 'Theo vị trí (công ty)' : 'Theo vị trí — chờ gán TB';
+  }
   const hasDevice =
     (r.equipmentLineIds && r.equipmentLineIds.length > 0) || Boolean(String(r.equipmentId ?? '').trim());
   const hasConsumable = (r.consumableRepairLines?.length ?? 0) > 0;
@@ -37,7 +40,12 @@ export function formatRepairRequestAssetNamesSummary(
       ordered.push(name);
     }
   }
-  if (ordered.length === 0) return '—';
+  if (ordered.length === 0) {
+    if (r.companySiteReport) {
+      return r.reportedLocationName ? `Vị trí: ${r.reportedLocationName}` : 'Chờ gán thiết bị';
+    }
+    return '—';
+  }
   return ordered.join(' · ');
 }
 
@@ -47,6 +55,7 @@ export function formatRepairRequestAssetNamesSummary(
  * - Cá nhân/Phòng ban: còn lại.
  */
 export function getRepairRequestTypeLabel(r: RepairRequest, equipments: Equipment[]): string {
+  if (r.companySiteReport) return 'Công ty (theo vị trí)';
   const eqIds = repairRequestEquipmentIds(r);
   const hasCompanyEquipment = eqIds.some(id => {
     const eq = equipments.find(e => e.id === id);

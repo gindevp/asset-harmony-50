@@ -8,6 +8,16 @@ import { FilterBar, type FilterField } from '@/components/shared/FilterBar';
 import { StatusBadge } from '@/components/shared/StatusBadge';
 import { Button } from '@/components/ui/button';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from '@/components/ui/alert-dialog';
 import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
 import { Input } from '@/components/ui/input';
@@ -286,6 +296,11 @@ const EmployeeRequests = () => {
   const editBasePath = location.pathname.startsWith('/admin') ? '/admin' : '/employee';
 
   const [cancelBusy, setCancelBusy] = useState<string | null>(null);
+  /** Xác nhận trước khi hủy bản ghi yêu cầu (danh sách hoặc chi tiết). */
+  const [cancelConfirm, setCancelConfirm] = useState<{
+    type: 'allocation' | 'repair' | 'return';
+    id: string;
+  } | null>(null);
 
   const hubLoading =
     arQ.isLoading || rrQ.isLoading || retQ.isLoading || eqQ.isLoading || iQ.isLoading || alQ.isLoading;
@@ -647,7 +662,7 @@ const EmployeeRequests = () => {
                       size="sm"
                       className="h-8 px-2 text-xs"
                       disabled={cancelBusy === r.id}
-                      onClick={() => void cancelAllocation(r.id)}
+                      onClick={() => setCancelConfirm({ type: 'allocation', id: r.id })}
                     >
                       {cancelBusy === r.id ? '…' : 'Hủy'}
                     </Button>
@@ -726,7 +741,7 @@ const EmployeeRequests = () => {
                       size="sm"
                       className="h-8 px-2 text-xs"
                       disabled={cancelBusy === r.id}
-                      onClick={() => void cancelRepair(r.id)}
+                      onClick={() => setCancelConfirm({ type: 'repair', id: r.id })}
                     >
                       {cancelBusy === r.id ? '…' : 'Hủy'}
                     </Button>
@@ -807,7 +822,7 @@ const EmployeeRequests = () => {
                       size="sm"
                       className="h-8 px-2 text-xs"
                       disabled={cancelBusy === r.id}
-                      onClick={() => void cancelReturn(r.id)}
+                      onClick={() => setCancelConfirm({ type: 'return', id: r.id })}
                     >
                       {cancelBusy === r.id ? '…' : 'Hủy'}
                     </Button>
@@ -885,6 +900,20 @@ const EmployeeRequests = () => {
                   emptyMessage="Không có dòng"
                 />
               </div>
+              {canCancelAllocationAsEmployee(empDetail.row.status) ? (
+                <div className="pt-2 border-t border-border">
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    className="text-destructive border-destructive/30 hover:bg-destructive/10"
+                    disabled={cancelBusy === empDetail.row.id}
+                    onClick={() => setCancelConfirm({ type: 'allocation', id: empDetail.row.id })}
+                  >
+                    {cancelBusy === empDetail.row.id ? '…' : 'Hủy yêu cầu'}
+                  </Button>
+                </div>
+              ) : null}
             </div>
           )}
           {empDetail?.section === 'repair' && (
@@ -958,7 +987,7 @@ const EmployeeRequests = () => {
                     size="sm"
                     className="text-destructive border-destructive/30 hover:bg-destructive/10"
                     disabled={cancelBusy === empDetail.row.id}
-                    onClick={() => void cancelRepair(empDetail.row.id)}
+                    onClick={() => setCancelConfirm({ type: 'repair', id: empDetail.row.id })}
                   >
                     {cancelBusy === empDetail.row.id ? '…' : 'Hủy yêu cầu'}
                   </Button>
@@ -1013,10 +1042,61 @@ const EmployeeRequests = () => {
                   })}
                 </ul>
               </div>
+              {canCancelReturnAsEmployee(empDetail.row.status) ? (
+                <div className="pt-2 border-t border-border">
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    className="text-destructive border-destructive/30 hover:bg-destructive/10"
+                    disabled={cancelBusy === empDetail.row.id}
+                    onClick={() => setCancelConfirm({ type: 'return', id: empDetail.row.id })}
+                  >
+                    {cancelBusy === empDetail.row.id ? '…' : 'Hủy yêu cầu'}
+                  </Button>
+                </div>
+              ) : null}
             </div>
           )}
         </DialogContent>
       </Dialog>
+
+      <AlertDialog open={!!cancelConfirm} onOpenChange={open => { if (!open) setCancelConfirm(null); }}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>
+              {cancelConfirm?.type === 'allocation'
+                ? 'Hủy yêu cầu cấp phát?'
+                : cancelConfirm?.type === 'repair'
+                  ? 'Hủy yêu cầu sửa chữa?'
+                  : 'Hủy yêu cầu thu hồi?'}
+            </AlertDialogTitle>
+            <AlertDialogDescription>
+              Yêu cầu sẽ được hủy theo quy định. Bạn có chắc muốn tiếp tục?
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Quay lại</AlertDialogCancel>
+            <AlertDialogAction
+              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+              disabled={!!cancelBusy}
+              onClick={e => {
+                e.preventDefault();
+                const c = cancelConfirm;
+                if (!c) return;
+                setCancelConfirm(null);
+                void (c.type === 'allocation'
+                  ? cancelAllocation(c.id)
+                  : c.type === 'repair'
+                    ? cancelRepair(c.id)
+                    : cancelReturn(c.id));
+              }}
+            >
+              {cancelBusy ? 'Đang xử lý…' : 'Hủy yêu cầu'}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 };

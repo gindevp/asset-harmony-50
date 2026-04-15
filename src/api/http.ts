@@ -63,6 +63,15 @@ export function parseProblemDetailJson(body: string | undefined): string {
       properties?: { message?: string; params?: string };
       fieldErrors?: Array<{ objectName?: string; field?: string; message?: string }>;
     };
+    const friendlyByProblemKey: Record<string, string> = {
+      'error.http.400': 'Dữ liệu gửi lên không hợp lệ. Vui lòng kiểm tra lại thông tin.',
+      'error.http.401': 'Sai tài khoản hoặc mật khẩu.',
+      'error.http.403': 'Bạn không có quyền thực hiện thao tác này.',
+      'error.http.404': 'Không tìm thấy dữ liệu yêu cầu.',
+      'error.http.405': 'Thao tác không được hỗ trợ.',
+      'error.http.409': 'Dữ liệu đang xung đột hoặc đã tồn tại.',
+      'error.http.500': 'Hệ thống đang bận. Vui lòng thử lại sau.',
+    };
     if (Array.isArray(j.fieldErrors) && j.fieldErrors.length > 0) {
       const label = (field: string) =>
         field === 'email' ? 'Email' : field === 'login' ? 'Đăng nhập' : field;
@@ -86,15 +95,22 @@ export function parseProblemDetailJson(body: string | undefined): string {
         'Dòng thiết bị phải chọn dòng tài sản (danh mục), không chọn item cụ thể trên phiếu yêu cầu.',
       'error.consumablerequiresitem': 'Dòng vật tư phải chọn mã tài sản (item).',
       'error.notinstock': 'Thiết bị chọn không còn ở trạng thái tồn kho (IN_STOCK).',
+      ...friendlyByProblemKey,
     };
     const msgKey = j.properties?.message ?? j.message;
     if (msgKey && problemKeys[msgKey]) {
       return problemKeys[msgKey];
     }
+    if (j.detail === 'Bad credentials') return 'Sai tài khoản hoặc mật khẩu.';
+    if (j.title === 'Unauthorized') return 'Bạn cần đăng nhập để tiếp tục.';
+    if (j.title === 'Forbidden') return 'Bạn không có quyền thực hiện thao tác này.';
+    if (j.title === 'Not Found') return 'Không tìm thấy dữ liệu yêu cầu.';
+    if (j.title === 'Conflict') return 'Dữ liệu đang xung đột hoặc đã tồn tại.';
     if (j.detail && j.detail.startsWith('{')) {
       try {
         const inner = JSON.parse(j.detail) as { title?: string; message?: string };
         if (inner.title && !isGenericProblemTitle(inner.title)) return inner.title;
+        if (inner.message && problemKeys[inner.message]) return problemKeys[inner.message];
       } catch {
         /* ignore */
       }
@@ -112,6 +128,15 @@ export function getApiErrorMessage(err: unknown): string {
   if (err instanceof ApiError) {
     const parsed = parseProblemDetailJson(err.body);
     if (parsed) return parsed;
+    const byStatus: Record<number, string> = {
+      400: 'Dữ liệu không hợp lệ. Vui lòng kiểm tra lại.',
+      401: 'Sai tài khoản hoặc mật khẩu, hoặc phiên đăng nhập đã hết hạn.',
+      403: 'Bạn không có quyền thực hiện thao tác này.',
+      404: 'Không tìm thấy dữ liệu yêu cầu.',
+      409: 'Dữ liệu đang xung đột hoặc đã tồn tại.',
+      500: 'Hệ thống gặp lỗi nội bộ. Vui lòng thử lại sau.',
+    };
+    if (byStatus[err.status]) return byStatus[err.status];
     return err.message;
   }
   if (err instanceof Error) return err.message;

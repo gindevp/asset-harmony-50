@@ -28,6 +28,7 @@ import {
   getRequesterDisplayByJobTitle,
   getDepartmentName,
   formatDate,
+  getItemName,
 } from '@/data/mockData';
 import { toast } from 'sonner';
 import { getStoredToken } from '@/api/http';
@@ -59,12 +60,20 @@ import {
   getRepairRequestTypeLabel,
 } from '@/utils/repairRequestListDisplay';
 import { LoadingIndicator, PageLoading } from '@/components/shared/page-loading';
+import { Checkbox } from '@/components/ui/checkbox';
+import { formatEquipmentCodeDisplay } from '@/utils/formatCodes';
 
 const outcomeLabels: Record<string, string> = {
   RETURN_USER: 'Trả lại người dùng',
   RETURN_STOCK: 'Trả về kho',
   MARK_BROKEN: 'Đánh dấu hỏng',
 };
+
+function repairOutcomeLabel(result: string | undefined, companySiteReport?: boolean): string {
+  if (!result) return '—';
+  if (result === 'RETURN_USER' && companySiteReport) return 'Trả về vị trí đã báo';
+  return outcomeLabels[result] ?? result;
+}
 
 /** QLTS không có quyền sửa/xóa phiếu (Admin / GĐ vẫn có). */
 function hideRepairEditDeleteForQlts(): boolean {
@@ -100,6 +109,8 @@ const RepairRequests = () => {
   const [rejectOpen, setRejectOpen] = useState(false);
   const [rejectReason, setRejectReason] = useState('');
   const [busy, setBusy] = useState(false);
+  /** Phiếu báo theo vị trí (chưa có dòng): QLTS chọn serial trước khi tiếp nhận */
+  const [assignEquipmentPicked, setAssignEquipmentPicked] = useState<Record<string, boolean>>({});
 
   const listLoading = rrQ.isLoading || eqQ.isLoading || iQ.isLoading || empQ.isLoading || depQ.isLoading;
 
@@ -159,6 +170,28 @@ const RepairRequests = () => {
     if (selected.result && outcomeLabels[selected.result]) setOutcome(selected.result);
     else setOutcome('RETURN_USER');
   }, [selected?.id, selected?.result]);
+
+  useEffect(() => {
+    setAssignEquipmentPicked({});
+  }, [selected?.id]);
+
+  const equipmentAtReportedLocation = useMemo(() => {
+    const lid = selected?.reportedLocationId?.trim();
+    if (!lid) return [];
+    return [...equipments]
+      .filter(e => e.assignedLocation === lid)
+      .sort((a, b) => a.equipmentCode.localeCompare(b.equipmentCode, 'vi'));
+  }, [selected?.reportedLocationId, equipments]);
+
+  const repairDetail = repairDetailQ.data;
+  const isCompanySiteReport = Boolean(repairDetail?.companySiteReport ?? selected?.companySiteReport);
+  const showCompanyAssignPanel =
+    selected != null &&
+    selected.status === 'NEW' &&
+    isCompanySiteReport &&
+    !repairDetailQ.isLoading &&
+    !repairDetailQ.isError &&
+    repairDetailLines.length === 0;
 
   const invalidate = () => {
     void qc.invalidateQueries({ queryKey: ['api', 'repair-requests-view'] });
@@ -232,6 +265,37 @@ const RepairRequests = () => {
     }
   };
 
+  const saveCompanySiteEquipmentLines = async () => {
+    if (!selected) return;
+    const ids = Object.entries(assignEquipmentPicked)
+      .filter(([, v]) => v)
+      .map(([k]) => k);
+    if (ids.length === 0) {
+      toast.error('Chọn ít nhất một thiết bị (đối chiếu ảnh / mô tả) trước khi lưu');
+      return;
+    }
+    setBusy(true);
+    try {
+      const lines = ids.map((eqId, i) => ({
+        lineNo: i + 1,
+        lineType: 'DEVICE',
+        equipment: { id: Number(eqId) },
+      }));
+      await apiPatch(`/api/repair-requests/${selected.id}`, {
+        id: Number(selected.id),
+        lines,
+      });
+      toast.success('Đã gán thiết bị — có thể tiếp nhận sửa');
+      await qc.invalidateQueries({ queryKey: ['api', 'repair-requests', selected.id] });
+      await qc.invalidateQueries({ queryKey: ['api', 'repair-requests-view'] });
+    } catch (e) {
+      const bodyErr = e instanceof ApiError ? e.body : undefined;
+      toast.error(parseProblemDetailJson(bodyErr ?? '') || (e instanceof Error ? e.message : 'Lỗi API'));
+    } finally {
+      setBusy(false);
+    }
+  };
+
   const confirmDeleteRepair = async () => {
     if (!deleteTarget) return;
     setBusy(true);
@@ -291,7 +355,11 @@ const RepairRequests = () => {
       render: r => getRepairRequestTypeLabel(r, equipments),
     },
     { key: 'status', label: 'Trạng thái', render: r => <StatusBadge status={r.status} label={repairStatusLabels[r.status]} /> },
-    { key: 'result', label: 'Kết quả', render: r => (r.result ? outcomeLabels[r.result] ?? r.result : '—') },
+    {
+      key: 'result',
+      label: 'Kết quả',
+      render: r => (r.result ? repairOutcomeLabel(r.result, r.companySiteReport) : '—'),
+    },
     { key: 'createdAt', label: 'Ngày tạo', render: r => formatDate(r.createdAt) },
     {
       key: 'actions',
@@ -415,7 +483,7 @@ const RepairRequests = () => {
                 {selected.result ? (
                   <div>
                     <span className="text-muted-foreground">Kết quả xử lý:</span>{' '}
-                    <span className="font-medium">{outcomeLabels[selected.result] ?? selected.result}</span>
+                    <span className="font-medium">{repairOutcomeLabel(selected.result, selected.companySiteReport)}</span>
                   </div>
                 ) : null}
                 {selected.status === 'REJECTED' && selected.rejectionReason?.trim() ? (
@@ -455,11 +523,79 @@ const RepairRequests = () => {
                   {selected.attachmentNote ? <AttachmentNoteView text={selected.attachmentNote} /> : null}
                 </div>
               )}
+              {showCompanyAssignPanel ? (
+                <div className="rounded-md border border-amber-500/35 bg-amber-500/10 p-3 space-y-3">
+                  <p className="text-sm font-medium text-foreground">Gán thiết bị cần sửa (theo ảnh / mô tả)</p>
+                  <p className="text-xs text-muted-foreground leading-relaxed">
+                    Vị trí nhân viên báo:{' '}
+                    <span className="font-medium text-foreground">
+                      {repairDetail?.reportedLocation?.code
+                        ? `${repairDetail.reportedLocation.code} — ${repairDetail.reportedLocation.name ?? ''}`
+                        : repairDetail?.reportedLocation?.name ?? selected.reportedLocationName ?? '—'}
+                    </span>
+                    . Chọn đúng serial thiết bị đang bàn giao tại vị trí này, lưu, rồi mới tiếp nhận sửa.
+                  </p>
+                  {equipmentAtReportedLocation.length === 0 ? (
+                    <p className="text-sm text-destructive">
+                      Không có thiết bị nào đang được gán cho vị trí này trong hệ thống — kiểm tra bàn giao hoặc cập nhật vị trí
+                      thiết bị trước.
+                    </p>
+                  ) : (
+                    <div className="space-y-2 max-h-52 overflow-y-auto pr-1">
+                      {equipmentAtReportedLocation.map(eq => {
+                        const name = eq.itemId ? getItemName(eq.itemId, assetItems) : '—';
+                        const serial = (eq.serial ?? '').trim() || '—';
+                        return (
+                          <label
+                            key={eq.id}
+                            className="flex items-start gap-2 rounded-md border border-border/60 bg-background/80 p-2 text-sm cursor-pointer"
+                          >
+                            <Checkbox
+                              className="mt-0.5"
+                              checked={!!assignEquipmentPicked[eq.id]}
+                              onCheckedChange={v =>
+                                setAssignEquipmentPicked(p => ({
+                                  ...p,
+                                  [eq.id]: v === true,
+                                }))
+                              }
+                              disabled={busy}
+                            />
+                            <span>
+                              <span className="font-mono">{formatEquipmentCodeDisplay(eq.equipmentCode)}</span>
+                              {' — '}
+                              <span className="font-medium">{name}</span>
+                              <span className="text-muted-foreground"> · Serial: {serial}</span>
+                            </span>
+                          </label>
+                        );
+                      })}
+                    </div>
+                  )}
+                  <Button type="button" size="sm" disabled={busy} onClick={() => void saveCompanySiteEquipmentLines()}>
+                    Lưu thiết bị đã chọn
+                  </Button>
+                </div>
+              ) : null}
               {selected.status === 'NEW' && (
                 <ApprovalActionBar
                   approveLabel="Tiếp nhận"
                   rejectLabel="Từ chối"
-                  onApprove={() => void patch({ status: 'ACCEPTED' })}
+                  onApprove={() => {
+                    if (isCompanySiteReport) {
+                      if (repairDetailQ.isLoading) {
+                        toast.error('Đang tải chi tiết phiếu…');
+                        return;
+                      }
+                      if (repairDetailLines.length === 0) {
+                        toast.error(
+                          'Chọn thiết bị cần sửa theo ảnh/mô tả, bấm «Lưu thiết bị đã chọn», sau đó mới tiếp nhận.',
+                        );
+                        return;
+                      }
+                    }
+                    void patch({ status: 'ACCEPTED' });
+                  }}
                   onReject={() => {
                     setRejectReason('');
                     setRejectOpen(true);
@@ -485,8 +621,10 @@ const RepairRequests = () => {
                     <Select value={outcome} onValueChange={setOutcome} disabled={busy}>
                       <SelectTrigger><SelectValue /></SelectTrigger>
                       <SelectContent>
-                        {Object.entries(outcomeLabels).map(([v, l]) => (
-                          <SelectItem key={v} value={v}>{l}</SelectItem>
+                        {(['RETURN_USER', 'RETURN_STOCK', 'MARK_BROKEN'] as const).map(v => (
+                          <SelectItem key={v} value={v}>
+                            {repairOutcomeLabel(v, repairDetail?.companySiteReport)}
+                          </SelectItem>
                         ))}
                       </SelectContent>
                     </Select>

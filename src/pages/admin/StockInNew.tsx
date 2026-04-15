@@ -672,6 +672,9 @@ const StockInNewPage = () => {
                 value={source}
                 onValueChange={v => {
                   setSource(v);
+                  if (v === 'RETURN') {
+                    setSupplierId('');
+                  }
                   if (v !== 'RETURN') {
                     setReturnHolderKey('');
                     setSelectedRecoveryEquipmentIds([]);
@@ -753,15 +756,17 @@ const StockInNewPage = () => {
                 </div>
               </div>
             )}
-            <div className="space-y-2">
-              <Label>Nhà cung cấp</Label>
-              <Select value={supplierId} onValueChange={setSupplierId}>
-                <SelectTrigger><SelectValue placeholder="Chọn NCC..." /></SelectTrigger>
-                <SelectContent>
-                  {suppliers.map(s => <SelectItem key={s.id} value={s.id}>{s.name}</SelectItem>)}
-                </SelectContent>
-              </Select>
-            </div>
+            {!isReturnSource && (
+              <div className="space-y-2">
+                <Label>Nhà cung cấp</Label>
+                <Select value={supplierId} onValueChange={setSupplierId}>
+                  <SelectTrigger><SelectValue placeholder="Chọn NCC..." /></SelectTrigger>
+                  <SelectContent>
+                    {suppliers.map(s => <SelectItem key={s.id} value={s.id}>{s.name}</SelectItem>)}
+                  </SelectContent>
+                </Select>
+              </div>
+            )}
             <div className="space-y-2">
               <Label>Ghi chú</Label>
               <Textarea

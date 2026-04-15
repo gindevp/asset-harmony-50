@@ -111,11 +111,17 @@ const MyAssets = () => {
     [empId, repairRequests, returnRequests, lossQ.data, returnLineDtos],
   );
 
-  const consumableGroupRows = useMemo(
-    (): MyConsumableGroupRow[] =>
-      groupConsumableAssignmentsByAssetItem(myConsumables).map(g => ({ ...g, id: g.assetItemId })),
-    [myConsumables],
-  );
+  const consumableGroupRows = useMemo((): MyConsumableGroupRow[] => {
+    const rows = groupConsumableAssignmentsByAssetItem(myConsumables).map(g => ({ ...g, id: g.assetItemId }));
+    return rows.filter(g => {
+      const held = totalHeldForConsumableGroup(g.assignments);
+      const pend = consumablePendingByAssetItem.get(g.assetItemId);
+      const hasPending =
+        (pend?.returnQty ?? 0) > 0 || (pend?.repairQty ?? 0) > 0 || (pend?.lossQty ?? 0) > 0;
+      const showLossOnly = held <= 0 && consumableGroupHasApprovedLoss(g, approvedLossConsumableIds);
+      return held > 0 || hasPending || showLossOnly;
+    });
+  }, [myConsumables, consumablePendingByAssetItem, approvedLossConsumableIds]);
 
   const totalConsumableQtyHeld = useMemo(
     () => consumableGroupRows.reduce((s, g) => s + totalHeldForConsumableGroup(g.assignments), 0),

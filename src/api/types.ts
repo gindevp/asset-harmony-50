@@ -199,6 +199,9 @@ export type RepairRequestDto = {
   repairOutcome?: string;
   requester?: EmployeeDto;
   equipment?: EquipmentDto;
+  /** Báo sửa tài sản công ty theo vị trí — không chọn serial lúc gửi */
+  companySiteReport?: boolean;
+  reportedLocation?: LocationDto;
   lines?: RepairRequestLineDto[];
 };
 

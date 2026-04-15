@@ -38,8 +38,7 @@ import {
   useEmployees,
   useReturnRequestsView,
 } from '@/hooks/useEntityApi';
-import { ApiError, apiDelete, apiGet, apiPatch, getStoredToken, parseProblemDetailJson, PAGE_ALL } from '@/api/http';
-import { hasAnyAuthority } from '@/auth/jwt';
+import { ApiError, apiDelete, apiGet, apiPatch, parseProblemDetailJson, PAGE_ALL } from '@/api/http';
 import type { ReturnRequestLineDto } from '@/api/types';
 import { canDeleteReturnRequest, canEditReturnRequestFields } from '@/utils/requestRecordActions';
 import { LoadingIndicator, PageLoading } from '@/components/shared/page-loading';
@@ -54,15 +53,8 @@ function returnStatusKey(s: string | undefined): string {
   return String(s ?? '').trim().toUpperCase();
 }
 
-/** QLTS không có quyền sửa/xóa phiếu (Admin / GĐ vẫn có). */
-function hideReturnEditDeleteForQlts(): boolean {
-  const t = getStoredToken();
-  return hasAnyAuthority(t, ['ROLE_ASSET_MANAGER']) && !hasAnyAuthority(t, ['ROLE_ADMIN', 'ROLE_GD']);
-}
-
 const ReturnRequests = () => {
   const navigate = useNavigate();
-  const hideRowEditDelete = hideReturnEditDeleteForQlts();
   const qc = useQueryClient();
   const retQ = useReturnRequestsView();
   const empQ = useEmployees();
@@ -133,6 +125,7 @@ const ReturnRequests = () => {
     void qc.invalidateQueries({ queryKey: ['api', 'return-request-lines'] });
     void qc.invalidateQueries({ queryKey: ['api', 'equipment'] });
     void qc.invalidateQueries({ queryKey: ['api', 'equipment-assignments'] });
+    void qc.invalidateQueries({ queryKey: ['api', 'consumable-assignments'] });
     void qc.invalidateQueries({ queryKey: ['api', 'consumable-stocks'] });
     void qc.invalidateQueries({ queryKey: ['api', 'consumable-stocks-view'] });
   };
@@ -331,7 +324,7 @@ const ReturnRequests = () => {
           >
             <Eye className="h-4 w-4" />
           </Button>
-          {!hideRowEditDelete && canEditReturnRequestFields(r.status) ? (
+          {canEditReturnRequestFields(r.status) ? (
             <Button
               type="button"
               variant="ghost"
@@ -345,7 +338,7 @@ const ReturnRequests = () => {
               <Pencil className="h-4 w-4" />
             </Button>
           ) : null}
-          {!hideRowEditDelete && canDeleteReturnRequest(r.status) ? (
+          {canDeleteReturnRequest(r.status) ? (
             <Button
               type="button"
               variant="ghost"
@@ -398,7 +391,7 @@ const ReturnRequests = () => {
         <DialogContent className="max-w-3xl max-h-[90vh] overflow-y-auto">
           <DialogHeader>
             <DialogTitle>
-              {dialogMode === 'edit' && !hideRowEditDelete ? 'Sửa yêu cầu' : 'Chi tiết yêu cầu'} thu hồi {selected?.code}
+              {dialogMode === 'edit' ? 'Sửa yêu cầu' : 'Chi tiết yêu cầu'} thu hồi {selected?.code}
             </DialogTitle>
             <DialogDescription className="sr-only">
               Xem hoặc chỉnh sửa yêu cầu thu hồi; khi đã duyệt, các dòng được chọn tự động — hoàn tất để cập nhật kho (mặc định trả về kho).
@@ -423,7 +416,7 @@ const ReturnRequests = () => {
                   },
                 ]}
               />
-              {dialogMode === 'edit' && !hideRowEditDelete && canEditReturnRequestFields(returnStatusKey(selected.status)) ? (
+              {dialogMode === 'edit' && canEditReturnRequestFields(returnStatusKey(selected.status)) ? (
                 <div className="space-y-2 border rounded-md p-3 bg-muted/20 text-sm">
                   <Label>Ghi chú</Label>
                   <Textarea value={editReturnReason} onChange={e => setEditReturnReason(e.target.value)} rows={3} disabled={busy} />

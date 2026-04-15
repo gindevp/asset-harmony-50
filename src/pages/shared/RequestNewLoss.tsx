@@ -80,10 +80,8 @@ export default function RequestNewLoss() {
       <AlertDialog open={cancelConfirmOpen} onOpenChange={setCancelConfirmOpen}>
         <AlertDialogContent>
           <AlertDialogHeader>
-            <AlertDialogTitle>Hủy yêu cầu báo mất?</AlertDialogTitle>
-            <AlertDialogDescription>
-              Dữ liệu đang nhập chưa được lưu. Bạn có chắc muốn quay lại danh sách?
-            </AlertDialogDescription>
+            <AlertDialogTitle>Bạn có chắc chắn không?</AlertDialogTitle>
+            <AlertDialogDescription>Mọi thay đổi sẽ mất.</AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
             <AlertDialogCancel>Ở lại</AlertDialogCancel>

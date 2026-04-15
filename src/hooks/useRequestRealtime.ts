@@ -9,6 +9,15 @@ const REQUEST_QUERY_KEYS: readonly string[] = [
   'loss-report-requests',
 ];
 
+/** Bàn giao / tồn — cần refetch khi duyệt thu hồi, cấp phát, sửa chữa… (Tài sản của tôi dùng consumable-assignments). */
+const HOLDINGS_QUERY_KEYS: readonly string[] = [
+  'consumable-assignments',
+  'consumable-stocks',
+  'consumable-stocks-view',
+  'equipment',
+  'equipment-assignments',
+];
+
 export function useRequestRealtime() {
   const qc = useQueryClient();
 
@@ -19,6 +28,9 @@ export function useRequestRealtime() {
 
     const invalidateAll = () => {
       for (const key of REQUEST_QUERY_KEYS) {
+        void qc.invalidateQueries({ queryKey: ['api', key] });
+      }
+      for (const key of HOLDINGS_QUERY_KEYS) {
         void qc.invalidateQueries({ queryKey: ['api', key] });
       }
     };

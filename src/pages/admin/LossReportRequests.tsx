@@ -35,6 +35,11 @@ import { formatCombinedLossSummary, getLossReportKindDisplayLabel, lossReportKin
 import { LossReportRequestNarrativeFields } from '@/components/shared/LossReportRequestNarrativeFields';
 import { PageLoading } from '@/components/shared/page-loading';
 import { buildLossAssetRows } from '@/utils/lossReportAssetRows';
+import {
+  formatLossOccurredAtForDisplay,
+  lossOccurredAtFromDatetimeLocal,
+  lossOccurredAtToDatetimeLocalValue,
+} from '@/utils/lossReportForm';
 
 const LossReportRequests = () => {
   const canAdminEditDelete = hasAnyAuthority(getStoredToken(), ['ROLE_ADMIN']);
@@ -75,7 +80,7 @@ const LossReportRequests = () => {
 
   useEffect(() => {
     if (!editRow) return;
-    setEditLossOccurredAt(editRow.lossOccurredAt?.trim() ?? '');
+    setEditLossOccurredAt(lossOccurredAtToDatetimeLocalValue(editRow.lossOccurredAt));
     setEditLossLocation(editRow.lossLocation?.trim() ?? '');
     setEditReason(editRow.reason?.trim() ?? '');
     setEditLossDescription(editRow.lossDescription?.trim() ?? '');
@@ -108,9 +113,14 @@ const LossReportRequests = () => {
   const submitEdit = async () => {
     if (!editRow?.id) return;
     const id = editRow.id;
+    const lossIso = lossOccurredAtFromDatetimeLocal(editLossOccurredAt);
+    if (!lossIso) {
+      toast.error('Chọn thời gian xảy ra / phát hiện');
+      return;
+    }
     const body: Record<string, unknown> = {
       id,
-      lossOccurredAt: editLossOccurredAt.trim(),
+      lossOccurredAt: lossIso,
       lossLocation: editLossLocation.trim(),
       reason: editReason.trim(),
       lossDescription: editLossDescription.trim(),
@@ -167,6 +177,10 @@ const LossReportRequests = () => {
           const combined = formatCombinedLossSummary(r, assetItems, equipments).toLowerCase();
           const reason = (r.reason ?? '').toLowerCase();
           const lossDesc = (r.lossDescription ?? '').toLowerCase();
+          const lossWhen = [
+            (r.lossOccurredAt ?? '').toLowerCase(),
+            formatLossOccurredAtForDisplay(r.lossOccurredAt ?? '').toLowerCase(),
+          ].join(' ');
           if (
             !code.includes(s) &&
             !eq.includes(s) &&
@@ -174,6 +188,7 @@ const LossReportRequests = () => {
             !combined.includes(s) &&
             !reason.includes(s) &&
             !lossDesc.includes(s) &&
+            !lossWhen.includes(s) &&
             !getEmployeeName(String(r.requester?.id ?? ''), employees).toLowerCase().includes(s)
           ) {
             return false;
@@ -210,6 +225,16 @@ const LossReportRequests = () => {
       key: 'requestDate',
       label: 'Ngày gửi',
       render: r => formatDate(r.requestDate ?? ''),
+    },
+    {
+      key: 'lossOccurredAt',
+      label: 'Thời gian xảy ra / phát hiện',
+      className: 'min-w-[10rem]',
+      render: r => (
+        <span className="tabular-nums text-sm text-foreground/90">
+          {formatLossOccurredAtForDisplay(r.lossOccurredAt ?? '').trim() || '—'}
+        </span>
+      ),
     },
     {
       key: 'actions',
@@ -364,7 +389,12 @@ const LossReportRequests = () => {
             <div className="space-y-3">
               <div className="space-y-1.5">
                 <Label>Thời gian (xảy ra / phát hiện)</Label>
-                <Input value={editLossOccurredAt} onChange={e => setEditLossOccurredAt(e.target.value)} />
+                <Input
+                  type="datetime-local"
+                  value={editLossOccurredAt}
+                  onChange={e => setEditLossOccurredAt(e.target.value)}
+                  className="w-full max-w-md font-sans tabular-nums"
+                />
               </div>
               <div className="space-y-1.5">
                 <Label>Địa điểm</Label>

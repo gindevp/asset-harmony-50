@@ -34,6 +34,17 @@ type ConsumableHoldingRow = {
   assignedDate: string;
 };
 
+/**
+ * Tài sản «của phòng ban»: gán cho phòng ban (pool / không cấp cá nhân),
+ * không gồm thiết bị chỉ gán cho nhân viên trong khi PB chỉ lấy từ hồ sơ NV.
+ */
+function isDepartmentScopedEquipment(e: Equipment): boolean {
+  if (!e.assignedDepartment) return false;
+  if (e.departmentPoolFromAllocation) return true;
+  const noPersonalHolder = !e.assignedTo || String(e.assignedTo).trim() === '';
+  return noPersonalHolder;
+}
+
 const AssetTracking = () => {
   const eqQ = useEnrichedEquipmentList();
   const caQ = useConsumableAssignments();
@@ -72,6 +83,18 @@ const AssetTracking = () => {
   const hasSearched = !!searchPayload;
   const normalizedKeyword = (searchPayload?.keyword ?? '').trim().toLowerCase();
 
+  /** Phòng ban khớp từ khóa (mã / tên) — dùng khi tra cứu theo phòng ban */
+  const matchingDepartmentIds = useMemo(() => {
+    if (!searchPayload || searchPayload.type !== 'department' || !normalizedKeyword) return new Set<string>();
+    const ids = new Set<string>();
+    for (const d of departments) {
+      const code = (d.code ?? '').toLowerCase();
+      const name = (d.name ?? '').toLowerCase();
+      if (code.includes(normalizedKeyword) || name.includes(normalizedKeyword)) ids.add(d.id);
+    }
+    return ids;
+  }, [departments, normalizedKeyword, searchPayload]);
+
   const isEquipmentHolding = (e: Equipment) => {
     if (e.status === 'IN_STOCK' || e.status === 'LOST' || e.status === 'DISPOSED') return false;
     return Boolean(e.assignedTo || e.assignedDepartment || e.assignedLocation);
@@ -84,8 +107,12 @@ const AssetTracking = () => {
       const emp = e.assignedTo ? employeesById.get(e.assignedTo) : undefined;
       return (emp?.code ?? '').toLowerCase().includes(normalizedKeyword);
     }
+    if (!isDepartmentScopedEquipment(e)) return false;
     const dep = e.assignedDepartment ? departmentsById.get(e.assignedDepartment) : undefined;
     const text = `${dep?.code ?? ''} ${dep?.name ?? ''} ${e.assignedDepartmentName ?? ''}`.toLowerCase();
+    if (matchingDepartmentIds.size > 0) {
+      return e.assignedDepartment ? matchingDepartmentIds.has(e.assignedDepartment) : false;
+    }
     return text.includes(normalizedKeyword);
   };
 
@@ -94,7 +121,7 @@ const AssetTracking = () => {
       equipments
         .filter(matchEquipment)
         .sort((a, b) => a.equipmentCode.localeCompare(b.equipmentCode, 'vi', { numeric: true })),
-    [equipments, searchPayload, normalizedKeyword, employeesById, departmentsById],
+    [equipments, searchPayload, normalizedKeyword, employeesById, departmentsById, matchingDepartmentIds],
   );
 
   const filteredConsumables = useMemo(() => {
@@ -119,15 +146,23 @@ const AssetTracking = () => {
         continue;
       }
       if (searchPayload.type === 'department') {
-        const text = `${a.department?.code ?? ''} ${a.department?.name ?? ''}`.toLowerCase();
-        if (!text.includes(normalizedKeyword)) continue;
+        if (a.employee?.id != null) continue;
+        const dept = a.department;
+        if (!dept?.id) continue;
+        const idStr = String(dept.id);
+        if (matchingDepartmentIds.size > 0) {
+          if (!matchingDepartmentIds.has(idStr)) continue;
+        } else {
+          const text = `${dept.code ?? ''} ${dept.name ?? ''}`.toLowerCase();
+          if (!text.includes(normalizedKeyword)) continue;
+        }
         rows.push({
           id: String(a.id ?? ''),
           itemId: String(a.assetItem?.id ?? ''),
           itemCode: a.assetItem?.code ?? '',
           itemName: a.assetItem?.name ?? '',
           holderType: 'Phòng ban',
-          holderName: [a.department?.code, a.department?.name].filter(Boolean).join(' - ') || '—',
+          holderName: [dept.code, dept.name].filter(Boolean).join(' - ') || '—',
           quantityHeld: held,
           assignedDate: a.assignedDate ?? '',
         });
@@ -135,7 +170,7 @@ const AssetTracking = () => {
       }
     }
     return rows.sort((a, b) => a.itemCode.localeCompare(b.itemCode, 'vi'));
-  }, [consumableAssignments, normalizedKeyword, searchPayload]);
+  }, [consumableAssignments, normalizedKeyword, searchPayload, matchingDepartmentIds]);
 
   const eqColumns: Column<Equipment>[] = [
     {
@@ -213,7 +248,8 @@ const AssetTracking = () => {
         <div>
           <h1 className="page-title">Tra cứu tài sản đang nắm giữ</h1>
           <p className="text-sm text-muted-foreground mt-1">
-            Tìm theo phòng ban hoặc mã nhân viên. Kết quả hiển thị cả thiết bị lẫn vật tư.
+            Theo phòng ban: chỉ tài sản gán cho phòng ban (không gồm tài sản cá nhân chỉ trùng phòng ban trên hồ sơ nhân viên).
+            Theo mã nhân viên: tài sản đang gán cho nhân viên đó. Kết quả gồm thiết bị và vật tư.
           </p>
         </div>
       </div>

@@ -33,6 +33,11 @@ export type OpenRequestAggregationOptions = {
   excludeRepairRequestId?: number;
   excludeReturnRequestId?: number;
   excludeLossRequestId?: number;
+  /**
+   * Khi tạo/sửa phiếu sửa chữa: không cộng SL đang trong phiếu thu hồi mở vào pending vật tư
+   * (cho phép vừa thu hồi vừa gửi sửa cùng mặt hàng — BE chấp nhận theo nghiệp vụ).
+   */
+  excludeConsumableReturnPending?: boolean;
 };
 
 function shouldExcludeReturnRequest(rr: ReturnRequest, opts?: OpenRequestAggregationOptions | null): boolean {
@@ -263,7 +268,8 @@ export function consumableRemainingForAssetItem(held: number, pend: ConsumableAs
 
 /**
  * Gộp theo mã mặt hàng (assetItem id): sửa/báo mất theo đúng người gửi; **thu hồi** theo mọi phiếu mở
- * (BE không cho hai phiếu thu hồi chờ/đã duyệt cùng một mặt hàng vật tư — nhưng cho phép chồng loại khác nếu tổng SL vẫn trong tồn đang giữ).
+ * (trừ khi `opts.excludeConsumableReturnPending` — dùng màn tạo sửa chữa).
+ * Hai phiếu thu hồi chờ/đã duyệt cùng mặt hàng vẫn do màn thu hồi / BE kiểm soát.
  */
 export function mapAssetItemIdToConsumablePending(
   requesterId: string | null,
@@ -291,30 +297,32 @@ export function mapAssetItemIdToConsumablePending(
     entryMap.set(assetItemId, arr);
   };
 
-  if (returnLineDtos != null && returnLineDtos.length > 0) {
-    for (const l of returnLineDtos) {
-      if (!isReturnLineParentOpen(l)) continue;
-      if (shouldExcludeReturnLineRequest(l, opts)) continue;
-      if (String(l.lineType ?? 'DEVICE').toUpperCase() !== 'CONSUMABLE') continue;
-      const aid = l.assetItem?.id != null ? String(l.assetItem.id) : '';
-      if (!aid) continue;
-      const q = l.quantity ?? 0;
-      const code = String(l.request?.code ?? l.request?.id ?? '').trim() || '—';
-      add(aid, 'returnQty', q);
-      pushEntry(aid, { requestCode: code, kind: 'return', label: 'Thu hồi', qty: q });
-    }
-  } else {
-    for (const rr of returns) {
-      if (!isReturnRequestOpen(rr)) continue;
-      if (shouldExcludeReturnRequest(rr, opts)) continue;
-      const code = String(rr.code ?? rr.id ?? '').trim() || '—';
-      for (const line of rr.lines ?? []) {
-        if (String(line.lineType ?? 'DEVICE').toUpperCase() !== 'CONSUMABLE') continue;
-        const aid = line.itemId;
+  if (!opts?.excludeConsumableReturnPending) {
+    if (returnLineDtos != null && returnLineDtos.length > 0) {
+      for (const l of returnLineDtos) {
+        if (!isReturnLineParentOpen(l)) continue;
+        if (shouldExcludeReturnLineRequest(l, opts)) continue;
+        if (String(l.lineType ?? 'DEVICE').toUpperCase() !== 'CONSUMABLE') continue;
+        const aid = l.assetItem?.id != null ? String(l.assetItem.id) : '';
         if (!aid) continue;
-        const q = line.quantity ?? 0;
-        add(String(aid), 'returnQty', q);
-        pushEntry(String(aid), { requestCode: code, kind: 'return', label: 'Thu hồi', qty: q });
+        const q = l.quantity ?? 0;
+        const code = String(l.request?.code ?? l.request?.id ?? '').trim() || '—';
+        add(aid, 'returnQty', q);
+        pushEntry(aid, { requestCode: code, kind: 'return', label: 'Thu hồi', qty: q });
+      }
+    } else {
+      for (const rr of returns) {
+        if (!isReturnRequestOpen(rr)) continue;
+        if (shouldExcludeReturnRequest(rr, opts)) continue;
+        const code = String(rr.code ?? rr.id ?? '').trim() || '—';
+        for (const line of rr.lines ?? []) {
+          if (String(line.lineType ?? 'DEVICE').toUpperCase() !== 'CONSUMABLE') continue;
+          const aid = line.itemId;
+          if (!aid) continue;
+          const q = line.quantity ?? 0;
+          add(String(aid), 'returnQty', q);
+          pushEntry(String(aid), { requestCode: code, kind: 'return', label: 'Thu hồi', qty: q });
+        }
       }
     }
   }

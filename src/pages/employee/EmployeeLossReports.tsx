@@ -35,6 +35,11 @@ import { ApiError, apiDelete, apiPatch, getApiErrorMessage, parseProblemDetailJs
 import { canDeleteLossReportAsRequester, canEditLossReportAsRequester } from '@/utils/requestRecordActions';
 import { buildLossAssetRows } from '@/utils/lossReportAssetRows';
 import { catalogItemNameOnly } from '@/utils/catalogItemDisplay';
+import {
+  formatLossOccurredAtForDisplay,
+  lossOccurredAtFromDatetimeLocal,
+  lossOccurredAtToDatetimeLocalValue,
+} from '@/utils/lossReportForm';
 import { RequesterEmployeeInfo } from '@/components/shared/RequesterEmployeeInfo';
 import { LossReportRequestNarrativeFields } from '@/components/shared/LossReportRequestNarrativeFields';
 import { PageLoading } from '@/components/shared/page-loading';
@@ -72,6 +77,10 @@ function lossRowMatchesSearch(
   if (lossKindUpper(r) === 'COMBINED') {
     parts.push(formatCombinedLossSummary(r, assetItems, equipments));
   }
+  if (r.lossOccurredAt?.trim()) {
+    parts.push(r.lossOccurredAt);
+    parts.push(formatLossOccurredAtForDisplay(r.lossOccurredAt));
+  }
   return parts.join(' ').toLowerCase().includes(s);
 }
 
@@ -104,7 +113,7 @@ const EmployeeLossReports = () => {
 
   useEffect(() => {
     if (!editRow) return;
-    setEditLossOccurredAt(editRow.lossOccurredAt?.trim() ?? '');
+    setEditLossOccurredAt(lossOccurredAtToDatetimeLocalValue(editRow.lossOccurredAt));
     setEditLossLocation(editRow.lossLocation?.trim() ?? '');
     setEditReason(editRow.reason?.trim() ?? '');
     setEditLossDescription(editRow.lossDescription?.trim() ?? '');
@@ -114,9 +123,14 @@ const EmployeeLossReports = () => {
   const submitEdit = async () => {
     if (!editRow?.id) return;
     const id = editRow.id;
+    const lossIso = lossOccurredAtFromDatetimeLocal(editLossOccurredAt);
+    if (!lossIso) {
+      toast.error('Chọn thời gian xảy ra / phát hiện');
+      return;
+    }
     const body: Record<string, unknown> = {
       id,
-      lossOccurredAt: editLossOccurredAt.trim(),
+      lossOccurredAt: lossIso,
       lossLocation: editLossLocation.trim(),
       reason: editReason.trim(),
       lossDescription: editLossDescription.trim(),
@@ -220,6 +234,16 @@ const EmployeeLossReports = () => {
       key: 'requestDate',
       label: 'Ngày gửi',
       render: r => formatDate(r.requestDate ?? ''),
+    },
+    {
+      key: 'lossOccurredAt',
+      label: 'Thời gian xảy ra / phát hiện',
+      className: 'min-w-[10rem]',
+      render: r => (
+        <span className="tabular-nums text-sm text-foreground/90">
+          {formatLossOccurredAtForDisplay(r.lossOccurredAt ?? '').trim() || '—'}
+        </span>
+      ),
     },
     {
       key: 'actions',
@@ -393,7 +417,13 @@ const EmployeeLossReports = () => {
             <div className="space-y-3">
               <div className="space-y-1.5">
                 <Label>Thời gian (xảy ra / phát hiện)</Label>
-                <Input value={editLossOccurredAt} onChange={e => setEditLossOccurredAt(e.target.value)} disabled={busy} />
+                <Input
+                  type="datetime-local"
+                  value={editLossOccurredAt}
+                  onChange={e => setEditLossOccurredAt(e.target.value)}
+                  disabled={busy}
+                  className="w-full max-w-md font-sans tabular-nums"
+                />
               </div>
               <div className="space-y-1.5">
                 <Label>Địa điểm</Label>

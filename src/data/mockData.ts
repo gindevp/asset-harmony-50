@@ -274,6 +274,10 @@ export interface RepairRequest {
   description: string;
   /** Link/ghi chú file đính kèm */
   attachmentNote?: string;
+  /** Báo sửa theo vị trí (tài sản công ty) — chờ QLTS gán serial */
+  companySiteReport?: boolean;
+  reportedLocationId?: string;
+  reportedLocationName?: string;
   status: RepairRequestStatus;
   /** Lý do từ chối (QLTS) khi trạng thái REJECTED */
   rejectionReason?: string;

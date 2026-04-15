@@ -117,9 +117,10 @@ export function filterEquipmentForMyAccount(
 
 /** Số lượng vật tư còn đang giữ (đã cấp − đã thu hồi). */
 export function consumableQuantityHeld(a: { quantity?: number; returnedQuantity?: number }): number {
-  const q = a.quantity ?? 0;
-  const r = a.returnedQuantity ?? 0;
-  return Math.max(0, q - r);
+  const q = Number(a.quantity ?? 0);
+  const r = Number(a.returnedQuantity ?? 0);
+  if (!Number.isFinite(q) || !Number.isFinite(r)) return 0;
+  return Math.max(0, Math.floor(q) - Math.floor(r));
 }
 
 /**

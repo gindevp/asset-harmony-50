@@ -429,7 +429,7 @@ const UsersPage = () => {
               <Download className="h-4 w-4 mr-1" /> Xuất CSV
             </Button>
             <Button size="sm" onClick={() => setAddOpen(true)}>
-              <Plus className="h-4 w-4 mr-1" /> Thêm nhân viên
+              <Plus className="h-4 w-4 mr-1" /> Thêm người dùng
             </Button>
           </div>
         )}
@@ -673,11 +673,11 @@ const UsersPage = () => {
         </DialogContent>
       </Dialog>
 
-      {/* Thêm nhân viên — POST /api/employees (master HRM, không gồm email/SĐT; quyền đăng nhập ở tab Tài khoản) */}
+      {/* Thêm người dùng — POST /api/employees (master HRM, không gồm email/SĐT; quyền đăng nhập ở tab Tài khoản) */}
       <EntityFormModal
         open={addOpen}
         onClose={() => { setAddOpen(false); setForm(emptyForm); }}
-        title="Thêm nhân viên"
+        title="Thêm người dùng"
         onSubmit={() => void handleAdd()}
         submitLabel="Thêm"
         loading={empBusy}

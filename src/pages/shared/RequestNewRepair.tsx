@@ -25,6 +25,7 @@ import {
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Textarea } from '@/components/ui/textarea';
 
@@ -56,6 +57,7 @@ import {
   useEmployees,
   useEnrichedEquipmentList,
   useEquipmentAssignments,
+  useLocations,
   useLossReportRequests,
   useRepairRequestsView,
   useReturnRequestsView,
@@ -92,6 +94,11 @@ export default function RequestNewRepair() {
   const repairQ = useRepairRequestsView();
   const returnQ = useReturnRequestsView();
   const lossQ = useLossReportRequests();
+  const locQ = useLocations();
+  const locations = useMemo(
+    () => [...(locQ.data ?? [])].filter(l => l.active !== false).sort((a, b) => (a.name ?? '').localeCompare(b.name ?? '', 'vi')),
+    [locQ.data],
+  );
   const equipments = eqQ.data ?? [];
   const assetItems = useMemo(() => (aiQ.data ?? []).map(mapAssetItemDto), [aiQ.data]);
   const myEmpIdStr = resolveEmployeeIdForRequests();
@@ -157,6 +164,12 @@ export default function RequestNewRepair() {
     return Number.isFinite(n) ? { excludeRepairRequestId: n } : undefined;
   }, [isEditMode, editId]);
 
+  /** Trên màn sửa chữa: không trừ SL đang trong phiếu thu hồi mở — vẫn cho gửi sửa cùng mặt hàng. */
+  const consumablePendingOpts = useMemo<OpenRequestAggregationOptions>(
+    () => ({ ...aggregationOpts, excludeConsumableReturnPending: true }),
+    [aggregationOpts],
+  );
+
   const equipmentOpenHints = useMemo(
     () =>
       mapEquipmentIdToOpenRequestHints(
@@ -191,9 +204,9 @@ export default function RequestNewRepair() {
         returnRequests,
         lossQ.data ?? [],
         returnLineDtos,
-        aggregationOpts,
+        consumablePendingOpts,
       ),
-    [myEmpIdStr, repairQ.data, returnRequests, lossQ.data, returnLineDtos, aggregationOpts],
+    [myEmpIdStr, repairQ.data, returnRequests, lossQ.data, returnLineDtos, consumablePendingOpts],
   );
 
   const [repairSelected, setRepairSelected] = useState<Record<string, boolean>>({});
@@ -236,8 +249,11 @@ export default function RequestNewRepair() {
 
   const [repairIssue, setRepairIssue] = useState('');
   const [repairDesc, setRepairDesc] = useState('');
-  const [repairAttachment, setRepairAttachment] = useState('');
   const [repairFile, setRepairFile] = useState<File | null>(null);
+  /** Báo sửa tài sản công ty: vị trí (không chọn serial — QLTS gán sau). */
+  const [companyLocationId, setCompanyLocationId] = useState('');
+  /** Phiếu sửa theo vị trí (đang sửa từ API). */
+  const [editCompanySite, setEditCompanySite] = useState(false);
   const [repairBusy, setRepairBusy] = useState(false);
   const [cancelConfirmOpen, setCancelConfirmOpen] = useState(false);
   const [editBootstrapLoading, setEditBootstrapLoading] = useState(false);
@@ -252,7 +268,12 @@ export default function RequestNewRepair() {
         if (cancelled) return;
         setRepairIssue(req?.problemCategory ?? '');
         setRepairDesc(req?.description ?? '');
-        setRepairAttachment(req?.attachmentNote ?? '');
+        setEditCompanySite(Boolean(req?.companySiteReport));
+        if (req?.companySiteReport && req?.reportedLocation?.id != null) {
+          setCompanyLocationId(String(req.reportedLocation.id));
+        } else {
+          setCompanyLocationId('');
+        }
         const lines = (req?.lines ?? []) as any[];
         const nextEq: Record<string, boolean> = {};
         const nextConsSel: Record<string, boolean> = {};
@@ -291,6 +312,12 @@ export default function RequestNewRepair() {
     };
   }, [isEditMode, editId]);
 
+  const hasPersonalHoldings = myEquipment.length > 0 || myConsumables.length > 0;
+  useEffect(() => {
+    if (isEditMode) return;
+    if (!hasPersonalHoldings && locations.length > 0) setAssetOwnershipTab('COMPANY');
+  }, [isEditMode, hasPersonalHoldings, locations.length]);
+
   const displayConsumableItems = useMemo(() => {
     const rows = consumableGroups.map(g => ({
       itemId: g.assetItemId,
@@ -326,7 +353,153 @@ export default function RequestNewRepair() {
     return displayConsumableItems.filter(g => (assetOwnershipTab === 'COMPANY' ? g.isCompanyAsset : !g.isCompanyAsset));
   }, [displayConsumableItems, isEditMode, assetOwnershipTab]);
 
+  /** Phiếu công ty đã có dòng thiết bị/vật tư do QLTS gán — hiển thị lưới chọn. */
+  const editHasAssetLines = useMemo(() => {
+    if (!isEditMode || !editCompanySite) return true;
+    const eq = Object.values(repairSelected).some(Boolean);
+    const cq = Object.values(repairConsumableSelected).some(Boolean);
+    return eq || cq;
+  }, [isEditMode, editCompanySite, repairSelected, repairConsumableSelected]);
+
+  const myTabHasSelection = useMemo(() => {
+    const ve = visibleEquipmentRows.some(e => repairSelected[e.id]);
+    const vc = visibleConsumableItems.some(g => repairConsumableSelected[g.itemId]);
+    return ve || vc;
+  }, [visibleEquipmentRows, visibleConsumableItems, repairSelected, repairConsumableSelected]);
+
+  const companyFormComplete =
+    Boolean(companyLocationId.trim()) &&
+    Boolean(repairIssue.trim()) &&
+    (Boolean(repairDesc.trim()) || repairFile != null);
+
+  const canSubmitRepair = useMemo(() => {
+    if (!repairIssue.trim()) return false;
+    if (isEditMode) {
+      if (editCompanySite && !editHasAssetLines) return companyFormComplete;
+      if (editCompanySite && editHasAssetLines) return myTabHasSelection;
+      return myTabHasSelection;
+    }
+    if (assetOwnershipTab === 'COMPANY') return companyFormComplete;
+    return myTabHasSelection;
+  }, [
+    repairIssue,
+    isEditMode,
+    editCompanySite,
+    editHasAssetLines,
+    companyFormComplete,
+    myTabHasSelection,
+    assetOwnershipTab,
+  ]);
+
   const submitRepair = async () => {
+    /** Tài sản công ty: chỉ chọn vị trí + mô tả/ảnh — QLTS gán serial khi tiếp nhận */
+    if (!isEditMode && assetOwnershipTab === 'COMPANY') {
+      const loc = companyLocationId.trim();
+      if (!loc) {
+        toast.error('Chọn vị trí có tài sản công ty cần sửa');
+        return;
+      }
+      if (!repairIssue.trim()) {
+        toast.error('Nhập vấn đề / danh mục');
+        return;
+      }
+      const repEidCs = requireEmployeeId();
+      if (repEidCs == null) return;
+      setRepairBusy(true);
+      try {
+        let fileUrlCs: string | undefined;
+        if (repairFile) {
+          const fd = new FormData();
+          fd.append('file', repairFile);
+          const up = await apiPostMultipart<{ url?: string }>('/api/repair-request-attachments', fd);
+          fileUrlCs = up?.url;
+          if (!fileUrlCs) throw new Error('Upload không trả URL');
+        }
+        const notePartsCs: string[] = [];
+        if (fileUrlCs) notePartsCs.push(`FILE:${fileUrlCs}`);
+        const descCs = repairDesc.trim();
+        if (!descCs && notePartsCs.length === 0) {
+          toast.error('Nhập mô tả chi tiết hoặc đính kèm ảnh / file');
+          setRepairBusy(false);
+          return;
+        }
+        await apiPost('/api/repair-requests', {
+          code: makeBizCode('RP'),
+          requestDate: new Date().toISOString(),
+          problemCategory: repairIssue.trim().slice(0, 100),
+          description: descCs || undefined,
+          attachmentNote: notePartsCs.length > 0 ? notePartsCs.join('\n') : undefined,
+          status: 'NEW',
+          requester: { id: repEidCs },
+          companySiteReport: true,
+          reportedLocation: { id: Number(loc) },
+          lines: [],
+        });
+        toast.success('Đã gửi yêu cầu sửa chữa');
+        await qc.invalidateQueries({ queryKey: ['api', 'allocation-requests-view'] });
+        await qc.invalidateQueries({ queryKey: ['api', 'repair-requests-view'] });
+        await qc.invalidateQueries({ queryKey: ['api', 'return-requests-view'] });
+        await qc.invalidateQueries({ queryKey: ['api', 'loss-report-requests'] });
+        navigate(backTo);
+      } catch (e) {
+        toast.error(getApiErrorMessage(e));
+      } finally {
+        setRepairBusy(false);
+      }
+      return;
+    }
+
+    /** Sửa phiếu báo theo vị trí (chưa có dòng thiết bị do QLTS gán sau) — chỉ PATCH vị trí + mô tả/ảnh, không gửi lines */
+    if (isEditMode && editCompanySite && !editHasAssetLines) {
+      const loc = companyLocationId.trim();
+      if (!loc) {
+        toast.error('Chọn vị trí có tài sản công ty cần sửa');
+        return;
+      }
+      if (!repairIssue.trim()) {
+        toast.error('Nhập vấn đề / danh mục');
+        return;
+      }
+      const descCs = repairDesc.trim();
+      if (!descCs && !repairFile) {
+        toast.error('Nhập mô tả chi tiết hoặc đính kèm ảnh / file');
+        return;
+      }
+      setRepairBusy(true);
+      try {
+        let fileUrlCs: string | undefined;
+        if (repairFile) {
+          const fd = new FormData();
+          fd.append('file', repairFile);
+          const up = await apiPostMultipart<{ url?: string }>('/api/repair-request-attachments', fd);
+          fileUrlCs = up?.url;
+          if (!fileUrlCs) throw new Error('Upload không trả URL');
+        }
+        const notePartsCs: string[] = [];
+        if (fileUrlCs) notePartsCs.push(`FILE:${fileUrlCs}`);
+        const requestId = Number(editId);
+        await apiPatch(`/api/repair-requests/${requestId}`, {
+          id: requestId,
+          problemCategory: repairIssue.trim().slice(0, 100),
+          description: descCs || undefined,
+          attachmentNote: notePartsCs.length > 0 ? notePartsCs.join('\n') : undefined,
+          companySiteReport: true,
+          reportedLocation: { id: Number(loc) },
+        });
+        toast.success('Đã cập nhật yêu cầu sửa chữa');
+        await qc.invalidateQueries({ queryKey: ['api', 'allocation-requests-view'] });
+        await qc.invalidateQueries({ queryKey: ['api', 'repair-requests-view'] });
+        await qc.invalidateQueries({ queryKey: ['api', 'return-requests-view'] });
+        await qc.invalidateQueries({ queryKey: ['api', 'loss-report-requests'] });
+        navigate(backTo);
+      } catch (e) {
+        toast.error(getApiErrorMessage(e));
+      } finally {
+        setRepairBusy(false);
+      }
+      return;
+    }
+
     const visibleEquipmentIdSet = new Set(visibleEquipmentRows.map(e => String(e.id)));
     const visibleConsumableIdSet = new Set(visibleConsumableItems.map(g => g.itemId));
     const eqIds = Object.entries(repairSelected)
@@ -351,7 +524,7 @@ export default function RequestNewRepair() {
       if (qty > remaining) {
         toast.error(
           remaining <= 0
-            ? `Mặt hàng không còn SL khả dụng (đã nằm trong phiếu sửa/thu hồi/báo mất chưa xử lý).${pend?.summary ? ` (${pend.summary})` : ''}`
+            ? `Mặt hàng không còn SL khả dụng (đã nằm trong phiếu sửa/báo mất chưa xử lý).${pend?.summary ? ` (${pend.summary})` : ''}`
             : `Số lượng vượt phần còn khả dụng (tối đa ${remaining}).${pend?.summary ? ` Đang có: ${pend.summary}.` : ''}`,
         );
         return;
@@ -384,7 +557,6 @@ export default function RequestNewRepair() {
         if (!fileUrl) throw new Error('Upload không trả URL');
       }
       const noteParts: string[] = [];
-      if (repairAttachment.trim()) noteParts.push(repairAttachment.trim());
       if (fileUrl) noteParts.push(`FILE:${fileUrl}`);
 
       let lineNo = 1;
@@ -409,13 +581,16 @@ export default function RequestNewRepair() {
 
       if (isEditMode) {
         const requestId = Number(editId);
-        await apiPatch(`/api/repair-requests/${requestId}`, {
+        const patchBody: Record<string, unknown> = {
           id: requestId,
           problemCategory: repairIssue.trim().slice(0, 100),
           description: repairDesc.trim() || undefined,
           attachmentNote: noteParts.length > 0 ? noteParts.join('\n') : undefined,
-          lines,
-        });
+        };
+        if (!(editCompanySite && !editHasAssetLines)) {
+          patchBody.lines = lines;
+        }
+        await apiPatch(`/api/repair-requests/${requestId}`, patchBody);
       } else {
         await apiPost('/api/repair-requests', {
           code: makeBizCode('RP'),
@@ -441,10 +616,20 @@ export default function RequestNewRepair() {
     }
   };
 
-  const hasAnyAsset = myEquipment.length > 0 || myConsumables.length > 0;
+  const hasPersonalHoldingsForUi = myEquipment.length > 0 || myConsumables.length > 0;
   const hasVisibleAsset = visibleEquipmentRows.length > 0 || visibleConsumableItems.length > 0;
+  const cannotCreateAny = !isEditMode && !hasPersonalHoldingsForUi && locations.length === 0;
   const loadingAssets =
-    eqQ.isLoading || caQ.isLoading || repairQ.isLoading || returnQ.isLoading || lossQ.isLoading || editBootstrapLoading;
+    eqQ.isLoading ||
+    caQ.isLoading ||
+    repairQ.isLoading ||
+    returnQ.isLoading ||
+    lossQ.isLoading ||
+    editBootstrapLoading ||
+    locQ.isLoading;
+
+  const showCompanySiteFlow =
+    (isEditMode && editCompanySite && !editHasAssetLines) || (!isEditMode && assetOwnershipTab === 'COMPANY');
 
   return (
     <div className="page-container max-w-none w-full pb-8">
@@ -471,35 +656,84 @@ export default function RequestNewRepair() {
         <CardContent className="space-y-4">
           {loadingAssets ? (
             <PageLoading label="Đang tải tài sản…" minHeight="min-h-[28vh]" />
-          ) : !hasAnyAsset && !isEditMode ? (
-            <p className="text-sm text-muted-foreground">Bạn không có thiết bị hoặc vật tư đang giữ — không thể tạo yêu cầu sửa chữa.</p>
+          ) : cannotCreateAny ? (
+            <p className="text-sm text-muted-foreground">
+              Không thể tạo yêu cầu: bạn không có thiết bị/vật tư đang giữ và chưa có vị trí nào trong hệ thống. Liên hệ QLTS nếu
+              cần.
+            </p>
           ) : (
             <>
               <div className="space-y-1">
                 <Label className="text-base font-semibold">
-                  Tài sản cần sửa (thiết bị và/hoặc vật tư)
-                  <RequiredMark />
+                  {showCompanySiteFlow ? 'Báo sửa tài sản công ty (theo vị trí)' : 'Tài sản cần sửa (thiết bị và/hoặc vật tư)'}
+                  {!showCompanySiteFlow ? <RequiredMark /> : null}
                 </Label>
                 <p className="text-xs text-muted-foreground">
-                  Danh sách bao gồm tài sản cá nhân/phòng ban và tài sản công ty theo vị trí làm việc của bạn.
+                  {isEditMode && editCompanySite && !editHasAssetLines ? (
+                    <>
+                      Bạn đã chọn vị trí và gửi ảnh/mô tả. QLTS sẽ gán đúng serial thiết bị khi tiếp nhận — sau đó các dòng tài sản
+                      sẽ hiển thị tại đây nếu cần chỉnh.
+                    </>
+                  ) : (
+                    <>
+                      <span className="font-medium text-foreground">Của tôi:</span> tài sản đang bàn giao cho bạn/phòng ban.{' '}
+                      <span className="font-medium text-foreground">Công ty:</span> chỉ cần chọn vị trí và mô tả/ảnh — không chọn
+                      serial; QLTS đối chiếu hình ảnh và gán thiết bị trước khi tiếp nhận.
+                    </>
+                  )}
                 </p>
               </div>
               {!isEditMode ? (
                 <Tabs value={assetOwnershipTab} onValueChange={v => setAssetOwnershipTab(v as 'MY' | 'COMPANY')}>
-                  <TabsList className="grid w-full max-w-lg grid-cols-2">
-                    <TabsTrigger value="MY">Yêu cầu sửa tài sản của tôi</TabsTrigger>
-                    <TabsTrigger value="COMPANY">Yêu cầu sửa tài sản công ty</TabsTrigger>
+                  <TabsList className="grid w-full max-w-2xl grid-cols-2 h-auto min-h-10">
+                    <TabsTrigger value="MY" className="whitespace-normal text-center leading-snug px-2 py-2">
+                      Sửa chữa tài sản của tôi
+                    </TabsTrigger>
+                    <TabsTrigger value="COMPANY" className="whitespace-normal text-center leading-snug px-2 py-2">
+                      Sửa chữa tài sản công ty (theo vị trí)
+                    </TabsTrigger>
                   </TabsList>
                 </Tabs>
               ) : null}
-              {!isEditMode && !hasVisibleAsset ? (
+              {!isEditMode && assetOwnershipTab === 'MY' && !hasVisibleAsset ? (
                 <p className="text-xs text-muted-foreground">
-                  {assetOwnershipTab === 'COMPANY'
-                    ? 'Không có tài sản công ty theo vị trí của bạn để tạo yêu cầu sửa chữa.'
-                    : 'Không có tài sản cá nhân/phòng ban để tạo yêu cầu sửa chữa.'}
+                  Không có thiết bị hoặc vật tư cá nhân/phòng ban đang giữ — chuyển sang tab «Công ty» nếu bạn cần báo sửa theo vị
+                  trí.
                 </p>
               ) : null}
-              <AssetPickTwoColumnGrid>
+              {!isEditMode && assetOwnershipTab === 'COMPANY' && locations.length === 0 ? (
+                <p className="text-xs text-destructive">Chưa có vị trí nào trong hệ thống — liên hệ QLTS.</p>
+              ) : null}
+              {showCompanySiteFlow ? (
+                <div className="space-y-3 rounded-xl border border-border/80 bg-muted/20 p-4">
+                  <div className="space-y-2">
+                    <Label>
+                      Vị trí tài sản công ty
+                      <RequiredMark />
+                    </Label>
+                    <Select
+                      value={companyLocationId || undefined}
+                      onValueChange={setCompanyLocationId}
+                      disabled={repairBusy || (isEditMode && editHasAssetLines)}
+                    >
+                      <SelectTrigger className="w-full max-w-md">
+                        <SelectValue placeholder="Chọn vị trí / khu vực" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {locations.map(loc => (
+                          <SelectItem key={String(loc.id)} value={String(loc.id)}>
+                            {loc.code ? `${loc.code} — ${loc.name ?? ''}` : (loc.name ?? '—')}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                    <p className="text-[11px] text-muted-foreground leading-relaxed">
+                      Không cần chọn serial tại bước này. Đính kèm ảnh hiện trường để QLTS xác định đúng thiết bị khi tiếp nhận.
+                    </p>
+                  </div>
+                </div>
+              ) : (
+                <AssetPickTwoColumnGrid>
                 <AssetPickColumn
                   icon={Monitor}
                   title="Thiết bị"
@@ -593,7 +827,8 @@ export default function RequestNewRepair() {
                     <p className="px-1 py-6 text-center text-xs text-muted-foreground">Không có vật tư đang giữ.</p>
                   )}
                 </AssetPickColumn>
-              </AssetPickTwoColumnGrid>
+                </AssetPickTwoColumnGrid>
+              )}
 
               <div className="space-y-2">
                 <Label>
@@ -605,15 +840,6 @@ export default function RequestNewRepair() {
               <div className="space-y-2">
                 <Label>Mô tả chi tiết</Label>
                 <Textarea value={repairDesc} onChange={e => setRepairDesc(e.target.value)} rows={3} />
-              </div>
-              <div className="space-y-2">
-                <Label>Link / ghi chú ảnh đính kèm (tùy chọn)</Label>
-                <Textarea
-                  value={repairAttachment}
-                  onChange={e => setRepairAttachment(e.target.value)}
-                  rows={2}
-                  placeholder="VD: URL ảnh lỗi, mô tả file đính kèm..."
-                />
               </div>
               <div className="space-y-2">
                 <Label>Tài liệu đính kèm (tối đa 50 MB)</Label>
@@ -628,17 +854,15 @@ export default function RequestNewRepair() {
                 <Button variant="outline" type="button" onClick={() => setCancelConfirmOpen(true)} disabled={repairBusy}>
                   Hủy
                 </Button>
-                <Button onClick={() => void submitRepair()} disabled={repairBusy || (!hasVisibleAsset && !isEditMode)}>
+                <Button onClick={() => void submitRepair()} disabled={repairBusy || !canSubmitRepair}>
                   {repairBusy ? 'Đang lưu…' : isEditMode ? 'Lưu thay đổi' : 'Gửi'}
                 </Button>
               </div>
               <AlertDialog open={cancelConfirmOpen} onOpenChange={setCancelConfirmOpen}>
                 <AlertDialogContent>
                   <AlertDialogHeader>
-                    <AlertDialogTitle>Hủy yêu cầu sửa chữa?</AlertDialogTitle>
-                    <AlertDialogDescription>
-                      Dữ liệu đang nhập chưa được lưu. Bạn có chắc muốn quay lại danh sách?
-                    </AlertDialogDescription>
+                    <AlertDialogTitle>Bạn có chắc chắn không?</AlertDialogTitle>
+                    <AlertDialogDescription>Mọi thay đổi sẽ mất.</AlertDialogDescription>
                   </AlertDialogHeader>
                   <AlertDialogFooter>
                     <AlertDialogCancel>Ở lại</AlertDialogCancel>

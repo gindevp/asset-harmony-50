@@ -292,6 +292,8 @@ const StockInPage = () => {
       invalidateStock();
       void qc.invalidateQueries({ queryKey: ['api', 'equipment'] });
       void qc.invalidateQueries({ queryKey: ['api', 'consumable-stocks'] });
+      void qc.invalidateQueries({ queryKey: ['api', 'consumable-stocks-view'] });
+      void qc.invalidateQueries({ queryKey: ['api', 'consumable-assignments'] });
       void qc.invalidateQueries({ queryKey: ['api', 'equipment-assignments'] });
     } catch (e) {
       toast.error(e instanceof Error ? e.message : 'Lỗi API');

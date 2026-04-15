@@ -4,7 +4,7 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
-import { apiPost, setStoredToken } from '@/api/http';
+import { apiPost, getApiErrorMessage, setStoredToken } from '@/api/http';
 import { fetchAndStoreAccountContext } from '@/api/account';
 import { hasAnyAuthority } from '@/auth/jwt';
 import { toast } from 'sonner';
@@ -51,7 +51,7 @@ const Login = () => {
       toast.success('Đăng nhập thành công');
       goAfterLogin(token);
     } catch (err: unknown) {
-      toast.error(err instanceof Error ? err.message : 'Đăng nhập thất bại');
+      toast.error(getApiErrorMessage(err) || 'Đăng nhập thất bại');
     } finally {
       setLoading(false);
     }
