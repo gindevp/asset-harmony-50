@@ -42,7 +42,7 @@ import {
 } from '@/utils/lossReportForm';
 
 const LossReportRequests = () => {
-  const canAdminEditDelete = hasAnyAuthority(getStoredToken(), ['ROLE_ADMIN']);
+  const canAdminEditDelete = hasAnyAuthority(getStoredToken(), ['ROLE_ADMIN', 'ROLE_ASSET_MANAGER', 'ROLE_GD']);
   const qc = useQueryClient();
   const lrQ = useLossReportRequests();
   const empQ = useEmployees();

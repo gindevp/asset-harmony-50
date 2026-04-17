@@ -324,7 +324,7 @@ const ReturnRequests = () => {
           >
             <Eye className="h-4 w-4" />
           </Button>
-          {canEditReturnRequestFields(r.status) ? (
+          {canEditReturnRequestFields(returnStatusKey(r.status)) ? (
             <Button
               type="button"
               variant="ghost"
@@ -338,7 +338,7 @@ const ReturnRequests = () => {
               <Pencil className="h-4 w-4" />
             </Button>
           ) : null}
-          {canDeleteReturnRequest(r.status) ? (
+          {canDeleteReturnRequest(returnStatusKey(r.status)) ? (
             <Button
               type="button"
               variant="ghost"

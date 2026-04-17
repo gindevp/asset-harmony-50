@@ -177,6 +177,12 @@ export function allocationDetailSerial(row: AllocationDetailRow, equipments: Equ
 }
 
 export function allocationDetailQuantity(row: AllocationDetailRow): number {
-  return row.kind === 'device_group' ? row.lines.length : row.line.quantity;
+  if (row.kind === 'device_group') {
+    return row.lines.reduce((sum, l) => {
+      const q = Number(l.quantity ?? 0);
+      return sum + (Number.isFinite(q) ? q : 0);
+    }, 0);
+  }
+  return row.line.quantity;
 }
 

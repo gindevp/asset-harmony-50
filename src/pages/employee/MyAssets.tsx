@@ -40,10 +40,6 @@ import { PageLoading } from '@/components/shared/page-loading';
 
 type MyConsumableGroupRow = GroupedConsumableRow & { id: string };
 
-function consumableGroupHasApprovedLoss(g: GroupedConsumableRow, approvedLossIds: Set<string>): boolean {
-  return g.assignments.some(a => approvedLossIds.has(String(a.id ?? '')));
-}
-
 const MyAssets = () => {
   const eqQ = useEnrichedEquipmentList();
   const caQ = useConsumableAssignments();
@@ -79,6 +75,36 @@ const MyAssets = () => {
     return s;
   }, [lossQ.data]);
 
+  /** Tổng SL vật tư đã được duyệt mất theo mã mặt hàng (độc lập với việc dòng bàn giao còn hiển thị hay không). */
+  const approvedLossQtyByAssetItem = useMemo(() => {
+    const m = new Map<string, number>();
+    if (!empId) return m;
+    for (const r of lossQ.data ?? []) {
+      if (r.status !== 'APPROVED') continue;
+      if (String(r.requester?.id ?? '') !== String(empId)) continue;
+      const kind = String(r.lossKind ?? '').toUpperCase();
+      if (kind === 'CONSUMABLE') {
+        const aid = r.consumableAssignment?.assetItem?.id;
+        const q = Number(r.quantity ?? 0);
+        if (aid != null && Number.isFinite(q) && q > 0) {
+          const key = String(aid);
+          m.set(key, (m.get(key) ?? 0) + q);
+        }
+      } else if (kind === 'COMBINED') {
+        for (const line of r.lossEntries ?? []) {
+          if (String(line.lineType ?? '').toUpperCase() !== 'CONSUMABLE') continue;
+          const aid = line.assetItemId;
+          const q = Number(line.quantity ?? 0);
+          if (aid != null && Number.isFinite(q) && q > 0) {
+            const key = String(aid);
+            m.set(key, (m.get(key) ?? 0) + q);
+          }
+        }
+      }
+    }
+    return m;
+  }, [lossQ.data, empId]);
+
   const empId = resolveEmployeeIdForRequests();
   const myDeptId = useMemo(() => {
     if (!empId || !empQ.data) return null;
@@ -99,9 +125,8 @@ const MyAssets = () => {
         empId,
         myDeptId,
         myLocId,
-        approvedLossConsumableIds,
       ),
-    [consumableAssignments, empId, myDeptId, myLocId, approvedLossConsumableIds],
+    [consumableAssignments, empId, myDeptId, myLocId],
   );
 
   const equipmentSorted = useMemo(() => sortEquipmentForDisplay(myEquipments), [myEquipments]);
@@ -118,10 +143,9 @@ const MyAssets = () => {
       const pend = consumablePendingByAssetItem.get(g.assetItemId);
       const hasPending =
         (pend?.returnQty ?? 0) > 0 || (pend?.repairQty ?? 0) > 0 || (pend?.lossQty ?? 0) > 0;
-      const showLossOnly = held <= 0 && consumableGroupHasApprovedLoss(g, approvedLossConsumableIds);
-      return held > 0 || hasPending || showLossOnly;
+      return held > 0 || hasPending;
     });
-  }, [myConsumables, consumablePendingByAssetItem, approvedLossConsumableIds]);
+  }, [myConsumables, consumablePendingByAssetItem]);
 
   const totalConsumableQtyHeld = useMemo(
     () => consumableGroupRows.reduce((s, g) => s + totalHeldForConsumableGroup(g.assignments), 0),
@@ -167,10 +191,10 @@ const MyAssets = () => {
     () =>
       consumableGroupRows.filter(
         g =>
-          totalHeldForConsumableGroup(g.assignments) <= 0 &&
-          consumableGroupHasApprovedLoss(g, approvedLossConsumableIds),
+          (consumablePendingByAssetItem.get(g.assetItemId)?.lossQty ?? 0) > 0 ||
+          (approvedLossQtyByAssetItem.get(g.assetItemId) ?? 0) > 0,
       ).length,
-    [consumableGroupRows, approvedLossConsumableIds],
+    [consumableGroupRows, consumablePendingByAssetItem, approvedLossQtyByAssetItem],
   );
 
   /** Phiếu thu hồi mở (chờ duyệt / đã duyệt chưa hoàn tất) — thiết bị nằm trong phiếu của tôi. */
@@ -233,7 +257,13 @@ const MyAssets = () => {
         key: 'status',
         label: 'Trạng thái',
         render: e => {
-          const { status, label } = getEquipmentDisplayStatusForMyAssets(e, empId, returnRequests);
+          const { status, label } = getEquipmentDisplayStatusForMyAssets(
+            e,
+            empId,
+            returnRequests,
+            repairRequests,
+            lossQ.data ?? [],
+          );
           return <StatusBadge status={status} label={label} />;
         },
       },
@@ -243,7 +273,7 @@ const MyAssets = () => {
         render: e => formatDateTime(e.capitalizedDate ?? ''),
       },
     ],
-    [assetItems, empId, returnRequests],
+    [assetItems, empId, returnRequests, repairRequests, lossQ.data],
   );
 
   const consumableColumns: Column<MyConsumableGroupRow>[] = useMemo(
@@ -289,6 +319,15 @@ const MyAssets = () => {
         },
       },
       {
+        key: 'underRepair',
+        label: 'Đang sửa chữa',
+        className: 'text-right text-amber-700 dark:text-amber-300 tabular-nums',
+        render: g => {
+          const qty = consumablePendingByAssetItem.get(g.assetItemId)?.repairQty ?? 0;
+          return <span className="font-medium">{qty.toLocaleString('vi-VN')}</span>;
+        },
+      },
+      {
         key: 'returned',
         label: 'Đã thu hồi',
         className: 'text-right text-muted-foreground tabular-nums',
@@ -310,13 +349,7 @@ const MyAssets = () => {
         className: 'text-right text-muted-foreground tabular-nums',
         render: g => {
           const pend = consumablePendingByAssetItem.get(g.assetItemId)?.lossQty ?? 0;
-          let approved = 0;
-          for (const a of g.assignments) {
-            if (!approvedLossConsumableIds.has(String(a.id ?? ''))) continue;
-            const q = a.quantity ?? 0;
-            const r = a.returnedQuantity ?? 0;
-            approved += Math.max(0, q - r);
-          }
+          const approved = approvedLossQtyByAssetItem.get(g.assetItemId) ?? 0;
           const total = pend + approved;
           return (
             <span className="font-medium">
@@ -338,7 +371,7 @@ const MyAssets = () => {
         },
       },
     ],
-    [assetItems, consumablePendingByAssetItem, approvedLossConsumableIds],
+    [assetItems, consumablePendingByAssetItem, approvedLossQtyByAssetItem],
   );
 
   return (

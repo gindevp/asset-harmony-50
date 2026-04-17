@@ -223,8 +223,20 @@ export function AssetPickConsumableRow({
                 <span className="text-muted-foreground/80"> · không vượt quá khi nhập SL</span>
               </p>
             )}
+            {blocked ? (
+              <p className="text-xs leading-snug text-amber-800 dark:text-amber-400">
+                Không chọn được — vật tư đã nằm trong yêu cầu khác (chưa xử lý xong).
+              </p>
+            ) : null}
             {pendingEntries && pendingEntries.length > 0 ? (
-              <ul className="mt-1.5 space-y-0.5 border-l-2 border-muted pl-2 text-[11px] leading-snug text-muted-foreground">
+              <ul
+                className={cn(
+                  'mt-1.5 space-y-0.5 border-l-2 pl-2 text-[11px] leading-snug',
+                  blocked
+                    ? 'border-amber-500/40 text-amber-800 dark:text-amber-400'
+                    : 'border-muted text-muted-foreground',
+                )}
+              >
                 {pendingEntries.map((e, i) => (
                   <li key={`${e.requestCode}-${e.kind}-${i}`}>
                     <span className="font-mono text-foreground/85">{formatBizCodeDisplay(e.requestCode)}</span>

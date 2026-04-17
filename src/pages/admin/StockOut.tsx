@@ -53,6 +53,11 @@ const selectableRecipientTypeLabels: Record<string, string> = {
 };
 const COMPANY_RECIPIENT_MARKER = 'Đối tượng: Công ty';
 
+function isDepartmentCoordinatorJobTitle(jobTitle: string | undefined): boolean {
+  const jt = String(jobTitle ?? '').trim().toLowerCase();
+  return jt.includes('quản lý phòng ban') || jt.includes('department coordinator');
+}
+
 const StockOutPage = () => {
   const qc = useQueryClient();
   const invalidateStockOutViews = async () => {
@@ -119,7 +124,7 @@ const StockOutPage = () => {
     switch (editOutRecipientType) {
       case 'EMPLOYEE':
         return employees
-          .filter(e => e.active !== false)
+          .filter(e => e.active !== false && !isDepartmentCoordinatorJobTitle(e.jobTitle))
           .map(e => ({ value: String(e.id), label: `${e.code} - ${e.fullName}` }));
       case 'DEPARTMENT':
         return departments

@@ -16,11 +16,12 @@ import {
   useDepartments,
   useEmployees,
   useEnrichedEquipmentList,
+  useLocations,
 } from '@/hooks/useEntityApi';
 import { formatEquipmentCodeDisplay } from '@/utils/formatCodes';
 import { consumableQuantityHeld } from '@/utils/myEquipment';
 
-type LookupType = 'department' | 'employeeCode';
+type LookupType = 'department' | 'location' | 'employeeCode';
 type SearchPayload = { type: LookupType; keyword: string };
 
 type ConsumableHoldingRow = {
@@ -35,6 +36,9 @@ type ConsumableHoldingRow = {
 };
 
 const ASSIGNMENT_NOTE_DEPARTMENT_POOL = 'scoped=DEPT';
+const ASSIGNMENT_NOTE_LOCATION_POOL = 'scoped=LOC';
+const ASSIGNMENT_NOTE_COMPANY_VI = 'đối tượng: công ty';
+const ASSIGNMENT_NOTE_COMPANY_ASCII = 'doi tuong: cong ty';
 
 /**
  * Tài sản «của phòng ban»: gán cho phòng ban (pool / không cấp cá nhân),
@@ -67,12 +71,34 @@ function consumableDepartmentScope(
   };
 }
 
+function hasCompanyLocationHint(note: string): boolean {
+  const n = note.toLowerCase();
+  return n.includes(ASSIGNMENT_NOTE_LOCATION_POOL.toLowerCase()) || n.includes(ASSIGNMENT_NOTE_COMPANY_VI) || n.includes(ASSIGNMENT_NOTE_COMPANY_ASCII);
+}
+
+function consumableLocationScope(
+  a: ConsumableAssignmentDto,
+): { id: string; code: string; name: string } | null {
+  const note = typeof a.note === 'string' ? a.note : '';
+  const loc = a.location ?? a.employee?.location;
+  if (!loc?.id) return null;
+  const noPersonalHolder = a.employee?.id == null && a.department?.id == null;
+  const locationPool = note.includes(ASSIGNMENT_NOTE_LOCATION_POOL) || hasCompanyLocationHint(note);
+  if (!locationPool && !noPersonalHolder) return null;
+  return {
+    id: String(loc.id),
+    code: loc.code ?? '',
+    name: loc.name ?? '',
+  };
+}
+
 const AssetTracking = () => {
   const eqQ = useEnrichedEquipmentList();
   const caQ = useConsumableAssignments();
   const iQ = useAssetItems();
   const empQ = useEmployees();
   const depQ = useDepartments();
+  const locQ = useLocations();
 
   const equipments = eqQ.data ?? [];
   const consumableAssignments = caQ.data ?? [];
@@ -86,6 +112,15 @@ const AssetTracking = () => {
         code: d.code ?? '',
       })),
     [depQ.data],
+  );
+  const locations = useMemo(
+    () =>
+      (locQ.data ?? []).map(l => ({
+        id: String(l.id),
+        name: l.name ?? '',
+        code: l.code ?? '',
+      })),
+    [locQ.data],
   );
   const [lookupType, setLookupType] = useState<LookupType>('department');
   const [keywordInput, setKeywordInput] = useState('');
@@ -101,6 +136,7 @@ const AssetTracking = () => {
     return m;
   }, [employees]);
   const departmentsById = useMemo(() => new Map(departments.map(d => [d.id, d])), [departments]);
+  const locationsById = useMemo(() => new Map(locations.map(l => [l.id, l])), [locations]);
 
   const hasSearched = !!searchPayload;
   const normalizedKeyword = (searchPayload?.keyword ?? '').trim().toLowerCase();
@@ -117,6 +153,17 @@ const AssetTracking = () => {
     return ids;
   }, [departments, normalizedKeyword, searchPayload]);
 
+  const matchingLocationIds = useMemo(() => {
+    if (!searchPayload || searchPayload.type !== 'location' || !normalizedKeyword) return new Set<string>();
+    const ids = new Set<string>();
+    for (const l of locations) {
+      const code = (l.code ?? '').toLowerCase();
+      const name = (l.name ?? '').toLowerCase();
+      if (code.includes(normalizedKeyword) || name.includes(normalizedKeyword)) ids.add(l.id);
+    }
+    return ids;
+  }, [locations, normalizedKeyword, searchPayload]);
+
   const isEquipmentHolding = (e: Equipment) => {
     if (e.status === 'IN_STOCK' || e.status === 'LOST' || e.status === 'DISPOSED') return false;
     return Boolean(e.assignedTo || e.assignedDepartment || e.assignedLocation);
@@ -129,13 +176,36 @@ const AssetTracking = () => {
       const emp = e.assignedTo ? employeesById.get(e.assignedTo) : undefined;
       return (emp?.code ?? '').toLowerCase().includes(normalizedKeyword);
     }
-    if (!isDepartmentScopedEquipment(e)) return false;
-    const dep = e.assignedDepartment ? departmentsById.get(e.assignedDepartment) : undefined;
-    const text = `${dep?.code ?? ''} ${dep?.name ?? ''} ${e.assignedDepartmentName ?? ''}`.toLowerCase();
-    if (matchingDepartmentIds.size > 0) {
-      return e.assignedDepartment ? matchingDepartmentIds.has(e.assignedDepartment) : false;
+    if (searchPayload.type === 'department') {
+      // Cho phép tra theo phòng ban cả tài sản pool của phòng ban lẫn tài sản cá nhân thuộc phòng ban đó.
+      const depId = e.assignedDepartment ?? (e.assignedTo ? (() => {
+        const emp = employees.find(x => String(x.id) === e.assignedTo);
+        return emp?.department?.id != null ? String(emp.department.id) : undefined;
+      })() : undefined);
+      if (!depId) return false;
+      const dep = departmentsById.get(depId);
+      const text = `${dep?.code ?? ''} ${dep?.name ?? ''} ${e.assignedDepartmentName ?? ''}`.toLowerCase();
+      if (matchingDepartmentIds.size > 0) {
+        return matchingDepartmentIds.has(depId);
+      }
+      return text.includes(normalizedKeyword);
     }
-    return text.includes(normalizedKeyword);
+    if (searchPayload.type === 'location') {
+      const locId = e.assignedLocation;
+      if (!locId) return false;
+      // Tài sản công ty theo vị trí: cấp phát vị trí/pool vị trí hoặc không gán người+phòng ban.
+      const isCompanyAtLocation = Boolean(
+        e.locationAssignedDirectly || e.locationPoolFromAllocation || (!e.assignedTo && !e.assignedDepartment),
+      );
+      if (!isCompanyAtLocation) return false;
+      const loc = locationsById.get(locId);
+      const text = `${loc?.code ?? ''} ${loc?.name ?? ''} ${e.assignedLocationName ?? ''}`.toLowerCase();
+      if (matchingLocationIds.size > 0) {
+        return matchingLocationIds.has(locId);
+      }
+      return text.includes(normalizedKeyword);
+    }
+    return false;
   };
 
   const filteredEquipments = useMemo(
@@ -168,7 +238,16 @@ const AssetTracking = () => {
         continue;
       }
       if (searchPayload.type === 'department') {
-        const dept = consumableDepartmentScope(a);
+        const deptPool = consumableDepartmentScope(a);
+        const deptFromEmployee =
+          a.employee?.department?.id != null
+            ? {
+                id: String(a.employee.department.id),
+                code: a.employee.department.code ?? '',
+                name: a.employee.department.name ?? '',
+              }
+            : null;
+        const dept = deptPool ?? deptFromEmployee;
         if (!dept) continue;
         const idStr = dept.id;
         if (matchingDepartmentIds.size > 0) {
@@ -189,9 +268,52 @@ const AssetTracking = () => {
         });
         continue;
       }
+      if (searchPayload.type === 'location') {
+        const loc = consumableLocationScope(a);
+        if (!loc) continue;
+        const idStr = loc.id;
+        if (matchingLocationIds.size > 0) {
+          if (!matchingLocationIds.has(idStr)) continue;
+        } else {
+          const text = `${loc.code ?? ''} ${loc.name ?? ''}`.toLowerCase();
+          if (!text.includes(normalizedKeyword)) continue;
+        }
+        rows.push({
+          id: String(a.id ?? ''),
+          itemId: String(a.assetItem?.id ?? ''),
+          itemCode: a.assetItem?.code ?? '',
+          itemName: a.assetItem?.name ?? '',
+          holderType: 'Phòng ban',
+          holderName: [loc.code, loc.name].filter(Boolean).join(' - ') || '—',
+          quantityHeld: held,
+          assignedDate: a.assignedDate ?? '',
+        });
+        continue;
+      }
     }
     return rows.sort((a, b) => a.itemCode.localeCompare(b.itemCode, 'vi'));
-  }, [consumableAssignments, normalizedKeyword, searchPayload, matchingDepartmentIds]);
+  }, [consumableAssignments, normalizedKeyword, searchPayload, matchingDepartmentIds, matchingLocationIds]);
+
+  const locationCompanyAssetCounts = useMemo(() => {
+    const byLoc = new Map<string, { locationLabel: string; equipmentCount: number; consumableCount: number }>();
+    for (const e of filteredEquipments) {
+      if (!e.assignedLocation) continue;
+      const loc = locationsById.get(e.assignedLocation);
+      const label = [loc?.code ?? '', loc?.name ?? e.assignedLocationName ?? ''].filter(Boolean).join(' - ') || '—';
+      const cur = byLoc.get(e.assignedLocation) ?? { locationLabel: label, equipmentCount: 0, consumableCount: 0 };
+      cur.equipmentCount += 1;
+      byLoc.set(e.assignedLocation, cur);
+    }
+    for (const c of filteredConsumables) {
+      const parts = c.holderName.split(' - ');
+      const label = c.holderName || '—';
+      const key = parts[0] || label;
+      const cur = byLoc.get(key) ?? { locationLabel: label, equipmentCount: 0, consumableCount: 0 };
+      cur.consumableCount += 1;
+      byLoc.set(key, cur);
+    }
+    return [...byLoc.values()].sort((a, b) => a.locationLabel.localeCompare(b.locationLabel, 'vi'));
+  }, [filteredEquipments, filteredConsumables, locationsById]);
 
   const eqColumns: Column<Equipment>[] = [
     {
@@ -269,7 +391,8 @@ const AssetTracking = () => {
         <div>
           <h1 className="page-title">Tra cứu tài sản đang nắm giữ</h1>
           <p className="text-sm text-muted-foreground mt-1">
-            Theo phòng ban: chỉ tài sản gán cho phòng ban (không gồm tài sản cá nhân chỉ trùng phòng ban trên hồ sơ nhân viên).
+            Theo phòng ban: tra cứu tài sản theo phòng ban (gồm pool phòng ban và tài sản nhân viên thuộc phòng ban).
+            Theo vị trí: tra cứu tài sản công ty theo vị trí và thống kê theo vị trí.
             Theo mã nhân viên: tài sản đang gán cho nhân viên đó. Kết quả gồm thiết bị và vật tư.
           </p>
         </div>
@@ -284,6 +407,7 @@ const AssetTracking = () => {
               </SelectTrigger>
               <SelectContent>
                 <SelectItem value="department">Tra cứu theo phòng ban</SelectItem>
+                <SelectItem value="location">Tra cứu theo vị trí</SelectItem>
                 <SelectItem value="employeeCode">Tra cứu theo mã nhân viên</SelectItem>
               </SelectContent>
             </Select>
@@ -294,7 +418,9 @@ const AssetTracking = () => {
                 placeholder={
                   lookupType === 'employeeCode'
                     ? 'Nhập mã nhân viên...'
-                    : 'Nhập mã hoặc tên phòng ban...'
+                    : lookupType === 'location'
+                      ? 'Nhập mã hoặc tên vị trí...'
+                      : 'Nhập mã hoặc tên phòng ban...'
                 }
                 value={keywordInput}
                 onChange={e => setKeywordInput(e.target.value)}
@@ -319,6 +445,22 @@ const AssetTracking = () => {
         <div className="text-sm text-muted-foreground">Nhập điều kiện và bấm Tìm kiếm để xem tài sản đang nắm giữ.</div>
       ) : (
         <div className="space-y-6">
+          {searchPayload?.type === 'location' ? (
+            <div className="rounded-md border p-3 bg-muted/20 space-y-2">
+              <p className="text-sm font-medium">Thống kê theo vị trí có tài sản công ty ({locationCompanyAssetCounts.length})</p>
+              {locationCompanyAssetCounts.length === 0 ? (
+                <p className="text-sm text-muted-foreground">Không có dữ liệu tài sản công ty theo vị trí với điều kiện hiện tại.</p>
+              ) : (
+                <div className="space-y-1">
+                  {locationCompanyAssetCounts.map((x, idx) => (
+                    <div key={`${x.locationLabel}-${idx}`} className="text-sm">
+                      <span className="font-medium">{x.locationLabel}</span>: Thiết bị {x.equipmentCount}, Vật tư {x.consumableCount}
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          ) : null}
           <div>
             <h2 className="text-base font-semibold mb-2">Thiết bị đang nắm giữ ({filteredEquipments.length})</h2>
             <DataTable columns={eqColumns} data={filteredEquipments} currentPage={eqPage} onPageChange={setEqPage} />

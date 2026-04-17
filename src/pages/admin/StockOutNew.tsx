@@ -44,6 +44,11 @@ function numOrZero(v: NumMaybeEmpty): number {
   return v === '' ? 0 : Number(v);
 }
 
+function isDepartmentCoordinatorJobTitle(jobTitle: string | undefined): boolean {
+  const jt = String(jobTitle ?? '').trim().toLowerCase();
+  return jt.includes('quản lý phòng ban') || jt.includes('department coordinator');
+}
+
 interface DeviceOutLine {
   id: string;
   itemId: string;
@@ -142,7 +147,7 @@ const StockOutNewPage = () => {
     switch (recipientType) {
       case 'EMPLOYEE':
         return employees
-          .filter(e => e.active !== false)
+          .filter(e => e.active !== false && !isDepartmentCoordinatorJobTitle(e.jobTitle))
           .map(e => ({ value: String(e.id), label: `${e.code} - ${e.fullName}` }));
       case 'DEPARTMENT':
         return departments

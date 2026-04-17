@@ -1,7 +1,7 @@
-import type { ConsumableAssignmentDto } from '@/api/types';
+import type { ConsumableAssignmentDto, LossReportRequestDto } from '@/api/types';
 import type { Equipment, RepairRequest, ReturnRequest } from '@/data/mockData';
 import { equipmentStatusLabels } from '@/data/mockData';
-import { isReturnRequestOpen } from '@/utils/openAssetRequestBlocks';
+import { isLossRequestOpen, isRepairRequestOpen, isReturnRequestOpen } from '@/utils/openAssetRequestBlocks';
 
 /** Cách thiết bị «thuộc» tài khoản NV theo bàn giao (cá nhân / PB / vị trí — chỉ khi phiếu không gán cá nhân). */
 export type MyAssetScope = 'personal' | 'department' | 'location';
@@ -61,7 +61,10 @@ export function resolveMyAssetScope(
 ): MyAssetScope | null {
   if (!employeeId) return null;
   const visible =
-    e.status === 'IN_USE' || e.status === 'PENDING_ISSUE' || e.status === 'LOST';
+    e.status === 'IN_USE' ||
+    e.status === 'PENDING_ISSUE' ||
+    e.status === 'UNDER_REPAIR' ||
+    e.status === 'LOST';
   if (!visible) return null;
 
   /**
@@ -185,11 +188,36 @@ export function getEquipmentDisplayStatusForMyAssets(
   e: Equipment,
   empId: string | null,
   returnRequests: ReturnRequest[],
+  repairRequests: RepairRequest[],
+  lossRequests: LossReportRequestDto[],
 ): { status: string; label: string } {
   const base = e.status;
   const label = equipmentStatusLabels[base] ?? base;
   if (base === 'LOST' || base === 'DISPOSED' || base === 'BROKEN' || base === 'UNDER_REPAIR' || base === 'PENDING_RETURN') {
     return { status: base, label };
+  }
+  if (empId) {
+    for (const l of lossRequests) {
+      if (!isLossRequestOpen(l)) continue;
+      const requesterId = l.requester?.id != null ? String(l.requester.id) : '';
+      if (requesterId !== empId) continue;
+      const kind = String(l.lossKind ?? '').toUpperCase();
+      if (kind === 'EQUIPMENT') {
+        const eid = l.equipment?.id != null ? String(l.equipment.id) : '';
+        if (eid === String(e.id)) return { status: 'PENDING_LOSS', label: 'Chờ báo mất' };
+      } else if (kind === 'COMBINED') {
+        const hit = (l.lossEntries ?? []).some(
+          x => String(x.lineType ?? '').toUpperCase() === 'EQUIPMENT' && String(x.equipmentId ?? '') === String(e.id),
+        );
+        if (hit) return { status: 'PENDING_LOSS', label: 'Chờ báo mất' };
+      }
+    }
+    for (const r of repairRequests) {
+      if (!isRepairRequestOpen(r)) continue;
+      if (String(r.requesterId ?? '') !== String(empId)) continue;
+      const hit = (r.equipmentLineIds ?? []).some(id => String(id) === String(e.id));
+      if (hit) return { status: 'UNDER_REPAIR', label: equipmentStatusLabels.UNDER_REPAIR };
+    }
   }
   const onReturn = equipmentIdsOnOpenReturnForRequester(empId, returnRequests);
   if (base === 'IN_USE' && onReturn.has(String(e.id))) {
