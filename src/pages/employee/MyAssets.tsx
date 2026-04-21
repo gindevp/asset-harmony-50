@@ -54,6 +54,7 @@ const MyAssets = () => {
   const returnLineDtos = returnQ.data?.lineDtos;
   const consumableAssignments = caQ.data ?? [];
   const assetItems = useMemo(() => (iQ.data ?? []).map(mapAssetItemDto), [iQ.data]);
+  const empId = resolveEmployeeIdForRequests();
   const listLoading =
     eqQ.isLoading || caQ.isLoading || repairQ.isLoading || returnQ.isLoading || lossQ.isLoading;
 
@@ -105,7 +106,6 @@ const MyAssets = () => {
     return m;
   }, [lossQ.data, empId]);
 
-  const empId = resolveEmployeeIdForRequests();
   const myDeptId = useMemo(() => {
     if (!empId || !empQ.data) return null;
     const me = empQ.data.find(x => String(x.id) === empId);
