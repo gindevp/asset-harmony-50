@@ -9,7 +9,7 @@ import { ArrowLeft, Eye } from 'lucide-react';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { toast } from 'sonner';
 import { ApiError, apiPatch } from '@/api/http';
-import { equipmentStatusLabels, formatCurrency, calculateDepreciation } from '@/data/mockData';
+import { equipmentStatusLabels, formatCurrency, calculateDepreciation, formatDate } from '@/data/mockData';
 import type { Equipment } from '@/data/mockData';
 import {
   mapAssetItemDto,
@@ -71,6 +71,27 @@ const AssetCatalogDevicesPage = () => {
           (a.equipment.equipmentCode || '').localeCompare(b.equipment.equipmentCode || '', undefined, { numeric: true }),
       );
   }, [deviceRows, itemId, isDeviceCatalog]);
+
+  const assignmentHistoryByEquipmentId = useMemo(() => {
+    const map = new Map<string, typeof assignQ.data>();
+    for (const a of assignQ.data ?? []) {
+      const rawEquipmentId = a.equipmentId ?? a.equipment?.id;
+      if (rawEquipmentId == null) continue;
+      const key = String(rawEquipmentId);
+      const list = map.get(key) ?? [];
+      list.push(a);
+      map.set(key, list);
+    }
+    for (const [, list] of map) {
+      list.sort((a, b) => {
+        const aAssigned = a.assignedDate ? Date.parse(a.assignedDate) : Number.NaN;
+        const bAssigned = b.assignedDate ? Date.parse(b.assignedDate) : Number.NaN;
+        if (!Number.isNaN(aAssigned) && !Number.isNaN(bAssigned) && aAssigned !== bAssigned) return bAssigned - aAssigned;
+        return Number(b.id ?? 0) - Number(a.id ?? 0);
+      });
+    }
+    return map;
+  }, [assignQ.data]);
 
   const catalogMissing =
     Boolean(itemId) && catalogItem == null && rowsInCatalog.length === 0 && !eqQ.isLoading;
@@ -279,6 +300,54 @@ const AssetCatalogDevicesPage = () => {
                   <div className="text-right">{formatCurrency(eq.originalCost)}</div>
                   <div className="text-muted-foreground">GT còn lại</div>
                   <div className="text-right font-medium text-primary">{formatCurrency(dep.currentValue)}</div>
+                </div>
+                <div className="space-y-2 border-t pt-3">
+                  <h3 className="font-medium">Lịch sử bàn giao</h3>
+                  {(() => {
+                    const rows = assignmentHistoryByEquipmentId.get(String(eq.id)) ?? [];
+                    if (rows.length === 0) {
+                      return <p className="text-muted-foreground">Chưa có lịch sử bàn giao cho thiết bị này.</p>;
+                    }
+                    return (
+                      <ul className="space-y-2">
+                        {rows.map((a, idx) => {
+                          const assignee =
+                            a.employee?.fullName?.trim() ||
+                            a.employee?.code?.trim() ||
+                            a.department?.name?.trim() ||
+                            a.location?.name?.trim() ||
+                            'Chưa xác định';
+                          const scope =
+                            a.employee?.id != null
+                              ? 'Nhân viên'
+                              : a.department?.id != null
+                                ? 'Phòng ban'
+                                : a.location?.id != null
+                                  ? 'Vị trí'
+                                  : 'Công ty';
+                          const assignedDateLabel = a.assignedDate ? formatDate(a.assignedDate) : '—';
+                          const returnedDateLabel = a.returnedDate ? formatDate(a.returnedDate) : 'Đang hiệu lực';
+                          return (
+                            <li key={String(a.id ?? `${a.assignedDate ?? 'unknown'}-${idx}`)} className="rounded-md border px-3 py-2">
+                              <div className="flex flex-wrap items-center justify-between gap-2">
+                                <span className="font-medium">
+                                  {scope}: {assignee}
+                                </span>
+                                <span className="text-xs text-muted-foreground">#{a.id ?? '—'}</span>
+                              </div>
+                              <div className="mt-1 text-xs text-muted-foreground">
+                                Bàn giao: <span className="text-foreground">{assignedDateLabel}</span> · Thu hồi:{' '}
+                                <span className="text-foreground">{returnedDateLabel}</span>
+                              </div>
+                              {a.note?.trim() ? (
+                                <div className="mt-1 text-xs text-muted-foreground">Ghi chú: {a.note}</div>
+                              ) : null}
+                            </li>
+                          );
+                        })}
+                      </ul>
+                    );
+                  })()}
                 </div>
               </div>
             );

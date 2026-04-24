@@ -107,6 +107,8 @@ export interface Equipment {
   status: EquipmentStatus;
   originalCost: number;
   capitalizedDate: string;
+  /** Thời điểm bàn giao hiện tại (equipment-assignment.assignedDate), nếu có. */
+  assignedDate?: string;
   depreciationMonths: number;
   salvageValue: number;
   /** Từ DTO `bookValueSnapshot` (BE) nếu có — có thể dùng thay tính GT còn lại client */

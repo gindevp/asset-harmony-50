@@ -92,6 +92,7 @@ export function mapEquipmentDto(
     status: (e.status ?? 'IN_STOCK') as Equipment['status'],
     originalCost: num(e.purchasePrice),
     capitalizedDate: e.capitalizationDate ?? '',
+    assignedDate: assignment?.assignedDate ?? undefined,
     depreciationMonths: e.depreciationMonths ?? 0,
     salvageValue: num(e.salvageValue),
     bookValueSnapshot:
